@@ -1,0 +1,54 @@
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# Local runtime data
+*.sqlite
+*.sqlite3
+*.db
+tmp/
+temp/
+uploads/
+storage/
+
+# IDEs
+.idea/
+.vscode/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# AI / ML artifacts
+models/
+checkpoints/
+artifacts/
+mlruns/
+wandb/
