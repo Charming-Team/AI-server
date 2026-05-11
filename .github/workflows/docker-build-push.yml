@@ -8,6 +8,11 @@ on:
       - "feat/**"
       - "chore/**"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional release version tag, for example v0.1.1"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -50,6 +55,14 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "image=${{ secrets.HARBOR_REGISTRY }}/${{ secrets.HARBOR_PROJECT }}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${{ secrets.HARBOR_REGISTRY }}/${{ secrets.HARBOR_PROJECT }}/${IMAGE_NAME}:sha-${SHORT_SHA}"
+            if [ -n "${{ inputs.version }}" ]; then
+              echo "${{ secrets.HARBOR_REGISTRY }}/${{ secrets.HARBOR_PROJECT }}/${IMAGE_NAME}:${{ inputs.version }}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -57,4 +70,4 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          tags: ${{ steps.meta.outputs.tags }}
