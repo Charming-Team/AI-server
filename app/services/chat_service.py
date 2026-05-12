@@ -1,3 +1,4 @@
+from app.core.config import Settings
 from app.schemas.chat import (
     ChatAnswerRequest,
     ChatAnswerResponse,
@@ -35,9 +36,9 @@ class ChatService:
         "모델명",
     )
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.intent_classifier = IntentClassifier()
-        self.evidence_service = EvidenceService()
+        self.evidence_service = EvidenceService(settings)
 
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
         blocked_status = self._get_blocked_status(request.question)

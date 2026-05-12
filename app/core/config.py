@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
+    evidence_lookup_enabled: bool = False
+    evidence_lookup_base_url: str = "http://localhost:8080"
+    evidence_lookup_path: str = "/internal/chat/evidence"
+    evidence_lookup_internal_token: str | None = None
+    evidence_lookup_timeout_seconds: float = 10.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
