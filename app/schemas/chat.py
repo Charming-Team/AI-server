@@ -1,0 +1,88 @@
+from datetime import datetime
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ChatIntent(StrEnum):
+    DELIVERY_RISK = "DELIVERY_RISK"
+    MATERIAL_SHORTAGE = "MATERIAL_SHORTAGE"
+    PRODUCTION_PLAN = "PRODUCTION_PLAN"
+    URGENT_ORDER_IMPACT = "URGENT_ORDER_IMPACT"
+    WORK_PRIORITY = "WORK_PRIORITY"
+    LINE_BOTTLENECK = "LINE_BOTTLENECK"
+    REPORT_LOOKUP = "REPORT_LOOKUP"
+    UNKNOWN = "UNKNOWN"
+
+
+class SecurityStatus(StrEnum):
+    PASSED = "PASSED"
+    BLOCKED_PROMPT_INJECTION = "BLOCKED_PROMPT_INJECTION"
+    BLOCKED_SENSITIVE_REQUEST = "BLOCKED_SENSITIVE_REQUEST"
+    BLOCKED_UNAUTHORIZED = "BLOCKED_UNAUTHORIZED"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    ERROR = "ERROR"
+
+
+class ChatUserContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: int = Field(alias="userId")
+    role: str
+    department: str | None = None
+    company_name: str | None = Field(default=None, alias="companyName")
+    status: str
+
+
+class ChatAnswerRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: int = Field(alias="sessionId")
+    message_id: int = Field(alias="messageId")
+    user: ChatUserContext
+    question: str = Field(min_length=1, max_length=1000)
+    requested_at: datetime = Field(alias="requestedAt")
+
+
+class ChatUrl(BaseModel):
+    label: str
+    url: str
+    type: str
+
+
+class ChatSource(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_type: str = Field(alias="sourceType")
+    title: str
+    summary: str
+    url: str | None = None
+    reference_id: int | None = Field(default=None, alias="referenceId")
+    source: str | None = None
+
+
+class SecurityResult(BaseModel):
+    status: SecurityStatus
+    reason: str | None = None
+
+
+class ModelResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    used_vector_search: bool = Field(alias="usedVectorSearch")
+    used_rdb_evidence: bool = Field(alias="usedRdbEvidence")
+    evidence_count: int = Field(alias="evidenceCount")
+
+
+class ChatAnswerResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: int = Field(alias="sessionId")
+    message_id: int = Field(alias="messageId")
+    intent: ChatIntent
+    answer: str
+    basis_time: datetime = Field(alias="basisTime")
+    urls: list[ChatUrl] = Field(default_factory=list)
+    sources: list[ChatSource] = Field(default_factory=list)
+    security_result: SecurityResult = Field(alias="securityResult")
+    model_result: ModelResult = Field(alias="modelResult")
