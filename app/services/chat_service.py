@@ -6,6 +6,7 @@ from app.schemas.chat import (
     SecurityResult,
     SecurityStatus,
 )
+from app.services.evidence_service import EvidenceService
 from app.services.intent_classifier import IntentClassifier
 
 
@@ -36,6 +37,7 @@ class ChatService:
 
     def __init__(self) -> None:
         self.intent_classifier = IntentClassifier()
+        self.evidence_service = EvidenceService()
 
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
         blocked_status = self._get_blocked_status(request.question)
@@ -43,24 +45,25 @@ class ChatService:
             return self._build_restricted_response(request, blocked_status)
 
         intent = self.intent_classifier.classify(request.question)
+        evidence_result = await self.evidence_service.get_evidence(request, intent)
 
         return ChatAnswerResponse(
             session_id=request.session_id,
             message_id=request.message_id,
-            intent=intent,
+            intent=evidence_result.intent,
             answer=(
                 "현재 답변 생성을 위한 근거 조회 기능이 아직 연결되지 않았습니다. "
                 "확인 가능한 근거 데이터가 부족해 답변할 수 없습니다."
             ),
-            basis_time=request.requested_at,
+            basis_time=evidence_result.basis_time,
             security_result=SecurityResult(
                 status=SecurityStatus.INSUFFICIENT_EVIDENCE,
-                reason="RDB Evidence 조회와 Qdrant 검색이 아직 연결되지 않았습니다.",
+                reason="조회된 RDB Evidence가 없고 Qdrant 검색이 아직 연결되지 않았습니다.",
             ),
             model_result=ModelResult(
                 used_vector_search=False,
-                used_rdb_evidence=False,
-                evidence_count=0,
+                used_rdb_evidence=evidence_result.has_evidence,
+                evidence_count=len(evidence_result.items),
             ),
         )
 

@@ -29,8 +29,11 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
     assert body["messageId"] == 24
     assert body["intent"] == "MATERIAL_SHORTAGE"
     assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert body["sources"] == []
+    assert body["urls"] == []
     assert body["modelResult"]["usedVectorSearch"] is False
     assert body["modelResult"]["usedRdbEvidence"] is False
+    assert body["modelResult"]["evidenceCount"] == 0
 
 
 def test_chat_answer_blocks_sensitive_information_request() -> None:

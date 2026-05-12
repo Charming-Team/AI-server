@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +43,30 @@ class ChatAnswerRequest(BaseModel):
     user: ChatUserContext
     question: str = Field(min_length=1, max_length=1000)
     requested_at: datetime = Field(alias="requestedAt")
+
+
+class EvidenceItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str
+    title: str
+    summary: str
+    url: str | None = None
+    source: str
+    reference_id: int | None = Field(default=None, alias="referenceId")
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    intent: ChatIntent
+    basis_time: datetime = Field(alias="basisTime")
+    items: list[EvidenceItem] = Field(default_factory=list)
+
+    @property
+    def has_evidence(self) -> bool:
+        return bool(self.items)
 
 
 class ChatUrl(BaseModel):
