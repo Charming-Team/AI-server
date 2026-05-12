@@ -6,6 +6,7 @@ from app.schemas.chat import (
     SecurityResult,
     SecurityStatus,
 )
+from app.services.intent_classifier import IntentClassifier
 
 
 class ChatService:
@@ -33,15 +34,20 @@ class ChatService:
         "모델명",
     )
 
+    def __init__(self) -> None:
+        self.intent_classifier = IntentClassifier()
+
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
         blocked_status = self._get_blocked_status(request.question)
         if blocked_status is not None:
             return self._build_restricted_response(request, blocked_status)
 
+        intent = self.intent_classifier.classify(request.question)
+
         return ChatAnswerResponse(
             session_id=request.session_id,
             message_id=request.message_id,
-            intent=ChatIntent.UNKNOWN,
+            intent=intent,
             answer=(
                 "현재 답변 생성을 위한 근거 조회 기능이 아직 연결되지 않았습니다. "
                 "확인 가능한 근거 데이터가 부족해 답변할 수 없습니다."

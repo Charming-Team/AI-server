@@ -27,7 +27,7 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
     body = response.json()
     assert body["sessionId"] == 10
     assert body["messageId"] == 24
-    assert body["intent"] == "UNKNOWN"
+    assert body["intent"] == "MATERIAL_SHORTAGE"
     assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
     assert body["modelResult"]["usedVectorSearch"] is False
     assert body["modelResult"]["usedRdbEvidence"] is False
@@ -55,3 +55,47 @@ def test_chat_answer_blocks_sensitive_information_request() -> None:
     body = response.json()
     assert body["securityResult"]["status"] == "BLOCKED_SENSITIVE_REQUEST"
     assert "보안상" in body["answer"]
+
+
+def test_chat_answer_classifies_delivery_risk_intent() -> None:
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "EXECUTIVE",
+                "department": "경영기획팀",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "현재 납기 위험이 높은 주문 알려줘",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "DELIVERY_RISK"
+
+
+def test_chat_answer_classifies_report_lookup_intent() -> None:
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "EXECUTIVE",
+                "department": "경영기획팀",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "최근 보고서 요약해줘",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "REPORT_LOOKUP"
