@@ -52,3 +52,7 @@ checkpoints/
 artifacts/
 mlruns/
 wandb/
+
+# Local design drafts
+docs/chatbot-rag-architecture.md
+docs/chatbot-intent-evidence-design.md
