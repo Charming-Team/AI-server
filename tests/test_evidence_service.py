@@ -45,18 +45,21 @@ def test_evidence_service_returns_empty_result_when_lookup_is_disabled() -> None
 
 def test_evidence_service_builds_internal_request_payload() -> None:
     service = EvidenceService(Settings(evidence_lookup_internal_token="internal-token"))
-    request = _build_request()
+    request = _build_request().model_copy(
+        update={"question": "LINE-A01 병목 원인을 알려줘"}
+    )
 
-    payload = service._build_payload(request, ChatIntent.MATERIAL_SHORTAGE)
+    payload = service._build_payload(request, ChatIntent.LINE_BOTTLENECK)
 
     assert service._headers == {"X-Internal-Token": "internal-token"}
     assert payload["sessionId"] == 10
     assert payload["messageId"] == 24
-    assert payload["intent"] == "MATERIAL_SHORTAGE"
+    assert payload["intent"] == "LINE_BOTTLENECK"
     assert payload["user"]["userId"] == 1
     assert payload["user"]["role"] == "MANUFACTURING_MANAGER"
     assert "department" not in payload["user"]
     assert payload["filters"]["limit"] == 5
+    assert payload["filters"]["targetCode"] == "LINE-A01"
 
 
 def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:

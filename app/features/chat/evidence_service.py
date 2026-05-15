@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.query_filter_extractor import QueryFilterExtractor
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
@@ -16,9 +17,11 @@ class EvidenceService:
         self,
         settings: Settings,
         http_client: httpx.AsyncClient | None = None,
+        query_filter_extractor: QueryFilterExtractor | None = None,
     ) -> None:
         self.settings = settings
         self.http_client = http_client
+        self.query_filter_extractor = query_filter_extractor or QueryFilterExtractor()
 
     async def get_evidence(
         self,
@@ -90,12 +93,7 @@ class EvidenceService:
                 "role": request.user.role,
                 "companyName": request.user.company_name,
             },
-            "filters": {
-                "limit": 5,
-                "fromDate": None,
-                "toDate": None,
-                "targetCode": None,
-            },
+            "filters": self.query_filter_extractor.extract_filters(request.question),
         }
 
     def _parse_response(self, response: httpx.Response) -> EvidenceResult:
