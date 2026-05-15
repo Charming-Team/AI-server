@@ -85,6 +85,31 @@ def test_chat_answer_blocks_prompt_injection_request() -> None:
     assert body["modelResult"]["usedRdbEvidence"] is False
 
 
+def test_chat_answer_rejects_blank_question() -> None:
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "MANUFACTURING_MANAGER",
+                "department": "생산관리팀",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "   ",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["securityResult"]["status"] == "INVALID_REQUEST"
+    assert body["modelResult"]["usedVectorSearch"] is False
+    assert body["modelResult"]["usedRdbEvidence"] is False
+
+
 def test_chat_answer_classifies_delivery_risk_intent() -> None:
     response = client.post(
         "/api/v1/chat/answer",
