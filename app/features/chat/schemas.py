@@ -45,6 +45,30 @@ class ChatAnswerRequest(BaseModel):
     requested_at: datetime = Field(alias="requestedAt")
 
 
+class ChatRecommendationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    user: ChatUserContext
+    keyword: str | None = Field(default=None, max_length=100)
+
+
+class ChatRecommendedQuestion(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    question_id: str = Field(alias="questionId")
+    question: str
+    intent: ChatIntent
+    category: str
+    url: str
+
+
+class ChatRecommendationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    items: list[ChatRecommendedQuestion]
+    fallback_used: bool = Field(alias="fallbackUsed")
+
+
 class EvidenceItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

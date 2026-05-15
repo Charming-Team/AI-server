@@ -127,3 +127,26 @@ def test_chat_answer_classifies_report_lookup_intent() -> None:
 
     assert response.status_code == 200
     assert response.json()["intent"] == "REPORT_LOOKUP"
+
+
+def test_chat_recommendations_returns_role_based_questions() -> None:
+    response = client.post(
+        "/api/v1/chat/recommendations",
+        json={
+            "user": {
+                "userId": 1,
+                "role": "MANUFACTURING_MANAGER",
+                "department": "생산관리팀",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "keyword": "라인",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fallbackUsed"] is False
+    assert body["items"][0]["questionId"] == "line-bottleneck-current"
+    assert body["items"][0]["intent"] == "LINE_BOTTLENECK"
+    assert body["items"][0]["url"] == "/production-lines/status"
