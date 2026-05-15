@@ -124,6 +124,8 @@ class GroundedPromptBuilder:
         ]
         if source.source_origin:
             lines.append(f"   근거 원천: {source.source_origin}")
+        if source.relevance_score is not None:
+            lines.append(f"   관련도 점수: {source.relevance_score:.4f}")
         if source.url:
             lines.append(f"   URL: {source.url}")
         if source.reference_id is not None:

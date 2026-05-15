@@ -77,6 +77,7 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
                 source="report-202605:summary",
                 basisTime=datetime.fromisoformat("2026-05-12T11:00:00+09:00"),
                 sourceOrigin="QDRANT",
+                relevanceScore=0.91823,
             )
         ]
     )
@@ -88,6 +89,7 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
     assert "2026년 5월 생산 리스크 보고서" in prompt.user_prompt
     assert "report-202605:summary" in prompt.user_prompt
     assert "근거 원천: QDRANT" in prompt.user_prompt
+    assert "관련도 점수: 0.9182" in prompt.user_prompt
     assert "기준 시각: 2026-05-12T11:00:00+09:00" in prompt.user_prompt
 
 
