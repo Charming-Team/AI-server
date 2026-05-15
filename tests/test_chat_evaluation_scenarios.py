@@ -122,11 +122,70 @@ class FakeGroundedAnswerGenerationService:
         )
 
 
+class FakeOperatorFinancialEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="ORDER",
+                    title="ORD-202605-002 납기 위험",
+                    summary="납기 지연 위험 등급은 WARNING입니다.",
+                    url="/orders/1002",
+                    source="ai_prediction_results",
+                    referenceId=1002,
+                    data={
+                        "riskLevel": "WARNING",
+                        "contractAmount": 12000000,
+                        "latePenaltyAmount": 500000,
+                    },
+                )
+            ],
+        )
+
+
+class FakeNoDocumentSearchService:
+    async def search(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> DocumentSearchResult:
+        return DocumentSearchResult(was_searched=True, sources=[])
+
+
+class FakeOperatorSafeAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert "contractAmount" not in evidence_result.items[0].data
+        assert "latePenaltyAmount" not in evidence_result.items[0].data
+        return AnswerGenerationResult(
+            answer="ORD-202605-002는 납기 지연 위험 등급이 WARNING입니다.",
+            was_generated=True,
+        )
+
+
 def _build_grounded_chat_service() -> ChatService:
     service = ChatService(Settings())
     service.evidence_service = FakeGroundedEvidenceService()
     service.document_search_service = FakeGroundedDocumentSearchService()
     service.answer_generation_service = FakeGroundedAnswerGenerationService()
+    return service
+
+
+def _build_operator_sanitized_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeOperatorFinancialEvidenceService()
+    service.document_search_service = FakeNoDocumentSearchService()
+    service.answer_generation_service = FakeOperatorSafeAnswerGenerationService()
     return service
 
 
@@ -369,6 +428,61 @@ def test_chat_answer_evaluation_returns_grounded_answer_with_sources() -> None:
         "rdbEvidenceCount": 1,
         "documentSourceCount": 1,
         "evidenceCount": 2,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_sanitizes_operator_financial_evidence() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_operator_sanitized_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "OPERATOR",
+                "현재 납기 위험이 높은 주문 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert "계약" not in body["answer"]
+    assert "금액" not in body["answer"]
+    assert "패널티" not in body["answer"]
+    assert body["urls"] == [
+        {
+            "label": "ORD-202605-002 납기 위험",
+            "url": "/orders/1002",
+            "type": "ORDER",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "ORDER",
+            "title": "ORD-202605-002 납기 위험",
+            "summary": "납기 지연 위험 등급은 WARNING입니다.",
+            "url": "/orders/1002",
+            "referenceId": 1002,
+            "source": "ai_prediction_results",
+            "basisTime": "2026-05-12T10:30:00+09:00",
+            "sourceOrigin": "RDB",
+            "relevanceScore": None,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": True,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 0,
+        "evidenceCount": 1,
         "vectorSearchSkippedReason": None,
         "llmGenerationSkippedReason": None,
     }
