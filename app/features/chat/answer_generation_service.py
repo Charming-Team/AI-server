@@ -79,6 +79,7 @@ class AnswerGenerationService:
                 security_result=output_security_result,
             )
 
+        answer = self._limit_answer_length(answer)
         return AnswerGenerationResult(
             answer=answer,
             was_generated=True,
@@ -132,3 +133,13 @@ class AnswerGenerationService:
             seen_titles.add(normalized_title)
             titles.append(title)
         return titles
+
+    def _limit_answer_length(self, answer: str) -> str:
+        max_chars = self.settings.answer_max_chars
+        if len(answer) <= max_chars:
+            return answer
+
+        suffix = "\n\n... 답변 길이 제한으로 일부 내용이 생략되었습니다."
+        if max_chars <= len(suffix):
+            return answer[:max_chars]
+        return f"{answer[: max_chars - len(suffix)]}{suffix}"

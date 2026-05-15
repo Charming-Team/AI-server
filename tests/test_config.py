@@ -9,6 +9,7 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
         qdrant_top_k=20,
         qdrant_score_threshold=1.0,
         llm_max_tokens=4096,
+        answer_max_chars=5000,
         prompt_max_evidence_items=20,
         prompt_max_document_sources=20,
     )
@@ -16,6 +17,7 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     assert settings.qdrant_top_k == 20
     assert settings.qdrant_score_threshold == 1.0
     assert settings.llm_max_tokens == 4096
+    assert settings.answer_max_chars == 5000
     assert settings.prompt_max_evidence_items == 20
     assert settings.prompt_max_document_sources == 20
 
@@ -29,6 +31,8 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
         ("qdrant_score_threshold", 1.1),
         ("llm_max_tokens", 0),
         ("llm_max_tokens", 4097),
+        ("answer_max_chars", 99),
+        ("answer_max_chars", 5001),
         ("prompt_max_evidence_items", -1),
         ("prompt_max_evidence_items", 21),
         ("prompt_max_document_sources", -1),

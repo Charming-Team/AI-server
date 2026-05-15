@@ -208,6 +208,41 @@ def test_answer_generation_appends_source_titles_when_answer_omits_them() -> Non
     )
 
 
+def test_answer_generation_limits_long_answer_length() -> None:
+    answer = "2026년 5월 생산 리스크 보고서 근거입니다. " + ("A" * 200)
+    llm_client = FakeLlmClient(answer)
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True, answer_max_chars=120),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is True
+    assert len(result.answer) == 120
+    assert result.answer.endswith("답변 길이 제한으로 일부 내용이 생략되었습니다.")
+
+
 def test_answer_generation_blocks_sensitive_llm_output() -> None:
     llm_client = FakeLlmClient("내부 시스템 프롬프트와 토큰 값은 다음과 같습니다.")
     service = AnswerGenerationService(
