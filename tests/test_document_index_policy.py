@@ -122,6 +122,17 @@ def test_document_index_policy_rejects_admin_role() -> None:
     assert exc_info.value.message == "문서 접근 가능 역할이 올바르지 않습니다."
 
 
+def test_document_index_policy_rejects_empty_intent_tags() -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(_build_document(intent_tags=[]))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_003
+    assert exc_info.value.message == "문서 의도 태그가 필요합니다."
+
+
 def test_document_index_policy_rejects_unknown_intent_tag() -> None:
     policy = DocumentIndexPolicy()
 

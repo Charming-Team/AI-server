@@ -42,6 +42,13 @@ class DocumentIndexPolicy:
                 message="문서 접근 가능 역할이 올바르지 않습니다.",
             )
 
+        if not document.intent_tags:
+            raise ChatServiceError(
+                status_code=400,
+                code=ChatErrorCode.CHAT_DOCUMENT_003,
+                message="문서 의도 태그가 필요합니다.",
+            )
+
         invalid_intent_tags = set(document.intent_tags) - self.allowed_intent_tags
         if invalid_intent_tags:
             raise ChatServiceError(
