@@ -8,15 +8,17 @@ from app.features.chat.schemas import ChatErrorCode
 
 def _build_document(
     *,
+    document_id: str = "report-202605",
     document_type: str = "REPORT",
+    title: str = "2026년 5월 생산 리스크 보고서",
     allowed_roles: list[str] | None = None,
     company_name: str | None = "S-MAP",
     intent_tags: list[str] | None = None,
 ) -> InternalDocumentInput:
     return InternalDocumentInput(
-        documentId="report-202605",
+        documentId=document_id,
         documentType=document_type,
-        title="2026년 5월 생산 리스크 보고서",
+        title=title,
         content="자재 부족과 라인 병목이 주요 리스크입니다.",
         allowedRoles=(
             ["EXECUTIVE", "MANUFACTURING_MANAGER"]
@@ -62,6 +64,28 @@ def test_document_index_policy_allows_missing_company_name() -> None:
     policy = DocumentIndexPolicy()
 
     policy.validate(_build_document(company_name=None))
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "expected_message"),
+    [
+        ("document_id", " ", "문서 ID은(는) 필수입니다."),
+        ("title", " ", "문서 제목은(는) 필수입니다."),
+    ],
+)
+def test_document_index_policy_rejects_blank_required_text(
+    field_name: str,
+    field_value: str,
+    expected_message: str,
+) -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(_build_document(**{field_name: field_value}))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert exc_info.value.message == expected_message
 
 
 def test_document_index_policy_rejects_empty_roles() -> None:

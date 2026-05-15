@@ -13,6 +13,9 @@ class DocumentIndexPolicy:
     }
 
     def validate(self, document: InternalDocumentInput) -> None:
+        self._validate_required_text(document.document_id, "문서 ID")
+        self._validate_required_text(document.title, "문서 제목")
+
         if document.document_type not in self.allowed_document_types:
             raise ChatServiceError(
                 status_code=400,
@@ -42,3 +45,13 @@ class DocumentIndexPolicy:
                 code=ChatErrorCode.CHAT_DOCUMENT_003,
                 message="문서 의도 태그가 올바르지 않습니다.",
             )
+
+    def _validate_required_text(self, value: str, field_label: str) -> None:
+        if value.strip():
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message=f"{field_label}은(는) 필수입니다.",
+        )
