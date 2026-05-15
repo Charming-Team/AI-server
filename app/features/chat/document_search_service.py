@@ -1,6 +1,7 @@
 from app.core.config import Settings
 from app.features.chat.document_payload import QdrantSearchPoint
 from app.features.chat.embedding_service import EmbeddingService
+from app.features.chat.qdrant_client import QdrantDocumentSearchClient
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatIntent,
@@ -10,9 +11,15 @@ from app.features.chat.schemas import (
 
 
 class DocumentSearchService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        embedding_service: EmbeddingService | None = None,
+        qdrant_client: QdrantDocumentSearchClient | None = None,
+    ) -> None:
         self.settings = settings
-        self.embedding_service = EmbeddingService(settings)
+        self.embedding_service = embedding_service or EmbeddingService(settings)
+        self.qdrant_client = qdrant_client or QdrantDocumentSearchClient(settings)
 
     async def search(
         self,
@@ -29,7 +36,13 @@ class DocumentSearchService:
                 skipped_reason=embedding_result.skipped_reason,
             )
 
-        return DocumentSearchResult(was_searched=True, sources=[])
+        search_payload = self._build_search_payload(embedding_result.vector, request, intent)
+        points = await self.qdrant_client.search(search_payload)
+
+        return DocumentSearchResult(
+            was_searched=True,
+            sources=self._build_sources(points),
+        )
 
     def _build_search_payload(
         self,
