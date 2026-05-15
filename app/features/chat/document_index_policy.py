@@ -6,6 +6,7 @@ from app.features.chat.schemas import ChatErrorCode, ChatIntent
 class DocumentIndexPolicy:
     allowed_document_types = {"REPORT", "COMPANY_INFO"}
     allowed_roles = {"OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"}
+    company_info_indexer_roles = {"ADMIN", "MANUFACTURING_MANAGER"}
     allowed_intent_tags = {
         intent.value
         for intent in ChatIntent
@@ -26,6 +27,9 @@ class DocumentIndexPolicy:
                 code=ChatErrorCode.CHAT_DOCUMENT_001,
                 message="문서 유형은 REPORT 또는 COMPANY_INFO만 허용됩니다.",
             )
+
+        if document.document_type == "COMPANY_INFO":
+            self._validate_company_info_indexer_role(document.requested_by_role)
 
         if not document.allowed_roles:
             raise ChatServiceError(
@@ -56,6 +60,22 @@ class DocumentIndexPolicy:
                 code=ChatErrorCode.CHAT_DOCUMENT_003,
                 message="문서 의도 태그가 올바르지 않습니다.",
             )
+
+    def _validate_company_info_indexer_role(
+        self,
+        requested_by_role: str | None,
+    ) -> None:
+        if requested_by_role in self.company_info_indexer_roles:
+            return
+
+        raise ChatServiceError(
+            status_code=403,
+            code=ChatErrorCode.CHAT_SECURITY_004,
+            message=(
+                "회사정보 문서 인덱싱은 ADMIN 또는 "
+                "MANUFACTURING_MANAGER만 요청할 수 있습니다."
+            ),
+        )
 
     def _validate_required_text(self, value: str, field_label: str) -> None:
         if value.strip():

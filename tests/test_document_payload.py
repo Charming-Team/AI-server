@@ -2,6 +2,7 @@ from datetime import datetime
 
 from app.features.chat.document_payload import (
     InternalDocumentDeleteRequest,
+    InternalDocumentInput,
     InternalDocumentPayload,
     QdrantSearchPoint,
 )
@@ -39,6 +40,20 @@ def test_internal_document_payload_normalizes_access_metadata() -> None:
     assert payload.document_type == "REPORT"
     assert payload.allowed_roles == ["EXECUTIVE", "MANUFACTURING_MANAGER"]
     assert payload.intent_tags == ["REPORT_LOOKUP", "DELIVERY_RISK"]
+
+
+def test_internal_document_input_normalizes_requested_by_role() -> None:
+    document = InternalDocumentInput(
+        documentId="company-policy",
+        documentType="COMPANY_INFO",
+        title="생산 우선순위 운영 기준",
+        content="긴급 주문과 납기 위험 상황의 생산 우선순위 기준입니다.",
+        allowedRoles=["OPERATOR", "MANUFACTURING_MANAGER"],
+        intentTags=["WORK_PRIORITY"],
+        requestedByRole=" manufacturing_manager ",
+    )
+
+    assert document.requested_by_role == "MANUFACTURING_MANAGER"
 
 
 def test_internal_document_payload_maps_to_chat_source() -> None:

@@ -535,6 +535,37 @@ def test_chat_internal_document_index_calls_index_service() -> None:
     assert index_service.document.document_id == "report-202605"
 
 
+def test_chat_internal_company_info_index_rejects_unauthorized_requester_role() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        document_index_internal_token="secret-token"
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/internal/documents/index",
+            headers={"X-Internal-Token": "secret-token"},
+            json={
+                "documentId": "company-policy-production-priority",
+                "documentType": "COMPANY_INFO",
+                "title": "생산 우선순위 운영 기준",
+                "content": "긴급 주문과 납기 위험 상황의 생산 우선순위 기준입니다.",
+                "allowedRoles": ["OPERATOR", "MANUFACTURING_MANAGER"],
+                "intentTags": ["WORK_PRIORITY"],
+                "requestedByRole": "EXECUTIVE",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "CHAT_SECURITY_004",
+        "message": (
+            "회사정보 문서 인덱싱은 ADMIN 또는 "
+            "MANUFACTURING_MANAGER만 요청할 수 있습니다."
+        ),
+    }
+
+
 def test_chat_internal_document_delete_calls_index_service() -> None:
     index_service = FakeDocumentIndexService()
     app.dependency_overrides[get_settings] = lambda: Settings(

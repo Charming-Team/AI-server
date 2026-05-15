@@ -51,6 +51,7 @@ class InternalDocumentInput(BaseModel):
     allowed_roles: list[str] = Field(default_factory=list, alias="allowedRoles")
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
+    requested_by_role: str | None = Field(default=None, alias="requestedByRole")
 
     @field_validator("document_id", "title", mode="before")
     @classmethod
@@ -68,6 +69,14 @@ class InternalDocumentInput(BaseModel):
     @classmethod
     def normalize_access_metadata(cls, value: Any) -> Any:
         return _normalize_upper_text_list(value)
+
+    @field_validator("requested_by_role", mode="before")
+    @classmethod
+    def normalize_requested_by_role(cls, value: Any) -> Any:
+        if value is None or not isinstance(value, str):
+            return value
+        normalized_value = _normalize_upper_text(value)
+        return normalized_value or None
 
 
 class InternalDocumentDeleteRequest(BaseModel):

@@ -15,6 +15,7 @@ def _build_document(
     allowed_roles: list[str] | None = None,
     company_name: str | None = "S-MAP",
     intent_tags: list[str] | None = None,
+    requested_by_role: str | None = None,
 ) -> InternalDocumentInput:
     return InternalDocumentInput(
         documentId=document_id,
@@ -28,14 +29,28 @@ def _build_document(
         ),
         companyName=company_name,
         intentTags=["REPORT_LOOKUP"] if intent_tags is None else intent_tags,
+        requestedByRole=requested_by_role,
     )
 
 
-def test_document_index_policy_allows_report_and_company_info_documents() -> None:
+def test_document_index_policy_allows_report_without_requested_by_role() -> None:
     policy = DocumentIndexPolicy()
 
     policy.validate(_build_document(document_type="REPORT"))
-    policy.validate(_build_document(document_type="COMPANY_INFO"))
+
+
+@pytest.mark.parametrize("requested_by_role", ["ADMIN", "MANUFACTURING_MANAGER"])
+def test_document_index_policy_allows_company_info_requester_roles(
+    requested_by_role: str,
+) -> None:
+    policy = DocumentIndexPolicy()
+
+    policy.validate(
+        _build_document(
+            document_type="COMPANY_INFO",
+            requested_by_role=requested_by_role,
+        )
+    )
 
 
 def test_document_index_policy_allows_normalized_document_metadata() -> None:
@@ -43,9 +58,10 @@ def test_document_index_policy_allows_normalized_document_metadata() -> None:
 
     policy.validate(
         _build_document(
-            document_type=" report ",
+            document_type=" company_info ",
             allowed_roles=[" executive ", "manufacturing_manager"],
             intent_tags=[" report_lookup "],
+            requested_by_role=" manufacturing_manager ",
         )
     )
 
@@ -109,6 +125,47 @@ def test_document_index_policy_rejects_empty_roles() -> None:
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
     assert exc_info.value.message == "문서 접근 가능 역할이 필요합니다."
+
+
+def test_document_index_policy_rejects_company_info_without_requested_by_role() -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(
+            _build_document(
+                document_type="COMPANY_INFO",
+                requested_by_role=None,
+            )
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == ChatErrorCode.CHAT_SECURITY_004
+    assert (
+        exc_info.value.message
+        == "회사정보 문서 인덱싱은 ADMIN 또는 MANUFACTURING_MANAGER만 요청할 수 있습니다."
+    )
+
+
+@pytest.mark.parametrize("requested_by_role", ["OPERATOR", "EXECUTIVE"])
+def test_document_index_policy_rejects_unauthorized_company_info_requester_roles(
+    requested_by_role: str,
+) -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(
+            _build_document(
+                document_type="COMPANY_INFO",
+                requested_by_role=requested_by_role,
+            )
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == ChatErrorCode.CHAT_SECURITY_004
+    assert (
+        exc_info.value.message
+        == "회사정보 문서 인덱싱은 ADMIN 또는 MANUFACTURING_MANAGER만 요청할 수 있습니다."
+    )
 
 
 def test_document_index_policy_rejects_admin_role() -> None:
