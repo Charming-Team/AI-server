@@ -78,10 +78,6 @@ class DocumentSearchService:
         must_conditions: list[dict] = [
             {"key": "allowedRoles", "match": {"any": [request.user.role]}},
         ]
-        if request.user.company_name:
-            must_conditions.append(
-                {"key": "companyName", "match": {"value": request.user.company_name}}
-            )
         if intent != ChatIntent.UNKNOWN:
             must_conditions.append(
                 {"key": "intentTags", "match": {"any": [intent.value]}}

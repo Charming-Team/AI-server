@@ -126,7 +126,7 @@ class FakeEmptyQdrantClient:
         return []
 
 
-def _build_request() -> ChatAnswerRequest:
+def _build_request(company_name: str | None = "S-MAP") -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
         messageId=24,
@@ -134,7 +134,7 @@ def _build_request() -> ChatAnswerRequest:
             userId=1,
             role="EXECUTIVE",
             department="경영기획팀",
-            companyName="S-MAP",
+            companyName=company_name,
             status="ACTIVE",
         ),
         question="최근 보고서 요약해줘",
@@ -181,7 +181,24 @@ def test_document_search_service_builds_qdrant_search_payload() -> None:
     assert payload["filter"] == {
         "must": [
             {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
-            {"key": "companyName", "match": {"value": "S-MAP"}},
+            {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
+        ]
+    }
+
+
+def test_document_search_service_does_not_require_company_name_for_qdrant_search() -> None:
+    service = DocumentSearchService(Settings(qdrant_top_k=3))
+    request = _build_request(company_name=None)
+
+    payload = service._build_search_payload(
+        [0.1, 0.2, 0.3],
+        request,
+        ChatIntent.REPORT_LOOKUP,
+    )
+
+    assert payload["filter"] == {
+        "must": [
+            {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
             {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
         ]
     }
