@@ -44,3 +44,53 @@ def test_document_search_service_marks_search_when_qdrant_is_enabled() -> None:
     assert result.was_searched is False
     assert result.sources == []
     assert result.skipped_reason == "Embedding is disabled."
+
+
+def test_document_search_service_builds_qdrant_search_payload() -> None:
+    service = DocumentSearchService(Settings(qdrant_top_k=3))
+    request = _build_request()
+
+    payload = service._build_search_payload(
+        [0.1, 0.2, 0.3],
+        request,
+        ChatIntent.REPORT_LOOKUP,
+    )
+
+    assert payload["vector"] == [0.1, 0.2, 0.3]
+    assert payload["limit"] == 3
+    assert payload["with_payload"] is True
+    assert payload["filter"] == {
+        "must": [
+            {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
+            {"key": "companyName", "match": {"value": "S-MAP"}},
+            {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
+        ]
+    }
+
+
+def test_document_search_service_builds_sources_from_qdrant_points() -> None:
+    service = DocumentSearchService(Settings())
+
+    sources = service._build_sources(
+        [
+            {
+                "id": "point-1",
+                "score": 0.88,
+                "payload": {
+                    "documentId": "process-guide",
+                    "chunkId": "line-a01",
+                    "documentType": "PROCESS",
+                    "title": "LINE-A01 병목 대응 가이드",
+                    "chunkText": "대기시간이 증가하면 LINE-A01 작업 순서를 조정합니다.",
+                    "url": "/process/line-a01",
+                    "allowedRoles": ["MANUFACTURING_MANAGER"],
+                    "intentTags": ["LINE_BOTTLENECK"],
+                },
+            }
+        ]
+    )
+
+    assert len(sources) == 1
+    assert sources[0].source_type == "PROCESS"
+    assert sources[0].title == "LINE-A01 병목 대응 가이드"
+    assert sources[0].source == "process-guide:line-a01"
