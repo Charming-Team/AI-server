@@ -88,7 +88,6 @@ class EvidenceService:
             "user": {
                 "userId": request.user.user_id,
                 "role": request.user.role,
-                "department": request.user.department,
                 "companyName": request.user.company_name,
             },
             "filters": {

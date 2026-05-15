@@ -55,6 +55,7 @@ def test_evidence_service_builds_internal_request_payload() -> None:
     assert payload["intent"] == "MATERIAL_SHORTAGE"
     assert payload["user"]["userId"] == 1
     assert payload["user"]["role"] == "MANUFACTURING_MANAGER"
+    assert "department" not in payload["user"]
     assert payload["filters"]["limit"] == 5
 
 
