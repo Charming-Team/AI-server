@@ -286,6 +286,34 @@ def test_chat_internal_document_index_calls_index_service() -> None:
     assert index_service.document.document_id == "report-202605"
 
 
+def test_chat_internal_document_index_rejects_invalid_document_policy() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        document_index_internal_token="secret-token"
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/internal/documents/index",
+            headers={"X-Internal-Token": "secret-token"},
+            json={
+                "documentId": "process-guide",
+                "documentType": "PROCESS",
+                "title": "라인 병목 대응 가이드",
+                "content": "LINE-A01 병목 대응 기준입니다.",
+                "allowedRoles": ["MANUFACTURING_MANAGER"],
+                "companyName": "S-MAP",
+                "intentTags": ["LINE_BOTTLENECK"],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "CHAT_DOCUMENT_001",
+        "message": "문서 유형은 REPORT 또는 COMPANY_INFO만 허용됩니다.",
+    }
+
+
 def test_chat_openapi_documents_error_response_model() -> None:
     response = client.get("/openapi.json")
 

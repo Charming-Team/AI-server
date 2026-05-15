@@ -1,7 +1,7 @@
 from app.features.chat.schemas import ChatErrorCode
 
 
-class ChatExternalServiceError(Exception):
+class ChatServiceError(Exception):
     def __init__(
         self,
         status_code: int,
@@ -12,3 +12,7 @@ class ChatExternalServiceError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
+
+
+class ChatExternalServiceError(ChatServiceError):
+    pass

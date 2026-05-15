@@ -4,7 +4,7 @@ import pytest
 from app.core.config import Settings
 from app.features.chat.document_index_service import DocumentIndexService
 from app.features.chat.document_payload import InternalDocumentInput, QdrantUpsertPoint
-from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.schemas import ChatErrorCode
 
 
@@ -49,6 +49,7 @@ def _build_document(content: str = "AAAAAAAAAA\nBBBBBBBBBB") -> InternalDocument
         content=content,
         url="/reports/20",
         allowedRoles=["EXECUTIVE", "MANUFACTURING_MANAGER"],
+        companyName="S-MAP",
         intentTags=["REPORT_LOOKUP"],
     )
 
@@ -130,12 +131,36 @@ def test_document_index_service_rejects_embedding_count_mismatch() -> None:
         qdrant_index_client=FakeQdrantIndexClient(),
     )
 
-    with pytest.raises(ChatExternalServiceError) as exc_info:
+    with pytest.raises(ChatServiceError) as exc_info:
         anyio.run(service.index_document, _build_document())
 
     assert exc_info.value.status_code == 502
     assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_002
     assert exc_info.value.message == "임베딩 응답 개수가 문서 청크 개수와 일치하지 않습니다."
+
+
+def test_document_index_service_rejects_invalid_document_before_external_calls() -> None:
+    embedding_client = FakeEmbeddingClient([[0.1, 0.2]])
+    qdrant_index_client = FakeQdrantIndexClient()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=2,
+            document_chunk_size=10,
+        ),
+        embedding_client=embedding_client,
+        qdrant_index_client=qdrant_index_client,
+    )
+    document = _build_document()
+    document.allowed_roles = ["ADMIN"]
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(service.index_document, document)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert embedding_client.texts == []
+    assert qdrant_index_client.calls == []
 
 
 def test_document_index_service_rejects_embedding_dimension_mismatch() -> None:

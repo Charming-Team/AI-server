@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import Settings
 from app.features.chat.document_index_builder import DocumentIndexBuilder
+from app.features.chat.document_index_policy import DocumentIndexPolicy
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.embedding_client import EmbeddingClient
 from app.features.chat.exceptions import ChatExternalServiceError
@@ -24,15 +25,19 @@ class DocumentIndexService:
         self,
         settings: Settings,
         index_builder: DocumentIndexBuilder | None = None,
+        index_policy: DocumentIndexPolicy | None = None,
         embedding_client: EmbeddingClient | None = None,
         qdrant_index_client: QdrantDocumentIndexClient | None = None,
     ) -> None:
         self.settings = settings
         self.index_builder = index_builder or DocumentIndexBuilder(settings)
+        self.index_policy = index_policy or DocumentIndexPolicy()
         self.embedding_client = embedding_client or EmbeddingClient(settings)
         self.qdrant_index_client = qdrant_index_client or QdrantDocumentIndexClient(settings)
 
     async def index_document(self, document: InternalDocumentInput) -> DocumentIndexResult:
+        self.index_policy.validate(document)
+
         payloads = self.index_builder.build_payloads(document)
         if not payloads:
             return self._skipped_result(document, "Document content is empty.", chunk_count=0)
