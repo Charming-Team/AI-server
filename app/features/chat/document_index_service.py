@@ -5,7 +5,7 @@ from app.features.chat.document_index_builder import DocumentIndexBuilder
 from app.features.chat.document_index_policy import DocumentIndexPolicy
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.embedding_client import EmbeddingClient
-from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.qdrant_client import QdrantDocumentIndexClient
 from app.features.chat.schemas import ChatErrorCode
 from app.features.chat.skip_reasons import DOCUMENT_CONTENT_EMPTY, EMBEDDING_DISABLED
@@ -44,6 +44,7 @@ class DocumentIndexService:
         payloads = self.index_builder.build_payloads(document)
         if not payloads:
             return self._skipped_result(document, DOCUMENT_CONTENT_EMPTY, chunk_count=0)
+        self._validate_chunk_count(len(payloads))
 
         if not self.settings.embedding_enabled:
             return self._skipped_result(
@@ -90,6 +91,19 @@ class DocumentIndexService:
                     code=ChatErrorCode.CHAT_EMBEDDING_003,
                     message="임베딩 벡터 차원이 설정값과 일치하지 않습니다.",
                 )
+
+    def _validate_chunk_count(self, chunk_count: int) -> None:
+        if chunk_count <= self.settings.document_max_chunks:
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message=(
+                f"문서 청크는 최대 {self.settings.document_max_chunks}개까지 "
+                "인덱싱할 수 있습니다."
+            ),
+        )
 
     def _skipped_result(
         self,
