@@ -5,6 +5,24 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.features.chat.schemas import ChatSource
 
 
+class InternalDocumentInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    document_id: str = Field(alias="documentId")
+    document_type: str = Field(alias="documentType")
+    title: str
+    content: str
+    summary: str | None = None
+    url: str | None = None
+    reference_type: str | None = Field(default=None, alias="referenceType")
+    reference_id: int | None = Field(default=None, alias="referenceId")
+    basis_time: datetime | None = Field(default=None, alias="basisTime")
+    allowed_roles: list[str] = Field(default_factory=list, alias="allowedRoles")
+    departments: list[str] = Field(default_factory=list)
+    company_name: str | None = Field(default=None, alias="companyName")
+    intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
+
+
 class InternalDocumentPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -54,3 +72,16 @@ class QdrantSearchPoint(BaseModel):
 
     def to_chat_source(self) -> ChatSource:
         return self.payload.to_chat_source()
+
+
+class QdrantUpsertPoint(BaseModel):
+    id: str
+    vector: list[float]
+    payload: InternalDocumentPayload
+
+    def to_qdrant_point(self) -> dict:
+        return {
+            "id": self.id,
+            "vector": self.vector,
+            "payload": self.payload.model_dump(by_alias=True, exclude_none=True),
+        }
