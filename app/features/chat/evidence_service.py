@@ -1,12 +1,24 @@
 import httpx
+from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.features.chat.schemas import ChatAnswerRequest, ChatIntent, EvidenceResult
+from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.schemas import (
+    ChatAnswerRequest,
+    ChatErrorCode,
+    ChatIntent,
+    EvidenceResult,
+)
 
 
 class EvidenceService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.settings = settings
+        self.http_client = http_client
 
     async def get_evidence(
         self,
@@ -17,17 +29,30 @@ class EvidenceService:
             return self._empty_result(request, intent)
 
         payload = self._build_payload(request, intent)
-        async with httpx.AsyncClient(
-            timeout=self.settings.evidence_lookup_timeout_seconds
-        ) as client:
-            response = await client.post(
-                self._evidence_lookup_url,
-                json=payload,
-                headers=self._headers,
-            )
-            response.raise_for_status()
+        try:
+            if self.http_client is not None:
+                response = await self.http_client.post(
+                    self._evidence_lookup_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
 
-        return EvidenceResult.model_validate(response.json())
+            async with httpx.AsyncClient(
+                timeout=self.settings.evidence_lookup_timeout_seconds
+            ) as client:
+                response = await client.post(
+                    self._evidence_lookup_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
+        except httpx.HTTPError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_EVIDENCE_002,
+                message="RDB Evidence 조회에 실패했습니다.",
+            ) from exc
 
     def _empty_result(
         self,
@@ -73,3 +98,20 @@ class EvidenceService:
                 "targetCode": None,
             },
         }
+
+    def _parse_response(self, response: httpx.Response) -> EvidenceResult:
+        try:
+            response.raise_for_status()
+            return EvidenceResult.model_validate(response.json())
+        except httpx.HTTPStatusError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_EVIDENCE_002,
+                message="RDB Evidence 조회에 실패했습니다.",
+            ) from exc
+        except (ValueError, ValidationError) as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_EVIDENCE_003,
+                message="RDB Evidence 응답 형식이 올바르지 않습니다.",
+            ) from exc
