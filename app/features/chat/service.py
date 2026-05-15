@@ -122,6 +122,8 @@ class ChatService:
             rdb_evidence_count=rdb_evidence_count,
             document_source_count=document_source_count,
             evidence_count=rdb_evidence_count + document_source_count,
+            vector_search_skipped_reason=document_result.skipped_reason,
+            llm_generation_skipped_reason=answer_result.skipped_reason,
         )
 
     def _build_restricted_answer(self, security_result: SecurityResult) -> str:

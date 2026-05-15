@@ -51,16 +51,22 @@ class FakeDocumentSearchService:
         self,
         sources: list[ChatSource] | None = None,
         was_searched: bool = False,
+        skipped_reason: str | None = None,
     ) -> None:
         self.sources = sources or []
         self.was_searched = was_searched
+        self.skipped_reason = skipped_reason
 
     async def search(
         self,
         request: ChatAnswerRequest,
         intent: ChatIntent,
     ) -> DocumentSearchResult:
-        return DocumentSearchResult(was_searched=self.was_searched, sources=self.sources)
+        return DocumentSearchResult(
+            was_searched=self.was_searched,
+            sources=self.sources,
+            skipped_reason=self.skipped_reason,
+        )
 
 
 class FakeGeneratedAnswerGenerationService:
@@ -121,6 +127,10 @@ def test_chat_service_uses_answer_output_security_result() -> None:
     assert response.security_result.status == SecurityStatus.BLOCKED_SENSITIVE_REQUEST
     assert response.security_result.reason == SENSITIVE_OUTPUT_REASON
     assert response.answer == BLOCKED_GENERATED_ANSWER
+    assert (
+        response.model_result.llm_generation_skipped_reason
+        == "Generated answer failed output safety policy."
+    )
 
 
 def test_chat_service_builds_detailed_model_result_counts() -> None:
@@ -151,3 +161,24 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
     assert response.model_result.rdb_evidence_count == 1
     assert response.model_result.document_source_count == 2
     assert response.model_result.evidence_count == 3
+    assert response.model_result.vector_search_skipped_reason is None
+    assert response.model_result.llm_generation_skipped_reason is None
+
+
+def test_chat_service_builds_model_result_skipped_reasons() -> None:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeDocumentSearchService(
+        skipped_reason="Embedding is disabled."
+    )
+    service.answer_generation_service = FakeBlockedAnswerGenerationService()
+
+    response = anyio.run(service.create_answer, _build_request())
+
+    assert response.model_result.used_vector_search is False
+    assert response.model_result.used_llm_generation is False
+    assert response.model_result.vector_search_skipped_reason == "Embedding is disabled."
+    assert (
+        response.model_result.llm_generation_skipped_reason
+        == "Generated answer failed output safety policy."
+    )

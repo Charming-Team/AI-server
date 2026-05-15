@@ -215,6 +215,14 @@ class ModelResult(BaseModel):
     rdb_evidence_count: int = Field(default=0, alias="rdbEvidenceCount")
     document_source_count: int = Field(default=0, alias="documentSourceCount")
     evidence_count: int = Field(alias="evidenceCount")
+    vector_search_skipped_reason: str | None = Field(
+        default=None,
+        alias="vectorSearchSkippedReason",
+    )
+    llm_generation_skipped_reason: str | None = Field(
+        default=None,
+        alias="llmGenerationSkippedReason",
+    )
 
 
 class ChatAnswerResponse(BaseModel):

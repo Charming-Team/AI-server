@@ -59,6 +59,11 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
     assert body["modelResult"]["rdbEvidenceCount"] == 0
     assert body["modelResult"]["documentSourceCount"] == 0
     assert body["modelResult"]["evidenceCount"] == 0
+    assert body["modelResult"]["vectorSearchSkippedReason"] is None
+    assert (
+        body["modelResult"]["llmGenerationSkippedReason"]
+        == "No RDB Evidence or document sources are available."
+    )
 
 
 def test_chat_answer_blocks_sensitive_information_request() -> None:
