@@ -3,6 +3,22 @@ from datetime import datetime
 from app.features.chat.document_payload import InternalDocumentPayload, QdrantSearchPoint
 
 
+def test_internal_document_payload_normalizes_access_metadata() -> None:
+    payload = InternalDocumentPayload(
+        documentId="report-202605",
+        chunkId="chunk-1",
+        documentType=" report ",
+        title="2026년 5월 생산 리스크 보고서",
+        chunkText="보고서 본문 청크",
+        allowedRoles=[" executive ", "EXECUTIVE", "manufacturing_manager", " "],
+        intentTags=[" report_lookup ", "DELIVERY_RISK", "report_lookup", " "],
+    )
+
+    assert payload.document_type == "REPORT"
+    assert payload.allowed_roles == ["EXECUTIVE", "MANUFACTURING_MANAGER"]
+    assert payload.intent_tags == ["REPORT_LOOKUP", "DELIVERY_RISK"]
+
+
 def test_internal_document_payload_maps_to_chat_source() -> None:
     payload = InternalDocumentPayload(
         documentId="report-202605",

@@ -1,8 +1,33 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.features.chat.schemas import ChatSource
+
+
+def _normalize_upper_text(value: str) -> str:
+    return value.strip().upper()
+
+
+def _normalize_upper_text_list(value: Any) -> Any:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return value
+
+    normalized_values: list[str] = []
+    seen_values: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            normalized_values.append(item)
+            continue
+        normalized_item = _normalize_upper_text(item)
+        if not normalized_item or normalized_item in seen_values:
+            continue
+        seen_values.add(normalized_item)
+        normalized_values.append(normalized_item)
+    return normalized_values
 
 
 class InternalDocumentInput(BaseModel):
@@ -21,6 +46,18 @@ class InternalDocumentInput(BaseModel):
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
 
+    @field_validator("document_type", mode="before")
+    @classmethod
+    def normalize_document_type(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        return _normalize_upper_text(value)
+
+    @field_validator("allowed_roles", "intent_tags", mode="before")
+    @classmethod
+    def normalize_access_metadata(cls, value: Any) -> Any:
+        return _normalize_upper_text_list(value)
+
 
 class InternalDocumentPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -38,6 +75,18 @@ class InternalDocumentPayload(BaseModel):
     allowed_roles: list[str] = Field(default_factory=list, alias="allowedRoles")
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
+
+    @field_validator("document_type", mode="before")
+    @classmethod
+    def normalize_document_type(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        return _normalize_upper_text(value)
+
+    @field_validator("allowed_roles", "intent_tags", mode="before")
+    @classmethod
+    def normalize_access_metadata(cls, value: Any) -> Any:
+        return _normalize_upper_text_list(value)
 
     def to_chat_source(self, relevance_score: float | None = None) -> ChatSource:
         return ChatSource(

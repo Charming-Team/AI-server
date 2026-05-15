@@ -35,6 +35,18 @@ def test_document_index_policy_allows_report_and_company_info_documents() -> Non
     policy.validate(_build_document(document_type="COMPANY_INFO"))
 
 
+def test_document_index_policy_allows_normalized_document_metadata() -> None:
+    policy = DocumentIndexPolicy()
+
+    policy.validate(
+        _build_document(
+            document_type=" report ",
+            allowed_roles=[" executive ", "manufacturing_manager"],
+            intent_tags=[" report_lookup "],
+        )
+    )
+
+
 def test_document_index_policy_rejects_unsupported_document_type() -> None:
     policy = DocumentIndexPolicy()
 
