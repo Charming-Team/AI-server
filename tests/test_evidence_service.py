@@ -55,11 +55,18 @@ def test_evidence_service_builds_internal_request_payload() -> None:
     assert payload["sessionId"] == 10
     assert payload["messageId"] == 24
     assert payload["intent"] == "LINE_BOTTLENECK"
-    assert payload["user"]["userId"] == 1
-    assert payload["user"]["role"] == "MANUFACTURING_MANAGER"
-    assert "department" not in payload["user"]
-    assert payload["filters"]["limit"] == 5
-    assert payload["filters"]["targetCode"] == "LINE-A01"
+    assert payload["user"] == {
+        "userId": 1,
+        "role": "MANUFACTURING_MANAGER",
+        "companyName": "S-MAP",
+    }
+    assert payload["filters"] == {
+        "limit": 5,
+        "fromDate": None,
+        "toDate": None,
+        "targetType": "LINE",
+        "targetCode": "LINE-A01",
+    }
 
 
 def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:

@@ -125,6 +125,35 @@ class EvidenceResult(BaseModel):
         return bool(self.items)
 
 
+class EvidenceLookupUser(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: int = Field(alias="userId")
+    role: str
+    company_name: str | None = Field(default=None, alias="companyName")
+
+
+class EvidenceLookupFilters(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    limit: int = 5
+    from_date: str | None = Field(default=None, alias="fromDate")
+    to_date: str | None = Field(default=None, alias="toDate")
+    target_type: str | None = Field(default=None, alias="targetType")
+    target_code: str | None = Field(default=None, alias="targetCode")
+
+
+class EvidenceLookupRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: int = Field(alias="sessionId")
+    message_id: int = Field(alias="messageId")
+    intent: ChatIntent
+    question: str
+    user: EvidenceLookupUser
+    filters: EvidenceLookupFilters
+
+
 class ChatUrl(BaseModel):
     label: str
     url: str

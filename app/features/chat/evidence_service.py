@@ -8,6 +8,9 @@ from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
     ChatIntent,
+    EvidenceLookupFilters,
+    EvidenceLookupRequest,
+    EvidenceLookupUser,
     EvidenceResult,
 )
 
@@ -83,18 +86,21 @@ class EvidenceService:
         request: ChatAnswerRequest,
         intent: ChatIntent,
     ) -> dict:
-        return {
-            "sessionId": request.session_id,
-            "messageId": request.message_id,
-            "intent": intent,
-            "question": request.question,
-            "user": {
-                "userId": request.user.user_id,
-                "role": request.user.role,
-                "companyName": request.user.company_name,
-            },
-            "filters": self.query_filter_extractor.extract_filters(request.question),
-        }
+        lookup_request = EvidenceLookupRequest(
+            session_id=request.session_id,
+            message_id=request.message_id,
+            intent=intent,
+            question=request.question,
+            user=EvidenceLookupUser(
+                user_id=request.user.user_id,
+                role=request.user.role,
+                company_name=request.user.company_name,
+            ),
+            filters=EvidenceLookupFilters.model_validate(
+                self.query_filter_extractor.extract_filters(request.question)
+            ),
+        )
+        return lookup_request.model_dump(mode="json", by_alias=True)
 
     def _parse_response(self, response: httpx.Response) -> EvidenceResult:
         try:
