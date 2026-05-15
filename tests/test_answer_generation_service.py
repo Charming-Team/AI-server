@@ -10,6 +10,7 @@ from app.features.chat.schemas import (
     ChatSource,
     ChatUserContext,
     DocumentSearchResult,
+    EvidenceItem,
     EvidenceResult,
 )
 
@@ -80,3 +81,26 @@ def test_answer_generation_does_not_call_llm_when_disabled() -> None:
     assert result.was_generated is False
     assert result.answer == "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다."
     assert result.skipped_reason == "LLM is disabled."
+
+
+def test_answer_generation_service_builds_grounded_prompt() -> None:
+    service = AnswerGenerationService(Settings())
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크",
+                summary="자재 부족이 주요 리스크입니다.",
+                source="reports",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(sources=[])
+
+    prompt = service.build_prompt(request, evidence_result, document_result)
+
+    assert "제공된 내부 근거만 사용" in prompt.system_prompt
+    assert "월간 생산 리스크" in prompt.user_prompt

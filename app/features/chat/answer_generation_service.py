@@ -1,4 +1,5 @@
 from app.core.config import Settings
+from app.features.chat.grounded_prompt_builder import GroundedPrompt, GroundedPromptBuilder
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
@@ -13,8 +14,13 @@ class AnswerGenerationService:
         "확인 가능한 근거 데이터가 부족해 답변할 수 없습니다."
     )
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        prompt_builder: GroundedPromptBuilder | None = None,
+    ) -> None:
         self.settings = settings
+        self.prompt_builder = prompt_builder or GroundedPromptBuilder()
 
     async def generate_answer(
         self,
@@ -41,6 +47,14 @@ class AnswerGenerationService:
             was_generated=False,
             skipped_reason="LLM provider execution is not connected yet.",
         )
+
+    def build_prompt(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> GroundedPrompt:
+        return self.prompt_builder.build(request, evidence_result, document_result)
 
     def _has_grounding(
         self,
