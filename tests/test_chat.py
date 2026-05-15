@@ -27,6 +27,7 @@ class FakeDocumentIndexService:
         self.document = document
         return DocumentIndexResult(
             document_id=document.document_id,
+            operation_type="INDEX",
             chunk_count=1,
             indexed_count=1,
             operation={"operation_id": 100, "status": "completed"},
@@ -39,6 +40,7 @@ class FakeDocumentIndexService:
         self.delete_request = request
         return DocumentDeleteResult(
             document_id=request.document_id,
+            operation_type="DELETE",
             operation={"operation_id": 101, "status": "completed"},
         )
 
@@ -361,6 +363,7 @@ def test_chat_internal_document_index_calls_index_service() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "documentId": "report-202605",
+        "operationType": "INDEX",
         "chunkCount": 1,
         "indexedCount": 1,
         "operation": {"operation_id": 100, "status": "completed"},
@@ -390,6 +393,7 @@ def test_chat_internal_document_delete_calls_index_service() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "documentId": "report-202605",
+        "operationType": "DELETE",
         "operation": {"operation_id": 101, "status": "completed"},
     }
     assert index_service.delete_request is not None

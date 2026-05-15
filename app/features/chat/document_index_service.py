@@ -18,6 +18,7 @@ class DocumentIndexResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     document_id: str = Field(alias="documentId")
+    operation_type: str = Field(default="INDEX", alias="operationType")
     chunk_count: int = Field(alias="chunkCount")
     indexed_count: int = Field(alias="indexedCount")
     operation: dict = Field(default_factory=dict)
@@ -28,6 +29,7 @@ class DocumentDeleteResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     document_id: str = Field(alias="documentId")
+    operation_type: str = Field(default="DELETE", alias="operationType")
     operation: dict = Field(default_factory=dict)
 
 

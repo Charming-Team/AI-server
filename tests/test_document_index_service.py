@@ -75,6 +75,7 @@ def test_document_index_service_indexes_document_chunks_with_batch_embedding() -
     result = anyio.run(service.index_document, _build_document())
 
     assert result.document_id == "report-202605"
+    assert result.operation_type == "INDEX"
     assert result.chunk_count == 2
     assert result.indexed_count == 2
     assert result.operation == {"operation_id": 100, "status": "completed"}
@@ -99,6 +100,7 @@ def test_document_index_service_deletes_document_by_id() -> None:
     )
 
     assert result.document_id == "report-202605"
+    assert result.operation_type == "DELETE"
     assert result.operation == {"operation_id": 99, "status": "completed"}
     assert qdrant_index_client.deleted_document_id == "report-202605"
     assert qdrant_index_client.calls == ["delete"]
@@ -135,6 +137,7 @@ def test_document_index_service_skips_empty_content() -> None:
     result = anyio.run(service.index_document, _build_document(content="  \n  "))
 
     assert result.chunk_count == 0
+    assert result.operation_type == "INDEX"
     assert result.indexed_count == 0
     assert result.skipped_reason == "문서 본문이 비어 있습니다."
     assert embedding_client.texts == []
@@ -157,6 +160,7 @@ def test_document_index_service_skips_when_embedding_is_disabled() -> None:
     result = anyio.run(service.index_document, _build_document())
 
     assert result.chunk_count == 2
+    assert result.operation_type == "INDEX"
     assert result.indexed_count == 0
     assert result.skipped_reason == "임베딩 기능이 비활성화되어 있습니다."
     assert embedding_client.texts == []
