@@ -18,7 +18,6 @@ def test_document_index_builder_builds_single_payload_with_metadata() -> None:
         referenceId=20,
         basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
         allowedRoles=["EXECUTIVE", "MANUFACTURING_MANAGER"],
-        departments=["생산관리팀"],
         companyName="S-MAP",
         intentTags=["REPORT_LOOKUP", "DELIVERY_RISK"],
     )
@@ -76,3 +75,4 @@ def test_document_index_builder_builds_qdrant_upsert_point() -> None:
     assert qdrant_point["vector"] == [0.1, 0.2, 0.3]
     assert qdrant_point["payload"]["documentId"] == "material-guide"
     assert qdrant_point["payload"]["chunkId"] == "chunk-0001"
+    assert "departments" not in qdrant_point["payload"]

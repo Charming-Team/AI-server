@@ -51,7 +51,6 @@ class DocumentIndexBuilder:
             reference_id=document.reference_id,
             basis_time=document.basis_time,
             allowed_roles=document.allowed_roles,
-            departments=document.departments,
             company_name=document.company_name,
             intent_tags=document.intent_tags,
         )

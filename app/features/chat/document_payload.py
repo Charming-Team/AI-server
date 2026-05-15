@@ -18,7 +18,6 @@ class InternalDocumentInput(BaseModel):
     reference_id: int | None = Field(default=None, alias="referenceId")
     basis_time: datetime | None = Field(default=None, alias="basisTime")
     allowed_roles: list[str] = Field(default_factory=list, alias="allowedRoles")
-    departments: list[str] = Field(default_factory=list)
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
 
@@ -37,7 +36,6 @@ class InternalDocumentPayload(BaseModel):
     reference_id: int | None = Field(default=None, alias="referenceId")
     basis_time: datetime | None = Field(default=None, alias="basisTime")
     allowed_roles: list[str] = Field(default_factory=list, alias="allowedRoles")
-    departments: list[str] = Field(default_factory=list)
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
 
