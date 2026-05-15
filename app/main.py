@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.features.chat.error_handlers import register_chat_error_handlers
 
 
 def create_app() -> FastAPI:
@@ -24,6 +25,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    register_chat_error_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
     @app.get("/", tags=["root"])
