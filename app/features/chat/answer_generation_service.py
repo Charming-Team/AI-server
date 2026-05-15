@@ -63,6 +63,7 @@ class AnswerGenerationService:
                 skipped_reason=LLM_EMPTY_ANSWER,
             )
 
+        answer = self._ensure_source_titles(answer, evidence_result, document_result)
         output_security_result = self.output_policy.evaluate(
             answer,
             role=request.user.role,
@@ -97,3 +98,37 @@ class AnswerGenerationService:
         document_result: DocumentSearchResult,
     ) -> bool:
         return evidence_result.has_evidence or bool(document_result.sources)
+
+    def _ensure_source_titles(
+        self,
+        answer: str,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> str:
+        titles = self._collect_source_titles(evidence_result, document_result)
+        if not titles:
+            return answer
+
+        normalized_answer = answer.casefold()
+        if any(title.casefold() in normalized_answer for title in titles):
+            return answer
+
+        return f"{answer}\n\n참조 근거: {', '.join(titles[:3])}"
+
+    def _collect_source_titles(
+        self,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> list[str]:
+        titles: list[str] = []
+        seen_titles: set[str] = set()
+        for title in [
+            *(item.title for item in evidence_result.items),
+            *(source.title for source in document_result.sources),
+        ]:
+            normalized_title = title.casefold()
+            if normalized_title in seen_titles:
+                continue
+            seen_titles.add(normalized_title)
+            titles.append(title)
+        return titles
