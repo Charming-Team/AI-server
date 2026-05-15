@@ -28,6 +28,7 @@ def test_internal_document_payload_maps_to_chat_source() -> None:
     assert source.reference_id == 20
     assert source.source == "report-202605:chunk-1"
     assert source.basis_time == datetime.fromisoformat("2026-05-12T10:30:00+09:00")
+    assert source.source_origin == "QDRANT"
 
 
 def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
@@ -54,3 +55,4 @@ def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
     assert source.summary == "MAT-001은 안전 재고 200KG 이상을 유지해야 합니다."
     assert source.source == "material-guide"
     assert source.basis_time == datetime.fromisoformat("2026-05-12T11:00:00+09:00")
+    assert source.source_origin == "QDRANT"

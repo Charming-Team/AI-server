@@ -71,6 +71,7 @@ class ChatResponseBuilder:
             reference_id=item.reference_id,
             source=item.source,
             basis_time=basis_time,
+            source_origin="RDB",
         )
 
     def _deduplicate_sources(self, sources: list[ChatSource]) -> list[ChatSource]:
@@ -92,4 +93,5 @@ class ChatResponseBuilder:
             source.source,
             source.title,
             source.basis_time,
+            source.source_origin,
         )

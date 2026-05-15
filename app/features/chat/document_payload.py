@@ -48,6 +48,7 @@ class InternalDocumentPayload(BaseModel):
             reference_id=self.reference_id,
             source=self._source_name,
             basis_time=self.basis_time,
+            source_origin="QDRANT",
         )
 
     @property

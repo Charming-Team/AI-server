@@ -44,6 +44,7 @@ def test_response_builder_merges_evidence_and_document_sources() -> None:
                 referenceId=20,
                 source="report-202605:summary",
                 basisTime=datetime.fromisoformat("2026-05-12T11:00:00+09:00"),
+                sourceOrigin="QDRANT",
             )
         ]
     )
@@ -54,9 +55,11 @@ def test_response_builder_merges_evidence_and_document_sources() -> None:
     assert sources[0].source_type == "ORDER"
     assert sources[0].reference_id == 1001
     assert sources[0].basis_time == datetime.fromisoformat("2026-05-12T10:30:00+09:00")
+    assert sources[0].source_origin == "RDB"
     assert sources[1].source_type == "REPORT"
     assert sources[1].source == "report-202605:summary"
     assert sources[1].basis_time == datetime.fromisoformat("2026-05-12T11:00:00+09:00")
+    assert sources[1].source_origin == "QDRANT"
 
 
 def test_response_builder_builds_unique_urls_from_sources() -> None:

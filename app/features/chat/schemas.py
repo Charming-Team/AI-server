@@ -170,6 +170,7 @@ class ChatSource(BaseModel):
     reference_id: int | None = Field(default=None, alias="referenceId")
     source: str | None = None
     basis_time: datetime | None = Field(default=None, alias="basisTime")
+    source_origin: str | None = Field(default=None, alias="sourceOrigin")
 
 
 class DocumentSearchResult(BaseModel):
