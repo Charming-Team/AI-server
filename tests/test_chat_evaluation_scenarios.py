@@ -216,6 +216,26 @@ class FakeOperatorMixedQdrantClient:
         ]
 
 
+class FakeOperatorRestrictedOnlyQdrantClient:
+    async def search(self, payload: dict) -> list[dict]:
+        return [
+            {
+                "id": "restricted-company-info",
+                "score": 0.93,
+                "payload": {
+                    "documentId": "financial-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "납기 위험 계약 금액 기준",
+                    "chunkText": "납기 지연 시 패널티 금액을 검토합니다.",
+                    "url": "/company-info/financial-guide",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            }
+        ]
+
+
 class FakeOperatorSafeAnswerGenerationService:
     async def generate_answer(
         self,
@@ -273,6 +293,17 @@ def _build_operator_qdrant_filtered_chat_service() -> ChatService:
         qdrant_client=FakeOperatorMixedQdrantClient(),
     )
     service.answer_generation_service = FakeOperatorQdrantSafeAnswerGenerationService()
+    return service
+
+
+def _build_operator_restricted_only_qdrant_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEmptyEvidenceService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeSearchEmbeddingService(),
+        qdrant_client=FakeOperatorRestrictedOnlyQdrantClient(),
+    )
     return service
 
 
@@ -470,6 +501,51 @@ def test_chat_answer_evaluation_blocks_inactive_user_before_intent_lookup() -> N
     assert body["modelResult"]["usedLlmGeneration"] is False
 
 
+@pytest.mark.parametrize(
+    ("question", "expected_code"),
+    [
+        pytest.param("   ", "CHAT_INPUT_001", id="blank_question"),
+        pytest.param("현재\x08납기 위험 알려줘", "CHAT_INPUT_003", id="control_character"),
+    ],
+)
+def test_chat_answer_evaluation_rejects_invalid_question_edges(
+    question: str,
+    expected_code: str,
+) -> None:
+    response = _post_chat_answer(
+        json=_build_answer_request(
+            "MANUFACTURING_MANAGER",
+            question,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "UNKNOWN"
+    assert body["securityResult"]["status"] == "INVALID_REQUEST"
+    assert body["securityResult"]["code"] == expected_code
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"]["usedVectorSearch"] is False
+    assert body["modelResult"]["usedRdbEvidence"] is False
+    assert body["modelResult"]["usedLlmGeneration"] is False
+
+
+def test_chat_answer_evaluation_rejects_too_long_question_payload() -> None:
+    response = _post_chat_answer(
+        json=_build_answer_request(
+            "MANUFACTURING_MANAGER",
+            "납" * 1001,
+        ),
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "CHAT_REQUEST_001",
+        "message": "요청 본문 형식이 올바르지 않습니다.",
+    }
+
+
 def test_chat_answer_evaluation_returns_grounded_answer_with_sources() -> None:
     previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
     app.dependency_overrides[get_chat_service] = _build_grounded_chat_service
@@ -627,4 +703,43 @@ def test_chat_answer_evaluation_filters_operator_financial_qdrant_document() -> 
         "evidenceCount": 1,
         "vectorSearchSkippedReason": None,
         "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_returns_insufficient_evidence_when_qdrant_is_filtered() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[
+        get_chat_service
+    ] = _build_operator_restricted_only_qdrant_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "OPERATOR",
+                "현재 납기 위험이 높은 주문 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert body["securityResult"]["code"] == "CHAT_EVIDENCE_001"
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": False,
+        "usedLlmGeneration": False,
+        "rdbEvidenceCount": 0,
+        "documentSourceCount": 0,
+        "evidenceCount": 0,
+        "vectorSearchSkippedReason": (
+            "Qdrant 검색 결과가 OPERATOR 권한 제한 내용을 포함해 제외되었습니다."
+        ),
+        "llmGenerationSkippedReason": "RDB Evidence와 문서 검색 근거가 없습니다.",
     }
