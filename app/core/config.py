@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     qdrant_timeout_seconds: float = 10.0
     embedding_enabled: bool = False
     embedding_provider: str = "huggingface"
+    embedding_base_url: str = "http://localhost:8002"
+    embedding_path: str = "/embed"
+    embedding_api_key: str | None = None
     embedding_model: str = "BAAI/bge-m3"
     embedding_dimension: int = 1024
     embedding_timeout_seconds: float = 30.0
