@@ -2,6 +2,7 @@ from datetime import datetime
 
 from app.features.chat.response_builder import ChatResponseBuilder
 from app.features.chat.schemas import (
+    ChatErrorCode,
     ChatIntent,
     ChatSource,
     DocumentSearchResult,
@@ -93,6 +94,7 @@ def test_response_builder_returns_insufficient_evidence_without_sources() -> Non
     result = builder.build_security_result(evidence_result, document_result)
 
     assert result.status == SecurityStatus.INSUFFICIENT_EVIDENCE
+    assert result.code == ChatErrorCode.CHAT_EVIDENCE_001
 
 
 def test_response_builder_returns_passed_when_grounding_exists() -> None:
@@ -112,3 +114,4 @@ def test_response_builder_returns_passed_when_grounding_exists() -> None:
     result = builder.build_security_result(evidence_result, document_result)
 
     assert result.status == SecurityStatus.PASSED
+    assert result.code is None

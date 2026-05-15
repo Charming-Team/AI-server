@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 
-from app.features.chat.schemas import SecurityResult, SecurityStatus
+from app.features.chat.schemas import ChatErrorCode, SecurityResult, SecurityStatus
 
 
 @dataclass(frozen=True)
 class SecurityRule:
     status: SecurityStatus
+    code: ChatErrorCode
     reason: str
     terms: tuple[str, ...]
 
@@ -14,6 +15,7 @@ class SecurityPolicy:
     _rules: tuple[SecurityRule, ...] = (
         SecurityRule(
             status=SecurityStatus.BLOCKED_PROMPT_INJECTION,
+            code=ChatErrorCode.CHAT_SECURITY_001,
             reason="프롬프트 인젝션 또는 시스템 지시 우회 요청으로 판단되었습니다.",
             terms=(
                 "ignore previous",
@@ -34,6 +36,7 @@ class SecurityPolicy:
         ),
         SecurityRule(
             status=SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
+            code=ChatErrorCode.CHAT_SECURITY_002,
             reason="민감 정보 또는 내부 설정 정보 요청으로 판단되었습니다.",
             terms=(
                 "system prompt",
@@ -67,7 +70,11 @@ class SecurityPolicy:
 
         for rule in self._rules:
             if self._matches_rule(rule, normalized_question, compact_question):
-                return SecurityResult(status=rule.status, reason=rule.reason)
+                return SecurityResult(
+                    status=rule.status,
+                    code=rule.code,
+                    reason=rule.reason,
+                )
         return None
 
     def _matches_rule(

@@ -29,6 +29,7 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
     assert body["messageId"] == 24
     assert body["intent"] == "MATERIAL_SHORTAGE"
     assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert body["securityResult"]["code"] == "CHAT_EVIDENCE_001"
     assert body["sources"] == []
     assert body["urls"] == []
     assert body["modelResult"]["usedVectorSearch"] is False
@@ -57,6 +58,7 @@ def test_chat_answer_blocks_sensitive_information_request() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["securityResult"]["status"] == "BLOCKED_SENSITIVE_REQUEST"
+    assert body["securityResult"]["code"] == "CHAT_SECURITY_002"
     assert "보안상" in body["answer"]
 
 
@@ -81,6 +83,7 @@ def test_chat_answer_blocks_prompt_injection_request() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["securityResult"]["status"] == "BLOCKED_PROMPT_INJECTION"
+    assert body["securityResult"]["code"] == "CHAT_SECURITY_001"
     assert body["modelResult"]["usedVectorSearch"] is False
     assert body["modelResult"]["usedRdbEvidence"] is False
 
@@ -106,6 +109,7 @@ def test_chat_answer_rejects_blank_question() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["securityResult"]["status"] == "INVALID_REQUEST"
+    assert body["securityResult"]["code"] == "CHAT_INPUT_001"
     assert body["modelResult"]["usedVectorSearch"] is False
     assert body["modelResult"]["usedRdbEvidence"] is False
 
@@ -175,3 +179,22 @@ def test_chat_recommendations_returns_role_based_questions() -> None:
     assert body["items"][0]["questionId"] == "line-bottleneck-current"
     assert body["items"][0]["intent"] == "LINE_BOTTLENECK"
     assert body["items"][0]["url"] == "/production-lines/status"
+
+
+def test_chat_openapi_documents_error_response_model() -> None:
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    schema = response.json()
+    assert "ErrorResponse" in schema["components"]["schemas"]
+    answer_responses = schema["paths"]["/api/v1/chat/answer"]["post"]["responses"]
+    recommendation_responses = schema["paths"]["/api/v1/chat/recommendations"]["post"][
+        "responses"
+    ]
+
+    assert answer_responses["400"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/ErrorResponse"
+    )
+    assert recommendation_responses["500"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/ErrorResponse")

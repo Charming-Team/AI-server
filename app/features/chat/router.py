@@ -9,6 +9,7 @@ from app.features.chat.schemas import (
     ChatAnswerResponse,
     ChatRecommendationRequest,
     ChatRecommendationResponse,
+    ErrorResponse,
 )
 from app.features.chat.service import ChatService
 
@@ -32,7 +33,18 @@ RecommendationServiceDep = Annotated[
 ]
 
 
-@router.post("/answer", response_model=ChatAnswerResponse)
+chat_error_responses = {
+    400: {"model": ErrorResponse},
+    422: {"model": ErrorResponse},
+    500: {"model": ErrorResponse},
+}
+
+
+@router.post(
+    "/answer",
+    response_model=ChatAnswerResponse,
+    responses=chat_error_responses,
+)
 async def create_chat_answer(
     request: ChatAnswerRequest,
     chat_service: ChatServiceDep,
@@ -40,7 +52,11 @@ async def create_chat_answer(
     return await chat_service.create_answer(request)
 
 
-@router.post("/recommendations", response_model=ChatRecommendationResponse)
+@router.post(
+    "/recommendations",
+    response_model=ChatRecommendationResponse,
+    responses=chat_error_responses,
+)
 async def get_chat_recommendations(
     request: ChatRecommendationRequest,
     recommendation_service: RecommendationServiceDep,

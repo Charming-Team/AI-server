@@ -1,4 +1,5 @@
 from app.features.chat.schemas import (
+    ChatErrorCode,
     ChatSource,
     ChatUrl,
     DocumentSearchResult,
@@ -51,6 +52,7 @@ class ChatResponseBuilder:
 
         return SecurityResult(
             status=SecurityStatus.INSUFFICIENT_EVIDENCE,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
             reason="조회된 RDB Evidence가 없고 Qdrant 검색 결과가 없습니다.",
         )
 

@@ -26,6 +26,30 @@ class SecurityStatus(StrEnum):
     ERROR = "ERROR"
 
 
+class ChatErrorCode(StrEnum):
+    CHAT_INPUT_001 = "CHAT_INPUT_001"
+    CHAT_INPUT_002 = "CHAT_INPUT_002"
+    CHAT_INPUT_003 = "CHAT_INPUT_003"
+    CHAT_SECURITY_001 = "CHAT_SECURITY_001"
+    CHAT_SECURITY_002 = "CHAT_SECURITY_002"
+    CHAT_SECURITY_003 = "CHAT_SECURITY_003"
+    CHAT_EVIDENCE_001 = "CHAT_EVIDENCE_001"
+    CHAT_EVIDENCE_002 = "CHAT_EVIDENCE_002"
+    CHAT_EVIDENCE_003 = "CHAT_EVIDENCE_003"
+    CHAT_EMBEDDING_001 = "CHAT_EMBEDDING_001"
+    CHAT_EMBEDDING_002 = "CHAT_EMBEDDING_002"
+    CHAT_EMBEDDING_003 = "CHAT_EMBEDDING_003"
+    CHAT_EMBEDDING_004 = "CHAT_EMBEDDING_004"
+    CHAT_QDRANT_001 = "CHAT_QDRANT_001"
+    CHAT_QDRANT_002 = "CHAT_QDRANT_002"
+    CHAT_QDRANT_003 = "CHAT_QDRANT_003"
+    CHAT_LLM_001 = "CHAT_LLM_001"
+    CHAT_LLM_002 = "CHAT_LLM_002"
+    CHAT_LLM_003 = "CHAT_LLM_003"
+    CHAT_RECOMMEND_001 = "CHAT_RECOMMEND_001"
+    CHAT_RECOMMEND_002 = "CHAT_RECOMMEND_002"
+
+
 class ChatUserContext(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -132,7 +156,13 @@ class AnswerGenerationResult(BaseModel):
 
 class SecurityResult(BaseModel):
     status: SecurityStatus
+    code: ChatErrorCode | None = None
     reason: str | None = None
+
+
+class ErrorResponse(BaseModel):
+    code: ChatErrorCode | str
+    message: str
 
 
 class ModelResult(BaseModel):

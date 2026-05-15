@@ -1,7 +1,7 @@
 import pytest
 
 from app.features.chat.question_validator import QuestionValidator
-from app.features.chat.schemas import SecurityStatus
+from app.features.chat.schemas import ChatErrorCode, SecurityStatus
 
 
 @pytest.mark.parametrize(
@@ -19,6 +19,7 @@ def test_question_validator_rejects_blank_question(question: str) -> None:
 
     assert result is not None
     assert result.status == SecurityStatus.INVALID_REQUEST
+    assert result.code == ChatErrorCode.CHAT_INPUT_001
     assert result.reason == "질문 내용이 비어 있습니다."
 
 
@@ -29,7 +30,19 @@ def test_question_validator_rejects_control_character() -> None:
 
     assert result is not None
     assert result.status == SecurityStatus.INVALID_REQUEST
+    assert result.code == ChatErrorCode.CHAT_INPUT_003
     assert result.reason == "질문에 허용되지 않는 제어 문자가 포함되어 있습니다."
+
+
+def test_question_validator_rejects_too_long_question() -> None:
+    validator = QuestionValidator()
+
+    result = validator.validate("가" * 1001)
+
+    assert result is not None
+    assert result.status == SecurityStatus.INVALID_REQUEST
+    assert result.code == ChatErrorCode.CHAT_INPUT_002
+    assert result.reason == "질문 길이가 허용 범위를 초과했습니다."
 
 
 def test_question_validator_allows_business_question() -> None:

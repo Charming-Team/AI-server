@@ -11,6 +11,7 @@ from app.features.chat.schemas import (
     ChatIntent,
     ModelResult,
     SecurityResult,
+    SecurityStatus,
 )
 from app.features.chat.security_policy import SecurityPolicy
 
@@ -83,7 +84,7 @@ class ChatService:
         )
 
     def _build_restricted_answer(self, security_result: SecurityResult) -> str:
-        if security_result.status == "INVALID_REQUEST":
+        if security_result.status == SecurityStatus.INVALID_REQUEST:
             return "질문 내용을 확인한 뒤 업무 데이터에 대한 질문으로 다시 요청해 주세요."
         return (
             "보안상 답변할 수 없는 요청입니다. "
