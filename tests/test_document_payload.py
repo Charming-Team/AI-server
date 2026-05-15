@@ -29,6 +29,7 @@ def test_internal_document_payload_maps_to_chat_source() -> None:
     assert source.source == "report-202605:chunk-1"
     assert source.basis_time == datetime.fromisoformat("2026-05-12T10:30:00+09:00")
     assert source.source_origin == "QDRANT"
+    assert source.relevance_score is None
 
 
 def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
@@ -56,3 +57,4 @@ def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
     assert source.source == "material-guide"
     assert source.basis_time == datetime.fromisoformat("2026-05-12T11:00:00+09:00")
     assert source.source_origin == "QDRANT"
+    assert source.relevance_score == 0.91

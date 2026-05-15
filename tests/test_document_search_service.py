@@ -194,6 +194,7 @@ def test_document_search_service_builds_sources_from_qdrant_points() -> None:
     assert sources[0].source_type == "PROCESS"
     assert sources[0].title == "LINE-A01 병목 대응 가이드"
     assert sources[0].source == "process-guide:line-a01"
+    assert sources[0].relevance_score == 0.88
 
 
 def test_document_search_service_searches_qdrant_when_embedding_is_ready() -> None:
@@ -213,6 +214,7 @@ def test_document_search_service_searches_qdrant_when_embedding_is_ready() -> No
     assert result.sources[0].source_type == "REPORT"
     assert result.sources[0].title == "2026년 5월 생산 리스크 보고서"
     assert result.sources[0].url == "/reports/20"
+    assert result.sources[0].relevance_score == 0.88
 
 
 def test_document_search_service_filters_points_below_score_threshold() -> None:
@@ -230,3 +232,4 @@ def test_document_search_service_filters_points_below_score_threshold() -> None:
     assert qdrant_client.search_payload["score_threshold"] == 0.65
     assert len(result.sources) == 1
     assert result.sources[0].title == "높은 유사도 보고서"
+    assert result.sources[0].relevance_score == 0.82

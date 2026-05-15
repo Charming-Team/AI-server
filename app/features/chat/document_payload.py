@@ -39,7 +39,7 @@ class InternalDocumentPayload(BaseModel):
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
 
-    def to_chat_source(self) -> ChatSource:
+    def to_chat_source(self, relevance_score: float | None = None) -> ChatSource:
         return ChatSource(
             source_type=self.document_type,
             title=self.title,
@@ -49,6 +49,7 @@ class InternalDocumentPayload(BaseModel):
             source=self._source_name,
             basis_time=self.basis_time,
             source_origin="QDRANT",
+            relevance_score=relevance_score,
         )
 
     @property
@@ -71,7 +72,7 @@ class QdrantSearchPoint(BaseModel):
     payload: InternalDocumentPayload
 
     def to_chat_source(self) -> ChatSource:
-        return self.payload.to_chat_source()
+        return self.payload.to_chat_source(relevance_score=self.score)
 
 
 class QdrantUpsertPoint(BaseModel):

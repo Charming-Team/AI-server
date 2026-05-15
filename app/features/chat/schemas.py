@@ -171,6 +171,7 @@ class ChatSource(BaseModel):
     source: str | None = None
     basis_time: datetime | None = Field(default=None, alias="basisTime")
     source_origin: str | None = Field(default=None, alias="sourceOrigin")
+    relevance_score: float | None = Field(default=None, alias="relevanceScore")
 
 
 class DocumentSearchResult(BaseModel):
