@@ -86,6 +86,11 @@ class ChatSource(BaseModel):
     source: str | None = None
 
 
+class DocumentSearchResult(BaseModel):
+    sources: list[ChatSource] = Field(default_factory=list)
+    was_searched: bool = False
+
+
 class SecurityResult(BaseModel):
     status: SecurityStatus
     reason: str | None = None

@@ -7,6 +7,7 @@ from app.schemas.chat import (
     SecurityResult,
     SecurityStatus,
 )
+from app.services.document_search_service import DocumentSearchService
 from app.services.evidence_service import EvidenceService
 from app.services.intent_classifier import IntentClassifier
 
@@ -39,6 +40,7 @@ class ChatService:
     def __init__(self, settings: Settings) -> None:
         self.intent_classifier = IntentClassifier()
         self.evidence_service = EvidenceService(settings)
+        self.document_search_service = DocumentSearchService(settings)
 
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
         blocked_status = self._get_blocked_status(request.question)
@@ -47,6 +49,7 @@ class ChatService:
 
         intent = self.intent_classifier.classify(request.question)
         evidence_result = await self.evidence_service.get_evidence(request, intent)
+        document_result = await self.document_search_service.search(request, evidence_result.intent)
 
         return ChatAnswerResponse(
             session_id=request.session_id,
@@ -57,12 +60,13 @@ class ChatService:
                 "확인 가능한 근거 데이터가 부족해 답변할 수 없습니다."
             ),
             basis_time=evidence_result.basis_time,
+            sources=document_result.sources,
             security_result=SecurityResult(
                 status=SecurityStatus.INSUFFICIENT_EVIDENCE,
                 reason="조회된 RDB Evidence가 없고 Qdrant 검색이 아직 연결되지 않았습니다.",
             ),
             model_result=ModelResult(
-                used_vector_search=False,
+                used_vector_search=document_result.was_searched,
                 used_rdb_evidence=evidence_result.has_evidence,
                 evidence_count=len(evidence_result.items),
             ),

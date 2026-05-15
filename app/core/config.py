@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     evidence_lookup_path: str = "/internal/chat/evidence"
     evidence_lookup_internal_token: str | None = None
     evidence_lookup_timeout_seconds: float = 10.0
+    qdrant_search_enabled: bool = False
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str | None = None
+    qdrant_collection: str = "smap_internal_documents"
+    qdrant_top_k: int = 5
+    qdrant_timeout_seconds: float = 10.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
