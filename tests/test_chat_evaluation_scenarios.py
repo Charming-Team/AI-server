@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings
+from app.features.chat.document_search_service import DocumentSearchService
 from app.features.chat.router import get_chat_service
 from app.features.chat.schemas import (
     AnswerGenerationResult,
@@ -9,6 +10,7 @@ from app.features.chat.schemas import (
     ChatIntent,
     ChatSource,
     DocumentSearchResult,
+    EmbeddingResult,
     EvidenceItem,
     EvidenceResult,
 )
@@ -158,6 +160,62 @@ class FakeNoDocumentSearchService:
         return DocumentSearchResult(was_searched=True, sources=[])
 
 
+class FakeEmptyEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[],
+        )
+
+
+class FakeSearchEmbeddingService:
+    async def embed_query(self, request: ChatAnswerRequest) -> EmbeddingResult:
+        return EmbeddingResult(
+            vector=[0.1, 0.2, 0.3],
+            was_embedded=True,
+            model="test-embedding-model",
+        )
+
+
+class FakeOperatorMixedQdrantClient:
+    async def search(self, payload: dict) -> list[dict]:
+        return [
+            {
+                "id": "restricted-company-info",
+                "score": 0.93,
+                "payload": {
+                    "documentId": "financial-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "납기 위험 계약 금액 기준",
+                    "chunkText": "납기 지연 시 패널티 금액을 검토합니다.",
+                    "url": "/company-info/financial-guide",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            },
+            {
+                "id": "safe-company-info",
+                "score": 0.88,
+                "payload": {
+                    "documentId": "line-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "LINE-A01 현장 확인 기준",
+                    "chunkText": "대기시간이 증가하면 현장 상태와 작업 순서를 확인합니다.",
+                    "url": "/company-info/line-guide",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            },
+        ]
+
+
 class FakeOperatorSafeAnswerGenerationService:
     async def generate_answer(
         self,
@@ -169,6 +227,23 @@ class FakeOperatorSafeAnswerGenerationService:
         assert "latePenaltyAmount" not in evidence_result.items[0].data
         return AnswerGenerationResult(
             answer="ORD-202605-002는 납기 지연 위험 등급이 WARNING입니다.",
+            was_generated=True,
+        )
+
+
+class FakeOperatorQdrantSafeAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.items == []
+        assert [source.title for source in document_result.sources] == [
+            "LINE-A01 현장 확인 기준"
+        ]
+        return AnswerGenerationResult(
+            answer="LINE-A01은 대기시간 증가 시 현장 상태와 작업 순서를 확인해야 합니다.",
             was_generated=True,
         )
 
@@ -186,6 +261,18 @@ def _build_operator_sanitized_chat_service() -> ChatService:
     service.evidence_service = FakeOperatorFinancialEvidenceService()
     service.document_search_service = FakeNoDocumentSearchService()
     service.answer_generation_service = FakeOperatorSafeAnswerGenerationService()
+    return service
+
+
+def _build_operator_qdrant_filtered_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEmptyEvidenceService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeSearchEmbeddingService(),
+        qdrant_client=FakeOperatorMixedQdrantClient(),
+    )
+    service.answer_generation_service = FakeOperatorQdrantSafeAnswerGenerationService()
     return service
 
 
@@ -482,6 +569,61 @@ def test_chat_answer_evaluation_sanitizes_operator_financial_evidence() -> None:
         "usedLlmGeneration": True,
         "rdbEvidenceCount": 1,
         "documentSourceCount": 0,
+        "evidenceCount": 1,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_filters_operator_financial_qdrant_document() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_operator_qdrant_filtered_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "OPERATOR",
+                "현재 납기 위험이 높은 주문 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert "계약" not in body["answer"]
+    assert "금액" not in body["answer"]
+    assert "패널티" not in body["answer"]
+    assert body["urls"] == [
+        {
+            "label": "LINE-A01 현장 확인 기준",
+            "url": "/company-info/line-guide",
+            "type": "COMPANY_INFO",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "COMPANY_INFO",
+            "title": "LINE-A01 현장 확인 기준",
+            "summary": "대기시간이 증가하면 현장 상태와 작업 순서를 확인합니다.",
+            "url": "/company-info/line-guide",
+            "referenceId": None,
+            "source": "line-guide:summary",
+            "basisTime": None,
+            "sourceOrigin": "QDRANT",
+            "relevanceScore": 0.88,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": False,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 0,
+        "documentSourceCount": 1,
         "evidenceCount": 1,
         "vectorSearchSkippedReason": None,
         "llmGenerationSkippedReason": None,
