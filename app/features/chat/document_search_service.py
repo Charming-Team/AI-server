@@ -38,10 +38,11 @@ class DocumentSearchService:
 
         search_payload = self._build_search_payload(embedding_result.vector, request, intent)
         points = await self.qdrant_client.search(search_payload)
+        filtered_points = self._filter_points_by_score(points)
 
         return DocumentSearchResult(
             was_searched=True,
-            sources=self._build_sources(points),
+            sources=self._build_sources(filtered_points),
         )
 
     def _build_search_payload(
@@ -50,12 +51,15 @@ class DocumentSearchService:
         request: ChatAnswerRequest,
         intent: ChatIntent,
     ) -> dict:
-        return {
+        payload = {
             "vector": vector,
             "limit": self.settings.qdrant_top_k,
             "with_payload": True,
             "filter": self._build_search_filter(request, intent),
         }
+        if self.settings.qdrant_score_threshold > 0:
+            payload["score_threshold"] = self.settings.qdrant_score_threshold
+        return payload
 
     def _build_search_filter(
         self,
@@ -74,6 +78,21 @@ class DocumentSearchService:
                 {"key": "intentTags", "match": {"any": [intent.value]}}
             )
         return {"must": must_conditions}
+
+    def _filter_points_by_score(self, points: list[dict]) -> list[dict]:
+        threshold = self.settings.qdrant_score_threshold
+        if threshold <= 0:
+            return points
+
+        return [
+            point
+            for point in points
+            if self._is_score_above_threshold(point, threshold)
+        ]
+
+    def _is_score_above_threshold(self, point: dict, threshold: float) -> bool:
+        score = point.get("score")
+        return isinstance(score, (int, float)) and score >= threshold
 
     def _build_sources(self, points: list[dict]) -> list[ChatSource]:
         return [

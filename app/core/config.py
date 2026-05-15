@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     qdrant_api_key: str | None = None
     qdrant_collection: str = "smap_internal_documents"
     qdrant_top_k: int = 5
+    qdrant_score_threshold: float = 0.0
     qdrant_timeout_seconds: float = 10.0
     document_chunk_size: int = 800
     document_chunk_overlap: int = 80

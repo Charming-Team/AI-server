@@ -46,6 +46,54 @@ class FakeQdrantClient:
         ]
 
 
+class FakeLowScoreQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "low-score-point",
+                "score": 0.31,
+                "payload": {
+                    "documentId": "report-low",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "낮은 유사도 보고서",
+                    "chunkText": "질문과 관련성이 낮은 보고서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+            {
+                "id": "missing-score-point",
+                "payload": {
+                    "documentId": "report-missing-score",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "점수 없는 보고서",
+                    "chunkText": "점수가 없는 검색 결과입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+            {
+                "id": "high-score-point",
+                "score": 0.82,
+                "payload": {
+                    "documentId": "report-high",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "높은 유사도 보고서",
+                    "chunkText": "질문과 관련성이 높은 보고서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+        ]
+
+
 def _build_request() -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -107,6 +155,19 @@ def test_document_search_service_builds_qdrant_search_payload() -> None:
     }
 
 
+def test_document_search_service_adds_score_threshold_to_qdrant_payload() -> None:
+    service = DocumentSearchService(Settings(qdrant_score_threshold=0.65))
+    request = _build_request()
+
+    payload = service._build_search_payload(
+        [0.1, 0.2, 0.3],
+        request,
+        ChatIntent.REPORT_LOOKUP,
+    )
+
+    assert payload["score_threshold"] == 0.65
+
+
 def test_document_search_service_builds_sources_from_qdrant_points() -> None:
     service = DocumentSearchService(Settings())
 
@@ -152,3 +213,20 @@ def test_document_search_service_searches_qdrant_when_embedding_is_ready() -> No
     assert result.sources[0].source_type == "REPORT"
     assert result.sources[0].title == "2026년 5월 생산 리스크 보고서"
     assert result.sources[0].url == "/reports/20"
+
+
+def test_document_search_service_filters_points_below_score_threshold() -> None:
+    qdrant_client = FakeLowScoreQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True, qdrant_score_threshold=0.65),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert qdrant_client.search_payload is not None
+    assert qdrant_client.search_payload["score_threshold"] == 0.65
+    assert len(result.sources) == 1
+    assert result.sources[0].title == "높은 유사도 보고서"
