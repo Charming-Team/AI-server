@@ -15,7 +15,16 @@ class EmbeddingClient:
         self.http_client = http_client
 
     async def embed(self, text: str) -> list[float]:
-        payload = self._build_payload(text)
+        vectors = await self.embed_many([text])
+        if not vectors:
+            return []
+        return vectors[0]
+
+    async def embed_many(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+
+        payload = self._build_payloads(texts)
         try:
             if self.http_client is not None:
                 response = await self.http_client.post(
@@ -23,7 +32,7 @@ class EmbeddingClient:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response)
+                return self._parse_batch_response(response)
 
             async with httpx.AsyncClient(timeout=self.settings.embedding_timeout_seconds) as client:
                 response = await client.post(
@@ -31,7 +40,7 @@ class EmbeddingClient:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response)
+                return self._parse_batch_response(response)
         except httpx.HTTPError as exc:
             raise ChatExternalServiceError(
                 status_code=503,
@@ -42,7 +51,16 @@ class EmbeddingClient:
     def _build_payload(self, text: str) -> dict:
         return {"inputs": [text]}
 
+    def _build_payloads(self, texts: list[str]) -> dict:
+        return {"inputs": texts}
+
     def _parse_response(self, response: httpx.Response) -> list[float]:
+        embeddings = self._parse_batch_response(response)
+        if not embeddings:
+            return []
+        return embeddings[0]
+
+    def _parse_batch_response(self, response: httpx.Response) -> list[list[float]]:
         try:
             response.raise_for_status()
             body = response.json()
@@ -58,7 +76,10 @@ class EmbeddingClient:
                 code=ChatErrorCode.CHAT_EMBEDDING_002,
                 message="임베딩 응답 형식이 올바르지 않습니다.",
             ) from exc
-        embedding = self._extract_embedding(body)
+        embeddings = self._extract_embeddings(body)
+        return [self._coerce_embedding(embedding) for embedding in embeddings]
+
+    def _coerce_embedding(self, embedding: list) -> list[float]:
         try:
             return [float(value) for value in embedding]
         except (TypeError, ValueError) as exc:
@@ -69,32 +90,41 @@ class EmbeddingClient:
             ) from exc
 
     def _extract_embedding(self, body: object) -> list:
+        embeddings = self._extract_embeddings(body)
+        if not embeddings:
+            return []
+        return embeddings[0]
+
+    def _extract_embeddings(self, body: object) -> list[list]:
         if isinstance(body, list):
             if not body:
                 return []
             first_item = body[0]
             if isinstance(first_item, list):
-                return first_item
-            return body
+                return body
+            return [body]
 
         if isinstance(body, dict):
             embedding = body.get("embedding")
             if isinstance(embedding, list):
-                return embedding
+                return [embedding]
 
             embeddings = body.get("embeddings")
             if isinstance(embeddings, list) and embeddings:
                 first_embedding = embeddings[0]
                 if isinstance(first_embedding, list):
-                    return first_embedding
+                    return embeddings
+                return [embeddings]
 
             data = body.get("data")
             if isinstance(data, list) and data:
-                first_data = data[0]
-                if isinstance(first_data, dict):
-                    openai_embedding = first_data.get("embedding")
-                    if isinstance(openai_embedding, list):
-                        return openai_embedding
+                data_embeddings = [
+                    item.get("embedding")
+                    for item in data
+                    if isinstance(item, dict) and isinstance(item.get("embedding"), list)
+                ]
+                if data_embeddings:
+                    return data_embeddings
 
         return []
 

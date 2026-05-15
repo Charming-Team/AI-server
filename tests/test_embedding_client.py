@@ -51,6 +51,60 @@ def test_embedding_client_parses_huggingface_tei_response() -> None:
     assert captured_request["body"] == {"inputs": ["최근 보고서 요약해줘"]}
 
 
+def test_embedding_client_embed_many_sends_single_batch_request() -> None:
+    captured_request: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["url"] = str(request.url)
+        captured_request["body"] = json.loads(request.content.decode())
+        return httpx.Response(200, json=[[0.1, 0.2], [0.3, 0.4]])
+
+    async def run_embed_many() -> list[list[float]]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = EmbeddingClient(
+                Settings(embedding_base_url="http://embedding.local"),
+                http_client=http_client,
+            )
+            return await client.embed_many(
+                [
+                    "첫 번째 보고서 청크",
+                    "두 번째 보고서 청크",
+                ]
+            )
+
+    vectors = anyio.run(run_embed_many)
+
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+    assert captured_request["url"] == "http://embedding.local/embed"
+    assert captured_request["body"] == {
+        "inputs": [
+            "첫 번째 보고서 청크",
+            "두 번째 보고서 청크",
+        ]
+    }
+
+
+def test_embedding_client_embed_many_skips_empty_texts() -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json=[])
+
+    async def run_embed_many() -> list[list[float]]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = EmbeddingClient(Settings(), http_client=http_client)
+            return await client.embed_many([])
+
+    vectors = anyio.run(run_embed_many)
+
+    assert vectors == []
+    assert called is False
+
+
 def test_embedding_client_parses_openai_compatible_embedding_response() -> None:
     client = EmbeddingClient(Settings())
     response = httpx.Response(
@@ -69,6 +123,30 @@ def test_embedding_client_parses_openai_compatible_embedding_response() -> None:
     vector = client._parse_response(response)
 
     assert vector == [0.4, 0.5, 0.6]
+
+
+def test_embedding_client_parses_openai_compatible_embedding_batch_response() -> None:
+    client = EmbeddingClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://embedding.local/embed"),
+        json={
+            "data": [
+                {
+                    "embedding": [0.1, 0.2],
+                    "index": 0,
+                },
+                {
+                    "embedding": [0.3, 0.4],
+                    "index": 1,
+                },
+            ]
+        },
+    )
+
+    vectors = client._parse_batch_response(response)
+
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
 
 
 def test_embedding_client_raises_external_error_on_http_failure() -> None:
