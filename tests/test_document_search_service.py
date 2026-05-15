@@ -131,6 +131,65 @@ class FakeEmptyQdrantClient:
         return []
 
 
+class FakeMixedRoleQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "operator-only-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "operator-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "작업자 전용 가이드",
+                    "chunkText": "작업자에게만 허용되는 문서입니다.",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+            {
+                "id": "executive-point",
+                "score": 0.88,
+                "payload": {
+                    "documentId": "executive-report",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "경영진 생산 리스크 보고서",
+                    "chunkText": "경영진에게 허용되는 문서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+        ]
+
+
+class FakeUnauthorizedRoleQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "operator-only-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "operator-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "작업자 전용 가이드",
+                    "chunkText": "작업자에게만 허용되는 문서입니다.",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
 def _build_request(company_name: str | None = "S-MAP") -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -304,6 +363,38 @@ def test_document_search_service_filters_points_below_score_threshold() -> None:
     assert len(result.sources) == 1
     assert result.sources[0].title == "높은 유사도 보고서"
     assert result.sources[0].relevance_score == 0.82
+
+
+def test_document_search_service_filters_sources_outside_user_role() -> None:
+    qdrant_client = FakeMixedRoleQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert qdrant_client.search_payload is not None
+    assert len(result.sources) == 1
+    assert result.sources[0].title == "경영진 생산 리스크 보고서"
+
+
+def test_document_search_service_marks_role_reason_when_all_points_are_not_allowed() -> None:
+    qdrant_client = FakeUnauthorizedRoleQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert result.skipped_reason == "Qdrant 검색 결과가 사용자 권한 범위를 통과하지 못했습니다."
 
 
 def test_document_search_service_marks_no_result_reason_when_qdrant_is_empty() -> None:

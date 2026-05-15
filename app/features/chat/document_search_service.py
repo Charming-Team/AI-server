@@ -10,6 +10,7 @@ from app.features.chat.schemas import (
 )
 from app.features.chat.skip_reasons import (
     QDRANT_NO_RESULTS,
+    QDRANT_ROLE_NOT_ALLOWED,
     QDRANT_SCORE_THRESHOLD_NOT_MET,
     QDRANT_UNKNOWN_INTENT,
 )
@@ -49,11 +50,12 @@ class DocumentSearchService:
 
         search_payload = self._build_search_payload(embedding_result.vector, request, intent)
         points = await self.qdrant_client.search(search_payload)
-        filtered_points = self._filter_points_by_score(points)
+        role_filtered_points = self._filter_points_by_role(points, request.user.role)
+        filtered_points = self._filter_points_by_score(role_filtered_points)
         if not filtered_points:
             return DocumentSearchResult(
                 was_searched=True,
-                skipped_reason=self._build_no_result_reason(points),
+                skipped_reason=self._build_no_result_reason(points, role_filtered_points),
             )
 
         return DocumentSearchResult(
@@ -91,6 +93,29 @@ class DocumentSearchService:
             )
         return {"must": must_conditions}
 
+    def _filter_points_by_role(self, points: list[dict], role: str) -> list[dict]:
+        return [
+            point
+            for point in points
+            if self._is_role_allowed(point, role)
+        ]
+
+    def _is_role_allowed(self, point: dict, role: str) -> bool:
+        payload = point.get("payload")
+        if not isinstance(payload, dict):
+            return False
+
+        allowed_roles = payload.get("allowedRoles")
+        if not isinstance(allowed_roles, list):
+            return False
+
+        normalized_role = role.strip().upper()
+        return any(
+            isinstance(allowed_role, str)
+            and allowed_role.strip().upper() == normalized_role
+            for allowed_role in allowed_roles
+        )
+
     def _filter_points_by_score(self, points: list[dict]) -> list[dict]:
         threshold = self.settings.qdrant_score_threshold
         if threshold <= 0:
@@ -106,8 +131,14 @@ class DocumentSearchService:
         score = point.get("score")
         return isinstance(score, (int, float)) and score >= threshold
 
-    def _build_no_result_reason(self, points: list[dict]) -> str:
-        if points and self.settings.qdrant_score_threshold > 0:
+    def _build_no_result_reason(
+        self,
+        points: list[dict],
+        role_filtered_points: list[dict],
+    ) -> str:
+        if points and not role_filtered_points:
+            return QDRANT_ROLE_NOT_ALLOWED
+        if role_filtered_points and self.settings.qdrant_score_threshold > 0:
             return QDRANT_SCORE_THRESHOLD_NOT_MET
         return QDRANT_NO_RESULTS
 
