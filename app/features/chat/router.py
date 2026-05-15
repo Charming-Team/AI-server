@@ -5,10 +5,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.core.config import Settings, get_settings
 from app.features.chat.document_index_service import (
+    DocumentDeleteResult,
     DocumentIndexResult,
     DocumentIndexService,
 )
-from app.features.chat.document_payload import InternalDocumentInput
+from app.features.chat.document_payload import (
+    InternalDocumentDeleteRequest,
+    InternalDocumentInput,
+)
 from app.features.chat.recommendation_service import RecommendationService
 from app.features.chat.schemas import (
     ChatAnswerRequest,
@@ -117,3 +121,16 @@ async def index_internal_document(
     document_index_service: DocumentIndexServiceDep,
 ) -> DocumentIndexResult:
     return await document_index_service.index_document(request)
+
+
+@router.post(
+    "/internal/documents/delete",
+    response_model=DocumentDeleteResult,
+    dependencies=[Depends(verify_document_index_token)],
+    responses=chat_error_responses,
+)
+async def delete_internal_document(
+    request: InternalDocumentDeleteRequest,
+    document_index_service: DocumentIndexServiceDep,
+) -> DocumentDeleteResult:
+    return await document_index_service.delete_document(request)

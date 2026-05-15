@@ -3,7 +3,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.config import Settings
 from app.features.chat.document_index_builder import DocumentIndexBuilder
 from app.features.chat.document_index_policy import DocumentIndexPolicy
-from app.features.chat.document_payload import InternalDocumentInput
+from app.features.chat.document_payload import (
+    InternalDocumentDeleteRequest,
+    InternalDocumentInput,
+)
 from app.features.chat.embedding_client import EmbeddingClient
 from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.qdrant_client import QdrantDocumentIndexClient
@@ -19,6 +22,13 @@ class DocumentIndexResult(BaseModel):
     indexed_count: int = Field(alias="indexedCount")
     operation: dict = Field(default_factory=dict)
     skipped_reason: str | None = Field(default=None, alias="skippedReason")
+
+
+class DocumentDeleteResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    document_id: str = Field(alias="documentId")
+    operation: dict = Field(default_factory=dict)
 
 
 class DocumentIndexService:
@@ -72,6 +82,19 @@ class DocumentIndexService:
             operation=operation,
         )
 
+    async def delete_document(
+        self,
+        request: InternalDocumentDeleteRequest,
+    ) -> DocumentDeleteResult:
+        self._validate_document_id(request.document_id)
+        operation = await self.qdrant_index_client.delete_by_document_id(
+            request.document_id
+        )
+        return DocumentDeleteResult(
+            document_id=request.document_id,
+            operation=operation,
+        )
+
     def _validate_vectors(
         self,
         vectors: list[list[float]],
@@ -91,6 +114,16 @@ class DocumentIndexService:
                     code=ChatErrorCode.CHAT_EMBEDDING_003,
                     message="임베딩 벡터 차원이 설정값과 일치하지 않습니다.",
                 )
+
+    def _validate_document_id(self, document_id: str) -> None:
+        if document_id.strip():
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message="문서 ID은(는) 필수입니다.",
+        )
 
     def _validate_chunk_count(self, chunk_count: int) -> None:
         if chunk_count <= self.settings.document_max_chunks:

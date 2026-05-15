@@ -70,6 +70,17 @@ class InternalDocumentInput(BaseModel):
         return _normalize_upper_text_list(value)
 
 
+class InternalDocumentDeleteRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    document_id: str = Field(alias="documentId")
+
+    @field_validator("document_id", mode="before")
+    @classmethod
+    def strip_document_id(cls, value: Any) -> Any:
+        return _strip_text(value)
+
+
 class InternalDocumentPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

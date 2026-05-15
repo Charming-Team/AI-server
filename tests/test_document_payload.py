@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from app.features.chat.document_payload import InternalDocumentPayload, QdrantSearchPoint
+from app.features.chat.document_payload import (
+    InternalDocumentDeleteRequest,
+    InternalDocumentPayload,
+    QdrantSearchPoint,
+)
+
+
+def test_internal_document_delete_request_strips_document_id() -> None:
+    request = InternalDocumentDeleteRequest(documentId=" report-202605 ")
+
+    assert request.document_id == "report-202605"
 
 
 def test_internal_document_payload_strips_required_text() -> None:

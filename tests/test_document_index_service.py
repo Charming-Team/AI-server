@@ -3,7 +3,11 @@ import pytest
 
 from app.core.config import Settings
 from app.features.chat.document_index_service import DocumentIndexService
-from app.features.chat.document_payload import InternalDocumentInput, QdrantUpsertPoint
+from app.features.chat.document_payload import (
+    InternalDocumentDeleteRequest,
+    InternalDocumentInput,
+    QdrantUpsertPoint,
+)
 from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.schemas import ChatErrorCode
 
@@ -80,6 +84,43 @@ def test_document_index_service_indexes_document_chunks_with_batch_embedding() -
     assert len(qdrant_index_client.points) == 2
     assert qdrant_index_client.points[0].payload.chunk_id == "chunk-0001"
     assert qdrant_index_client.points[1].vector == [0.3, 0.4]
+
+
+def test_document_index_service_deletes_document_by_id() -> None:
+    qdrant_index_client = FakeQdrantIndexClient()
+    service = DocumentIndexService(
+        Settings(),
+        qdrant_index_client=qdrant_index_client,
+    )
+
+    result = anyio.run(
+        service.delete_document,
+        InternalDocumentDeleteRequest(documentId=" report-202605 "),
+    )
+
+    assert result.document_id == "report-202605"
+    assert result.operation == {"operation_id": 99, "status": "completed"}
+    assert qdrant_index_client.deleted_document_id == "report-202605"
+    assert qdrant_index_client.calls == ["delete"]
+
+
+def test_document_index_service_rejects_blank_delete_document_id() -> None:
+    qdrant_index_client = FakeQdrantIndexClient()
+    service = DocumentIndexService(
+        Settings(),
+        qdrant_index_client=qdrant_index_client,
+    )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(
+            service.delete_document,
+            InternalDocumentDeleteRequest(documentId=" "),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert exc_info.value.message == "문서 ID은(는) 필수입니다."
+    assert qdrant_index_client.calls == []
 
 
 def test_document_index_service_skips_empty_content() -> None:

@@ -1,8 +1,14 @@
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings
-from app.features.chat.document_index_service import DocumentIndexResult
-from app.features.chat.document_payload import InternalDocumentInput
+from app.features.chat.document_index_service import (
+    DocumentDeleteResult,
+    DocumentIndexResult,
+)
+from app.features.chat.document_payload import (
+    InternalDocumentDeleteRequest,
+    InternalDocumentInput,
+)
 from app.features.chat.router import get_document_index_service
 from app.main import app
 
@@ -12,6 +18,7 @@ client = TestClient(app)
 class FakeDocumentIndexService:
     def __init__(self) -> None:
         self.document: InternalDocumentInput | None = None
+        self.delete_request: InternalDocumentDeleteRequest | None = None
 
     async def index_document(
         self,
@@ -23,6 +30,16 @@ class FakeDocumentIndexService:
             chunk_count=1,
             indexed_count=1,
             operation={"operation_id": 100, "status": "completed"},
+        )
+
+    async def delete_document(
+        self,
+        request: InternalDocumentDeleteRequest,
+    ) -> DocumentDeleteResult:
+        self.delete_request = request
+        return DocumentDeleteResult(
+            document_id=request.document_id,
+            operation={"operation_id": 101, "status": "completed"},
         )
 
 
@@ -353,6 +370,32 @@ def test_chat_internal_document_index_calls_index_service() -> None:
     assert index_service.document.document_id == "report-202605"
 
 
+def test_chat_internal_document_delete_calls_index_service() -> None:
+    index_service = FakeDocumentIndexService()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        document_index_internal_token="secret-token"
+    )
+    app.dependency_overrides[get_document_index_service] = lambda: index_service
+    try:
+        response = client.post(
+            "/api/v1/chat/internal/documents/delete",
+            headers={"X-Internal-Token": "secret-token"},
+            json={
+                "documentId": " report-202605 ",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "documentId": "report-202605",
+        "operation": {"operation_id": 101, "status": "completed"},
+    }
+    assert index_service.delete_request is not None
+    assert index_service.delete_request.document_id == "report-202605"
+
+
 def test_chat_internal_document_index_rejects_invalid_document_policy() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
         document_index_internal_token="secret-token"
@@ -394,6 +437,9 @@ def test_chat_openapi_documents_error_response_model() -> None:
     index_responses = schema["paths"]["/api/v1/chat/internal/documents/index"]["post"][
         "responses"
     ]
+    delete_responses = schema["paths"]["/api/v1/chat/internal/documents/delete"]["post"][
+        "responses"
+    ]
 
     assert answer_responses["400"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/ErrorResponse"
@@ -402,5 +448,8 @@ def test_chat_openapi_documents_error_response_model() -> None:
         "$ref"
     ].endswith("/ErrorResponse")
     assert index_responses["403"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/ErrorResponse"
+    )
+    assert delete_responses["403"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/ErrorResponse"
     )
