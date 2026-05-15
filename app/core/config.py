@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
     qdrant_collection: str = "smap_internal_documents"
-    qdrant_top_k: int = 5
-    qdrant_score_threshold: float = 0.0
+    qdrant_top_k: int = Field(default=5, ge=1, le=20)
+    qdrant_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     qdrant_timeout_seconds: float = 10.0
     document_chunk_size: int = 800
     document_chunk_overlap: int = 80
@@ -40,10 +40,10 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str = "local-open-source-model"
     llm_temperature: float = 0.1
-    llm_max_tokens: int = 1024
+    llm_max_tokens: int = Field(default=1024, ge=1, le=4096)
     llm_timeout_seconds: float = 60.0
-    prompt_max_evidence_items: int = 5
-    prompt_max_document_sources: int = 5
+    prompt_max_evidence_items: int = Field(default=5, ge=0, le=20)
+    prompt_max_document_sources: int = Field(default=5, ge=0, le=20)
     prompt_max_summary_chars: int = 700
     prompt_max_data_chars: int = 1000
 
