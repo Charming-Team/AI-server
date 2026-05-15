@@ -82,6 +82,23 @@ class FakeGeneratedAnswerGenerationService:
         )
 
 
+class FakeCapturingAnswerGenerationService:
+    def __init__(self) -> None:
+        self.evidence_result: EvidenceResult | None = None
+
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        self.evidence_result = evidence_result
+        return AnswerGenerationResult(
+            answer="근거에 따르면 납기 위험이 있습니다.",
+            was_generated=True,
+        )
+
+
 class FakeBlockedAnswerGenerationService:
     async def generate_answer(
         self,
@@ -109,17 +126,51 @@ class FakeUnexpectedEvidenceService:
         raise AssertionError("비활성 계정은 RDB Evidence 조회를 호출하면 안 됩니다.")
 
 
-def _build_request(status: str = "ACTIVE") -> ChatAnswerRequest:
+class FakeFinancialEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="ORDER",
+                    title="ORD-202605-001 납기 위험",
+                    summary="납기 지연 위험 등급은 WARNING입니다.",
+                    source="ai_prediction_results",
+                    data={
+                        "riskLevel": "WARNING",
+                        "contractAmount": 12000000,
+                        "latePenaltyAmount": 500000,
+                        "recommendedAction": "생산 순서 조정",
+                        "nested": {
+                            "costChangeAmount": 300000,
+                            "lineCode": "LINE-A01",
+                        },
+                    },
+                )
+            ],
+        )
+
+
+def _build_request(
+    status: str = "ACTIVE",
+    role: str = "EXECUTIVE",
+    question: str = "최근 보고서 요약해줘",
+) -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
         messageId=24,
         user=ChatUserContext(
             userId=1,
-            role="EXECUTIVE",
+            role=role,
             companyName="S-MAP",
             status=status,
         ),
-        question="최근 보고서 요약해줘",
+        question=question,
         requestedAt=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
     )
 
@@ -186,6 +237,31 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
     assert response.model_result.evidence_count == 3
     assert response.model_result.vector_search_skipped_reason is None
     assert response.model_result.llm_generation_skipped_reason is None
+
+
+def test_chat_service_sanitizes_operator_financial_evidence_before_llm() -> None:
+    service = ChatService(Settings())
+    answer_generation_service = FakeCapturingAnswerGenerationService()
+    service.evidence_service = FakeFinancialEvidenceService()
+    service.document_search_service = FakeDocumentSearchService()
+    service.answer_generation_service = answer_generation_service
+
+    response = anyio.run(
+        service.create_answer,
+        _build_request(
+            role="OPERATOR",
+            question="현재 납기 위험 높은 주문 알려줘",
+        ),
+    )
+
+    assert response.answer == "근거에 따르면 납기 위험이 있습니다."
+    assert answer_generation_service.evidence_result is not None
+    evidence_data = answer_generation_service.evidence_result.items[0].data
+    assert evidence_data["riskLevel"] == "WARNING"
+    assert evidence_data["recommendedAction"] == "생산 순서 조정"
+    assert evidence_data["nested"] == {"lineCode": "LINE-A01"}
+    assert "contractAmount" not in evidence_data
+    assert "latePenaltyAmount" not in evidence_data
 
 
 def test_chat_service_builds_model_result_skipped_reasons() -> None:

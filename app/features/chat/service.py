@@ -1,6 +1,7 @@
 from app.core.config import Settings
 from app.features.chat.answer_generation_service import AnswerGenerationService
 from app.features.chat.document_search_service import DocumentSearchService
+from app.features.chat.evidence_access_policy import EvidenceAccessPolicy
 from app.features.chat.evidence_service import EvidenceService
 from app.features.chat.intent_classifier import IntentClassifier
 from app.features.chat.question_validator import QuestionValidator
@@ -28,6 +29,7 @@ class ChatService:
         self.response_builder = ChatResponseBuilder()
         self.intent_classifier = IntentClassifier()
         self.role_access_policy = RoleAccessPolicy()
+        self.evidence_access_policy = EvidenceAccessPolicy()
         self.evidence_service = EvidenceService(settings)
         self.document_search_service = DocumentSearchService(settings)
         self.answer_generation_service = AnswerGenerationService(settings)
@@ -59,6 +61,10 @@ class ChatService:
             )
 
         evidence_result = await self.evidence_service.get_evidence(request, intent)
+        evidence_result = self.evidence_access_policy.sanitize(
+            request.user.role,
+            evidence_result,
+        )
         document_result = await self.document_search_service.search(request, evidence_result.intent)
         answer_result = await self.answer_generation_service.generate_answer(
             request,
