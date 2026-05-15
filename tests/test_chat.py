@@ -62,7 +62,7 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
     assert body["modelResult"]["vectorSearchSkippedReason"] is None
     assert (
         body["modelResult"]["llmGenerationSkippedReason"]
-        == "No RDB Evidence or document sources are available."
+        == "RDB Evidence와 문서 검색 근거가 없습니다."
     )
 
 

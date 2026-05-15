@@ -8,6 +8,12 @@ from app.features.chat.schemas import (
     DocumentSearchResult,
     EvidenceResult,
 )
+from app.features.chat.skip_reasons import (
+    ANSWER_BLOCKED_BY_OUTPUT_POLICY,
+    LLM_DISABLED,
+    LLM_EMPTY_ANSWER,
+    NO_GROUNDING_EVIDENCE,
+)
 
 
 class AnswerGenerationService:
@@ -38,14 +44,14 @@ class AnswerGenerationService:
             return AnswerGenerationResult(
                 answer=self._insufficient_evidence_answer,
                 was_generated=False,
-                skipped_reason="No RDB Evidence or document sources are available.",
+                skipped_reason=NO_GROUNDING_EVIDENCE,
             )
 
         if not self.settings.llm_enabled:
             return AnswerGenerationResult(
                 answer="근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
                 was_generated=False,
-                skipped_reason="LLM is disabled.",
+                skipped_reason=LLM_DISABLED,
             )
 
         prompt = self.build_prompt(request, evidence_result, document_result)
@@ -54,7 +60,7 @@ class AnswerGenerationService:
             return AnswerGenerationResult(
                 answer="LLM 답변 생성 결과가 비어 있습니다.",
                 was_generated=False,
-                skipped_reason="LLM returned an empty answer.",
+                skipped_reason=LLM_EMPTY_ANSWER,
             )
 
         output_security_result = self.output_policy.evaluate(answer)
@@ -65,7 +71,7 @@ class AnswerGenerationService:
                     "업무 데이터에 대한 질문으로 다시 요청해 주세요."
                 ),
                 was_generated=False,
-                skipped_reason="Generated answer failed output safety policy.",
+                skipped_reason=ANSWER_BLOCKED_BY_OUTPUT_POLICY,
                 security_result=output_security_result,
             )
 

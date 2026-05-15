@@ -94,7 +94,7 @@ def test_document_index_service_skips_empty_content() -> None:
 
     assert result.chunk_count == 0
     assert result.indexed_count == 0
-    assert result.skipped_reason == "Document content is empty."
+    assert result.skipped_reason == "문서 본문이 비어 있습니다."
     assert embedding_client.texts == []
     assert qdrant_index_client.points == []
 
@@ -115,7 +115,7 @@ def test_document_index_service_skips_when_embedding_is_disabled() -> None:
 
     assert result.chunk_count == 2
     assert result.indexed_count == 0
-    assert result.skipped_reason == "Embedding is disabled."
+    assert result.skipped_reason == "임베딩 기능이 비활성화되어 있습니다."
     assert embedding_client.texts == []
     assert qdrant_index_client.points == []
 

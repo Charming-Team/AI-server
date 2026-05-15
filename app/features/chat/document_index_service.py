@@ -8,6 +8,7 @@ from app.features.chat.embedding_client import EmbeddingClient
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.qdrant_client import QdrantDocumentIndexClient
 from app.features.chat.schemas import ChatErrorCode
+from app.features.chat.skip_reasons import DOCUMENT_CONTENT_EMPTY, EMBEDDING_DISABLED
 
 
 class DocumentIndexResult(BaseModel):
@@ -40,12 +41,12 @@ class DocumentIndexService:
 
         payloads = self.index_builder.build_payloads(document)
         if not payloads:
-            return self._skipped_result(document, "Document content is empty.", chunk_count=0)
+            return self._skipped_result(document, DOCUMENT_CONTENT_EMPTY, chunk_count=0)
 
         if not self.settings.embedding_enabled:
             return self._skipped_result(
                 document,
-                "Embedding is disabled.",
+                EMBEDDING_DISABLED,
                 chunk_count=len(payloads),
             )
 

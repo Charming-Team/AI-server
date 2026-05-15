@@ -92,7 +92,7 @@ class FakeBlockedAnswerGenerationService:
         return AnswerGenerationResult(
             answer=BLOCKED_GENERATED_ANSWER,
             was_generated=False,
-            skipped_reason="Generated answer failed output safety policy.",
+            skipped_reason="생성 답변이 출력 보안 정책에 의해 차단되었습니다.",
             security_result=SecurityResult(
                 status=SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
                 reason="생성 답변에 민감 정보 또는 내부 설정 정보가 포함된 것으로 판단되었습니다.",
@@ -129,7 +129,7 @@ def test_chat_service_uses_answer_output_security_result() -> None:
     assert response.answer == BLOCKED_GENERATED_ANSWER
     assert (
         response.model_result.llm_generation_skipped_reason
-        == "Generated answer failed output safety policy."
+        == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
     )
 
 
@@ -169,7 +169,7 @@ def test_chat_service_builds_model_result_skipped_reasons() -> None:
     service = ChatService(Settings())
     service.evidence_service = FakeEvidenceService()
     service.document_search_service = FakeDocumentSearchService(
-        skipped_reason="Embedding is disabled."
+        skipped_reason="임베딩 기능이 비활성화되어 있습니다."
     )
     service.answer_generation_service = FakeBlockedAnswerGenerationService()
 
@@ -177,8 +177,11 @@ def test_chat_service_builds_model_result_skipped_reasons() -> None:
 
     assert response.model_result.used_vector_search is False
     assert response.model_result.used_llm_generation is False
-    assert response.model_result.vector_search_skipped_reason == "Embedding is disabled."
+    assert (
+        response.model_result.vector_search_skipped_reason
+        == "임베딩 기능이 비활성화되어 있습니다."
+    )
     assert (
         response.model_result.llm_generation_skipped_reason
-        == "Generated answer failed output safety policy."
+        == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
     )

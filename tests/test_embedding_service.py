@@ -42,7 +42,7 @@ def test_embedding_service_returns_disabled_result_by_default() -> None:
     assert result.was_embedded is False
     assert result.vector == []
     assert result.model == "BAAI/bge-m3"
-    assert result.skipped_reason == "Embedding is disabled."
+    assert result.skipped_reason == "임베딩 기능이 비활성화되어 있습니다."
 
 
 def test_embedding_settings_use_bge_m3_defaults() -> None:
@@ -82,4 +82,4 @@ def test_embedding_service_rejects_dimension_mismatch() -> None:
 
     assert result.was_embedded is False
     assert result.vector == [0.1, 0.2, 0.3]
-    assert result.skipped_reason == "Embedding dimension mismatch."
+    assert result.skipped_reason == "임베딩 벡터 차원이 설정값과 일치하지 않습니다."

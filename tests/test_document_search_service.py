@@ -130,7 +130,7 @@ def test_document_search_service_marks_search_when_qdrant_is_enabled() -> None:
 
     assert result.was_searched is False
     assert result.sources == []
-    assert result.skipped_reason == "Embedding is disabled."
+    assert result.skipped_reason == "임베딩 기능이 비활성화되어 있습니다."
 
 
 def test_document_search_service_builds_qdrant_search_payload() -> None:

@@ -1,6 +1,11 @@
 from app.core.config import Settings
 from app.features.chat.embedding_client import EmbeddingClient
 from app.features.chat.schemas import ChatAnswerRequest, EmbeddingResult
+from app.features.chat.skip_reasons import (
+    EMBEDDING_DIMENSION_MISMATCH,
+    EMBEDDING_DISABLED,
+    EMBEDDING_EMPTY_VECTOR,
+)
 
 
 class EmbeddingService:
@@ -17,7 +22,7 @@ class EmbeddingService:
             return EmbeddingResult(
                 was_embedded=False,
                 model=self.settings.embedding_model,
-                skipped_reason="Embedding is disabled.",
+                skipped_reason=EMBEDDING_DISABLED,
             )
 
         vector = await self.embedding_client.embed(request.question)
@@ -25,7 +30,7 @@ class EmbeddingService:
             return EmbeddingResult(
                 was_embedded=False,
                 model=self.settings.embedding_model,
-                skipped_reason="Embedding model returned an empty vector.",
+                skipped_reason=EMBEDDING_EMPTY_VECTOR,
             )
 
         if len(vector) != self.settings.embedding_dimension:
@@ -33,7 +38,7 @@ class EmbeddingService:
                 vector=vector,
                 was_embedded=False,
                 model=self.settings.embedding_model,
-                skipped_reason="Embedding dimension mismatch.",
+                skipped_reason=EMBEDDING_DIMENSION_MISMATCH,
             )
 
         return EmbeddingResult(

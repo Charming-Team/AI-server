@@ -69,7 +69,7 @@ def test_answer_generation_returns_insufficient_evidence_without_grounding() -> 
 
     assert result.was_generated is False
     assert "근거" in result.answer
-    assert result.skipped_reason == "No RDB Evidence or document sources are available."
+    assert result.skipped_reason == "RDB Evidence와 문서 검색 근거가 없습니다."
 
 
 def test_answer_generation_does_not_call_llm_when_disabled() -> None:
@@ -99,7 +99,7 @@ def test_answer_generation_does_not_call_llm_when_disabled() -> None:
 
     assert result.was_generated is False
     assert result.answer == "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다."
-    assert result.skipped_reason == "LLM is disabled."
+    assert result.skipped_reason == "LLM 답변 생성 기능이 비활성화되어 있습니다."
 
 
 def test_answer_generation_service_builds_grounded_prompt() -> None:
@@ -191,6 +191,6 @@ def test_answer_generation_blocks_sensitive_llm_output() -> None:
 
     assert result.was_generated is False
     assert result.answer == BLOCKED_GENERATED_ANSWER
-    assert result.skipped_reason == "Generated answer failed output safety policy."
+    assert result.skipped_reason == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
     assert result.security_result is not None
     assert result.security_result.code == "CHAT_SECURITY_002"

@@ -1,0 +1,8 @@
+ANSWER_BLOCKED_BY_OUTPUT_POLICY = "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
+DOCUMENT_CONTENT_EMPTY = "문서 본문이 비어 있습니다."
+EMBEDDING_DIMENSION_MISMATCH = "임베딩 벡터 차원이 설정값과 일치하지 않습니다."
+EMBEDDING_DISABLED = "임베딩 기능이 비활성화되어 있습니다."
+EMBEDDING_EMPTY_VECTOR = "임베딩 모델이 빈 벡터를 반환했습니다."
+LLM_DISABLED = "LLM 답변 생성 기능이 비활성화되어 있습니다."
+LLM_EMPTY_ANSWER = "LLM이 빈 답변을 반환했습니다."
+NO_GROUNDING_EVIDENCE = "RDB Evidence와 문서 검색 근거가 없습니다."
