@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.features.chat.role_access_policy import RoleAccessPolicy
-from app.features.chat.schemas import EvidenceItem, EvidenceResult
+from app.features.chat.schemas import ChatUserContext, EvidenceItem, EvidenceResult
 
 
 class EvidenceAccessPolicy:
@@ -33,29 +33,46 @@ class EvidenceAccessPolicy:
 
     def sanitize(
         self,
-        role: str,
+        role: str | ChatUserContext,
         evidence_result: EvidenceResult,
     ) -> EvidenceResult:
-        if role.strip().upper() != "OPERATOR":
-            return evidence_result
+        role_name = self._role_name(role)
 
         return evidence_result.model_copy(
             update={
                 "items": [
                     sanitized_item
                     for item in evidence_result.items
-                    if (sanitized_item := self._sanitize_item(item)) is not None
+                    if (
+                        sanitized_item := self._sanitize_item(
+                            item,
+                            role_name,
+                        )
+                    )
+                    is not None
                 ]
             }
         )
 
-    def _sanitize_item(self, item: EvidenceItem) -> EvidenceItem | None:
+    def _sanitize_item(
+        self,
+        item: EvidenceItem,
+        role: str,
+    ) -> EvidenceItem | None:
+        if not self._is_role_allowed(item, role):
+            return None
+
+        if role != "OPERATOR":
+            return item
+
         if self._contains_restricted_term(item.title) or self._contains_restricted_term(
             item.summary
         ):
             return None
-
         return item.model_copy(update={"data": self._sanitize_data(item.data)})
+
+    def _is_role_allowed(self, item: EvidenceItem, role: str) -> bool:
+        return not item.allowed_roles or role in item.allowed_roles
 
     def _sanitize_data(self, value: Any) -> Any:
         if isinstance(value, dict):
@@ -100,3 +117,8 @@ class EvidenceAccessPolicy:
 
     def _compact(self, value: str) -> str:
         return "".join(value.split()).replace("_", "").replace("-", "")
+
+    def _role_name(self, role: str | ChatUserContext) -> str:
+        if isinstance(role, ChatUserContext):
+            return role.role.strip().upper()
+        return role.strip().upper()

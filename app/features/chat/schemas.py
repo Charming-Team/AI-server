@@ -11,6 +11,33 @@ def _normalize_upper_text(value: Any) -> Any:
     return value.strip().upper()
 
 
+def _strip_optional_text(value: Any) -> Any:
+    if value is None or not isinstance(value, str):
+        return value
+    stripped_value = value.strip()
+    return stripped_value or None
+
+
+def _normalize_upper_text_list(value: Any) -> Any:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return value
+
+    normalized_values: list[str] = []
+    seen_values: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            normalized_values.append(item)
+            continue
+        normalized_item = item.strip().upper()
+        if not normalized_item or normalized_item in seen_values:
+            continue
+        seen_values.add(normalized_item)
+        normalized_values.append(normalized_item)
+    return normalized_values
+
+
 class ChatIntent(StrEnum):
     DELIVERY_RISK = "DELIVERY_RISK"
     MATERIAL_SHORTAGE = "MATERIAL_SHORTAGE"
@@ -76,6 +103,11 @@ class ChatUserContext(BaseModel):
     def normalize_access_text(cls, value: Any) -> Any:
         return _normalize_upper_text(value)
 
+    @field_validator("company_name", mode="before")
+    @classmethod
+    def strip_optional_text(cls, value: Any) -> Any:
+        return _strip_optional_text(value)
+
 
 class ChatAnswerRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -121,6 +153,12 @@ class EvidenceItem(BaseModel):
     source: str
     reference_id: int | None = Field(default=None, alias="referenceId")
     data: dict[str, Any] = Field(default_factory=dict)
+    allowed_roles: list[str] = Field(default_factory=list, alias="allowedRoles")
+
+    @field_validator("allowed_roles", mode="before")
+    @classmethod
+    def normalize_allowed_roles(cls, value: Any) -> Any:
+        return _normalize_upper_text_list(value)
 
 
 class EvidenceResult(BaseModel):
@@ -146,6 +184,11 @@ class EvidenceLookupUser(BaseModel):
     @classmethod
     def normalize_role(cls, value: Any) -> Any:
         return _normalize_upper_text(value)
+
+    @field_validator("company_name", mode="before")
+    @classmethod
+    def strip_optional_text(cls, value: Any) -> Any:
+        return _strip_optional_text(value)
 
 
 class EvidenceLookupFilters(BaseModel):

@@ -62,7 +62,7 @@ class ChatService:
 
         evidence_result = await self.evidence_service.get_evidence(request, intent)
         evidence_result = self.evidence_access_policy.sanitize(
-            request.user.role,
+            request.user,
             evidence_result,
         )
         document_result = await self.document_search_service.search(request, evidence_result.intent)

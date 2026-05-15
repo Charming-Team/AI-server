@@ -156,6 +156,44 @@ class FakeFinancialEvidenceService:
         )
 
 
+class FakeScopedEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="ORDER",
+                    title="허용된 납기 위험",
+                    summary="현재 사용자 범위에 포함됩니다.",
+                    source="ai_prediction_results",
+                    allowedRoles=["EXECUTIVE"],
+                    companyName="S-MAP",
+                ),
+                EvidenceItem(
+                    type="ORDER",
+                    title="다른 Role 납기 위험",
+                    summary="현재 사용자 범위 밖입니다.",
+                    source="ai_prediction_results",
+                    allowedRoles=["MANUFACTURING_MANAGER"],
+                    companyName="S-MAP",
+                ),
+                EvidenceItem(
+                    type="ORDER",
+                    title="다른 회사명 납기 위험",
+                    summary="회사명은 로그용이므로 접근 제어 조건으로 쓰지 않습니다.",
+                    source="ai_prediction_results",
+                    allowedRoles=["EXECUTIVE"],
+                    companyName="OTHER",
+                ),
+            ],
+        )
+
+
 def _build_request(
     status: str = "ACTIVE",
     role: str = "EXECUTIVE",
@@ -262,6 +300,29 @@ def test_chat_service_sanitizes_operator_financial_evidence_before_llm() -> None
     assert evidence_data["nested"] == {"lineCode": "LINE-A01"}
     assert "contractAmount" not in evidence_data
     assert "latePenaltyAmount" not in evidence_data
+
+
+def test_chat_service_filters_allowed_roles_before_llm_and_ignores_company_name() -> None:
+    service = ChatService(Settings())
+    answer_generation_service = FakeCapturingAnswerGenerationService()
+    service.evidence_service = FakeScopedEvidenceService()
+    service.document_search_service = FakeDocumentSearchService()
+    service.answer_generation_service = answer_generation_service
+
+    response = anyio.run(
+        service.create_answer,
+        _build_request(
+            question="현재 납기 위험 높은 주문 알려줘",
+        ),
+    )
+
+    assert response.answer == "근거에 따르면 납기 위험이 있습니다."
+    assert answer_generation_service.evidence_result is not None
+    assert [item.title for item in answer_generation_service.evidence_result.items] == [
+        "허용된 납기 위험",
+        "다른 회사명 납기 위험",
+    ]
+    assert response.model_result.rdb_evidence_count == 2
 
 
 def test_chat_service_builds_model_result_skipped_reasons() -> None:
