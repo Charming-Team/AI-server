@@ -22,7 +22,7 @@ class AnswerGenerationService:
         llm_client: LlmClient | None = None,
     ) -> None:
         self.settings = settings
-        self.prompt_builder = prompt_builder or GroundedPromptBuilder()
+        self.prompt_builder = prompt_builder or GroundedPromptBuilder(settings)
         self.llm_client = llm_client or LlmClient(settings)
 
     async def generate_answer(

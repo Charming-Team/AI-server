@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     llm_max_tokens: int = 1024
     llm_timeout_seconds: float = 60.0
+    prompt_max_evidence_items: int = 5
+    prompt_max_document_sources: int = 5
+    prompt_max_summary_chars: int = 700
+    prompt_max_data_chars: int = 1000
 
     model_config = SettingsConfigDict(
         env_file=".env",

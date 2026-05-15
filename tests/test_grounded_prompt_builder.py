@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from app.core.config import Settings
 from app.features.chat.grounded_prompt_builder import GroundedPromptBuilder
 from app.features.chat.schemas import (
     ChatAnswerRequest,
@@ -84,3 +85,60 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
     assert '"orderNo": "ORD-202605-001"' in prompt.user_prompt
     assert "2026년 5월 생산 리스크 보고서" in prompt.user_prompt
     assert "report-202605:summary" in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
+    builder = GroundedPromptBuilder(
+        Settings(
+            prompt_max_evidence_items=1,
+            prompt_max_document_sources=1,
+            prompt_max_summary_chars=20,
+            prompt_max_data_chars=25,
+        )
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="ORDER",
+                title="첫 번째 RDB 근거",
+                summary="A" * 60,
+                source="customer_orders",
+                data={"longText": "B" * 80},
+            ),
+            EvidenceItem(
+                type="ORDER",
+                title="두 번째 RDB 근거",
+                summary="제외되어야 하는 근거",
+                source="customer_orders",
+            ),
+        ],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="첫 번째 문서 근거",
+                summary="C" * 60,
+            ),
+            ChatSource(
+                sourceType="REPORT",
+                title="두 번째 문서 근거",
+                summary="제외되어야 하는 문서",
+            ),
+        ]
+    )
+
+    prompt = builder.build(request, evidence_result, document_result)
+
+    assert "첫 번째 RDB 근거" in prompt.user_prompt
+    assert "두 번째 RDB 근거" not in prompt.user_prompt
+    assert "1개 RDB 근거는 프롬프트 길이 제한으로 제외됨" in prompt.user_prompt
+    assert "첫 번째 문서 근거" in prompt.user_prompt
+    assert "두 번째 문서 근거" not in prompt.user_prompt
+    assert "1개 문서 근거는 프롬프트 길이 제한으로 제외됨" in prompt.user_prompt
+    assert "AAAAAAAAAAAAAAAAA..." in prompt.user_prompt
+    assert "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" not in prompt.user_prompt
+    assert "CCCCCCCCCCCCCCCCC..." in prompt.user_prompt
