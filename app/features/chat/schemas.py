@@ -154,16 +154,19 @@ class EmbeddingResult(BaseModel):
     skipped_reason: str | None = None
 
 
-class AnswerGenerationResult(BaseModel):
-    answer: str
-    was_generated: bool = False
-    skipped_reason: str | None = None
-
-
 class SecurityResult(BaseModel):
     status: SecurityStatus
     code: ChatErrorCode | None = None
     reason: str | None = None
+
+
+class AnswerGenerationResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    answer: str
+    was_generated: bool = False
+    skipped_reason: str | None = None
+    security_result: SecurityResult | None = Field(default=None, alias="securityResult")
 
 
 class ErrorResponse(BaseModel):

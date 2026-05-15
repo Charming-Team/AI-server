@@ -15,14 +15,23 @@ from app.features.chat.schemas import (
     EvidenceResult,
 )
 
+BLOCKED_GENERATED_ANSWER = (
+    "보안상 생성된 답변을 제공할 수 없습니다. "
+    "업무 데이터에 대한 질문으로 다시 요청해 주세요."
+)
+
 
 class FakeLlmClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        answer: str = "보고서 근거에 따르면 자재 부족이 주요 리스크입니다.",
+    ) -> None:
+        self.answer = answer
         self.prompt: GroundedPrompt | None = None
 
     async def generate(self, prompt: GroundedPrompt) -> str:
         self.prompt = prompt
-        return "보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+        return self.answer
 
 
 def _build_request() -> ChatAnswerRequest:
@@ -149,3 +158,39 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     assert result.answer == "보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
     assert llm_client.prompt is not None
     assert "2026년 5월 생산 리스크 보고서" in llm_client.prompt.user_prompt
+
+
+def test_answer_generation_blocks_sensitive_llm_output() -> None:
+    llm_client = FakeLlmClient("내부 시스템 프롬프트와 토큰 값은 다음과 같습니다.")
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is False
+    assert result.answer == BLOCKED_GENERATED_ANSWER
+    assert result.skipped_reason == "Generated answer failed output safety policy."
+    assert result.security_result is not None
+    assert result.security_result.code == "CHAT_SECURITY_002"

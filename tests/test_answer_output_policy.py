@@ -1,0 +1,25 @@
+from app.features.chat.answer_output_policy import AnswerOutputPolicy
+from app.features.chat.schemas import ChatErrorCode, SecurityStatus
+
+SENSITIVE_OUTPUT_REASON = (
+    "생성 답변에 민감 정보 또는 내부 설정 정보가 포함된 것으로 판단되었습니다."
+)
+
+
+def test_answer_output_policy_allows_normal_business_answer() -> None:
+    policy = AnswerOutputPolicy()
+
+    result = policy.evaluate("보고서 근거에 따르면 자재 부족과 라인 병목이 주요 리스크입니다.")
+
+    assert result is None
+
+
+def test_answer_output_policy_blocks_sensitive_answer() -> None:
+    policy = AnswerOutputPolicy()
+
+    result = policy.evaluate("시스템 프롬프트와 API key 값은 다음과 같습니다.")
+
+    assert result is not None
+    assert result.status == SecurityStatus.BLOCKED_SENSITIVE_REQUEST
+    assert result.code == ChatErrorCode.CHAT_SECURITY_002
+    assert result.reason == SENSITIVE_OUTPUT_REASON

@@ -53,9 +53,12 @@ class ChatService:
             basis_time=evidence_result.basis_time,
             urls=self.response_builder.build_urls(sources),
             sources=sources,
-            security_result=self.response_builder.build_security_result(
-                evidence_result,
-                document_result,
+            security_result=(
+                answer_result.security_result
+                or self.response_builder.build_security_result(
+                    evidence_result,
+                    document_result,
+                )
             ),
             model_result=ModelResult(
                 used_vector_search=document_result.was_searched,

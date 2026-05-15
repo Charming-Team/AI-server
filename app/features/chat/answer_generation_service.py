@@ -1,4 +1,5 @@
 from app.core.config import Settings
+from app.features.chat.answer_output_policy import AnswerOutputPolicy
 from app.features.chat.grounded_prompt_builder import GroundedPrompt, GroundedPromptBuilder
 from app.features.chat.llm_client import LlmClient
 from app.features.chat.schemas import (
@@ -19,10 +20,12 @@ class AnswerGenerationService:
         self,
         settings: Settings,
         prompt_builder: GroundedPromptBuilder | None = None,
+        output_policy: AnswerOutputPolicy | None = None,
         llm_client: LlmClient | None = None,
     ) -> None:
         self.settings = settings
         self.prompt_builder = prompt_builder or GroundedPromptBuilder(settings)
+        self.output_policy = output_policy or AnswerOutputPolicy()
         self.llm_client = llm_client or LlmClient(settings)
 
     async def generate_answer(
@@ -52,6 +55,18 @@ class AnswerGenerationService:
                 answer="LLM 답변 생성 결과가 비어 있습니다.",
                 was_generated=False,
                 skipped_reason="LLM returned an empty answer.",
+            )
+
+        output_security_result = self.output_policy.evaluate(answer)
+        if output_security_result is not None:
+            return AnswerGenerationResult(
+                answer=(
+                    "보안상 생성된 답변을 제공할 수 없습니다. "
+                    "업무 데이터에 대한 질문으로 다시 요청해 주세요."
+                ),
+                was_generated=False,
+                skipped_reason="Generated answer failed output safety policy.",
+                security_result=output_security_result,
             )
 
         return AnswerGenerationResult(
