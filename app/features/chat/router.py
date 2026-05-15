@@ -42,26 +42,51 @@ def get_document_index_service(settings: SettingsDep) -> DocumentIndexService:
     return DocumentIndexService(settings)
 
 
+def verify_chat_answer_token(
+    settings: SettingsDep,
+    x_internal_token: InternalTokenHeader = None,
+) -> None:
+    _verify_internal_token(
+        expected_token=settings.chat_answer_internal_token,
+        provided_token=x_internal_token,
+        not_configured_message="채팅 답변 내부 토큰이 설정되지 않았습니다.",
+        forbidden_message="채팅 답변 권한이 없습니다.",
+    )
+
+
 def verify_document_index_token(
     settings: SettingsDep,
     x_internal_token: InternalTokenHeader = None,
 ) -> None:
-    expected_token = settings.document_index_internal_token
+    _verify_internal_token(
+        expected_token=settings.document_index_internal_token,
+        provided_token=x_internal_token,
+        not_configured_message="문서 인덱싱 내부 토큰이 설정되지 않았습니다.",
+        forbidden_message="문서 인덱싱 권한이 없습니다.",
+    )
+
+
+def _verify_internal_token(
+    expected_token: str | None,
+    provided_token: str | None,
+    not_configured_message: str,
+    forbidden_message: str,
+) -> None:
     if not expected_token:
         raise HTTPException(
             status_code=503,
             detail={
                 "code": ChatErrorCode.CHAT_SECURITY_003,
-                "message": "문서 인덱싱 내부 토큰이 설정되지 않았습니다.",
+                "message": not_configured_message,
             },
         )
 
-    if not x_internal_token or not compare_digest(x_internal_token, expected_token):
+    if not provided_token or not compare_digest(provided_token, expected_token):
         raise HTTPException(
             status_code=403,
             detail={
                 "code": ChatErrorCode.CHAT_SECURITY_003,
-                "message": "문서 인덱싱 권한이 없습니다.",
+                "message": forbidden_message,
             },
         )
 
@@ -89,6 +114,7 @@ chat_error_responses = {
 @router.post(
     "/answer",
     response_model=ChatAnswerResponse,
+    dependencies=[Depends(verify_chat_answer_token)],
     responses=chat_error_responses,
 )
 async def create_chat_answer(

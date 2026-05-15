@@ -127,6 +127,40 @@ def test_document_index_policy_rejects_empty_roles() -> None:
     assert exc_info.value.message == "문서 접근 가능 역할이 필요합니다."
 
 
+def test_document_index_policy_allows_operator_operational_document() -> None:
+    policy = DocumentIndexPolicy()
+
+    policy.validate(
+        _build_document(
+            title="LINE-A01 작업 기준",
+            content="LINE-A01 대기시간이 증가하면 담당자는 현장 상태를 확인합니다.",
+            allowed_roles=["OPERATOR"],
+            intent_tags=["LINE_BOTTLENECK"],
+        )
+    )
+
+
+def test_document_index_policy_rejects_operator_financial_document() -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(
+            _build_document(
+                title="납기 위험 대응 기준",
+                content="납기 지연 시 계약 금액과 패널티 금액을 함께 검토합니다.",
+                allowed_roles=["OPERATOR"],
+                intent_tags=["DELIVERY_RISK"],
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert (
+        exc_info.value.message
+        == "OPERATOR 접근 문서에는 금액, 계약, 패널티 등 경영/재무성 내용을 포함할 수 없습니다."
+    )
+
+
 def test_document_index_policy_rejects_company_info_without_requested_by_role() -> None:
     policy = DocumentIndexPolicy()
 

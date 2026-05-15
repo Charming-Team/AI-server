@@ -23,6 +23,26 @@ from app.features.chat.service import ChatService
 from app.main import app
 
 client = TestClient(app)
+CHAT_ANSWER_INTERNAL_TOKEN = "chat-answer-token"
+CHAT_ANSWER_HEADERS = {"X-Internal-Token": CHAT_ANSWER_INTERNAL_TOKEN}
+_MISSING_OVERRIDE = object()
+
+
+def _post_chat_answer(*, json: dict, headers: dict[str, str] | None = None):
+    previous_override = app.dependency_overrides.get(get_settings, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
+    )
+    try:
+        return _post_chat_answer(
+            headers=headers or CHAT_ANSWER_HEADERS,
+            json=json,
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_settings, None)
+        else:
+            app.dependency_overrides[get_settings] = previous_override
 
 
 class FakeDocumentIndexService:
@@ -128,8 +148,7 @@ def _build_grounded_chat_service() -> ChatService:
 
 
 def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connected() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -167,8 +186,7 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
 
 
 def test_chat_answer_blocks_sensitive_information_request() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -191,8 +209,7 @@ def test_chat_answer_blocks_sensitive_information_request() -> None:
 
 
 def test_chat_answer_blocks_prompt_injection_request() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -216,8 +233,7 @@ def test_chat_answer_blocks_prompt_injection_request() -> None:
 
 
 def test_chat_answer_blocks_operator_financial_question() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -245,8 +261,7 @@ def test_chat_answer_blocks_operator_financial_question() -> None:
 
 
 def test_chat_answer_blocks_admin_business_question() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -273,8 +288,7 @@ def test_chat_answer_blocks_admin_business_question() -> None:
 
 
 def test_chat_answer_blocks_inactive_user_status() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -304,8 +318,7 @@ def test_chat_answer_blocks_inactive_user_status() -> None:
 
 
 def test_chat_answer_rejects_blank_question() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -329,8 +342,7 @@ def test_chat_answer_rejects_blank_question() -> None:
 
 
 def test_chat_answer_classifies_delivery_risk_intent() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -350,8 +362,7 @@ def test_chat_answer_classifies_delivery_risk_intent() -> None:
 
 
 def test_chat_answer_classifies_report_lookup_intent() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,
@@ -373,8 +384,7 @@ def test_chat_answer_classifies_report_lookup_intent() -> None:
 def test_chat_answer_returns_grounded_answer_with_sources_and_urls() -> None:
     app.dependency_overrides[get_chat_service] = _build_grounded_chat_service
     try:
-        response = client.post(
-            "/api/v1/chat/answer",
+        response = _post_chat_answer(
             json={
                 "sessionId": 10,
                 "messageId": 24,

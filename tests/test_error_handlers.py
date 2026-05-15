@@ -10,8 +10,7 @@ client = TestClient(app)
 
 
 def test_validation_error_returns_error_response() -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json={
             "sessionId": 10,
             "messageId": 24,

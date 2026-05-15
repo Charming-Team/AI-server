@@ -1,3 +1,4 @@
+from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
@@ -13,8 +14,13 @@ class DocumentIndexPolicy:
         if intent != ChatIntent.UNKNOWN
     }
 
-    def __init__(self, max_content_chars: int = 100_000) -> None:
+    def __init__(
+        self,
+        max_content_chars: int = 100_000,
+        document_access_policy: DocumentAccessPolicy | None = None,
+    ) -> None:
         self.max_content_chars = max_content_chars
+        self.document_access_policy = document_access_policy or DocumentAccessPolicy()
 
     def validate(self, document: InternalDocumentInput) -> None:
         self._validate_required_text(document.document_id, "문서 ID")
@@ -44,6 +50,16 @@ class DocumentIndexPolicy:
                 status_code=400,
                 code=ChatErrorCode.CHAT_DOCUMENT_002,
                 message="문서 접근 가능 역할이 올바르지 않습니다.",
+            )
+
+        if not self.document_access_policy.allows_document(document):
+            raise ChatServiceError(
+                status_code=400,
+                code=ChatErrorCode.CHAT_DOCUMENT_002,
+                message=(
+                    "OPERATOR 접근 문서에는 금액, 계약, 패널티 등 "
+                    "경영/재무성 내용을 포함할 수 없습니다."
+                ),
             )
 
         if not document.intent_tags:

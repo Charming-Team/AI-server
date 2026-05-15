@@ -158,8 +158,7 @@ def test_chat_answer_evaluation_scenarios(
     expected_security_code: str,
     expected_answer_keyword: str,
 ) -> None:
-    response = client.post(
-        "/api/v1/chat/answer",
+    response = _post_chat_answer(
         json=_build_answer_request(role, question),
     )
 

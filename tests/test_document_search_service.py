@@ -190,13 +190,75 @@ class FakeUnauthorizedRoleQdrantClient:
         ]
 
 
-def _build_request(company_name: str | None = "S-MAP") -> ChatAnswerRequest:
+class FakeOperatorRestrictedContentQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "financial-point",
+                "score": 0.93,
+                "payload": {
+                    "documentId": "financial-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "납기 위험 계약 금액 기준",
+                    "chunkText": "납기 지연 시 패널티 금액을 검토합니다.",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            },
+            {
+                "id": "safe-point",
+                "score": 0.86,
+                "payload": {
+                    "documentId": "line-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "LINE-A01 현장 확인 기준",
+                    "chunkText": "대기시간이 증가하면 현장 상태와 작업 순서를 확인합니다.",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            },
+        ]
+
+
+class FakeOnlyOperatorRestrictedContentQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "financial-point",
+                "score": 0.93,
+                "payload": {
+                    "documentId": "financial-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "납기 위험 계약 금액 기준",
+                    "chunkText": "납기 지연 시 패널티 금액을 검토합니다.",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            }
+        ]
+
+
+def _build_request(
+    company_name: str | None = "S-MAP",
+    role: str = "EXECUTIVE",
+) -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
         messageId=24,
         user=ChatUserContext(
             userId=1,
-            role="EXECUTIVE",
+            role=role,
             companyName=company_name,
             status="ACTIVE",
         ),
@@ -394,6 +456,41 @@ def test_document_search_service_marks_role_reason_when_all_points_are_not_allow
     assert result.was_searched is True
     assert result.sources == []
     assert result.skipped_reason == "Qdrant 검색 결과가 사용자 권한 범위를 통과하지 못했습니다."
+
+
+def test_document_search_service_filters_operator_restricted_content() -> None:
+    qdrant_client = FakeOperatorRestrictedContentQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request(role="OPERATOR")
+
+    result = anyio.run(service.search, request, ChatIntent.DELIVERY_RISK)
+
+    assert qdrant_client.search_payload is not None
+    assert len(result.sources) == 1
+    assert result.sources[0].title == "LINE-A01 현장 확인 기준"
+
+
+def test_document_search_service_marks_operator_restricted_content_reason() -> None:
+    qdrant_client = FakeOnlyOperatorRestrictedContentQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request(role="OPERATOR")
+
+    result = anyio.run(service.search, request, ChatIntent.DELIVERY_RISK)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert (
+        result.skipped_reason
+        == "Qdrant 검색 결과가 OPERATOR 권한 제한 내용을 포함해 제외되었습니다."
+    )
 
 
 def test_document_search_service_marks_no_result_reason_when_qdrant_is_empty() -> None:
