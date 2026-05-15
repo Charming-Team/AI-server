@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     qdrant_timeout_seconds: float = 10.0
     document_chunk_size: int = 800
     document_chunk_overlap: int = 80
+    document_index_internal_token: str | None = None
     embedding_enabled: bool = False
     embedding_provider: str = "huggingface"
     embedding_base_url: str = "http://localhost:8002"

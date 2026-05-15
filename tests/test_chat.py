@@ -1,8 +1,29 @@
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings, get_settings
+from app.features.chat.document_index_service import DocumentIndexResult
+from app.features.chat.document_payload import InternalDocumentInput
+from app.features.chat.router import get_document_index_service
 from app.main import app
 
 client = TestClient(app)
+
+
+class FakeDocumentIndexService:
+    def __init__(self) -> None:
+        self.document: InternalDocumentInput | None = None
+
+    async def index_document(
+        self,
+        document: InternalDocumentInput,
+    ) -> DocumentIndexResult:
+        self.document = document
+        return DocumentIndexResult(
+            document_id=document.document_id,
+            chunk_count=1,
+            indexed_count=1,
+            operation={"operation_id": 100, "status": "completed"},
+        )
 
 
 def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connected() -> None:
@@ -181,6 +202,90 @@ def test_chat_recommendations_returns_role_based_questions() -> None:
     assert body["items"][0]["url"] == "/production-lines/status"
 
 
+def test_chat_internal_document_index_requires_configured_token() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        document_index_internal_token=None
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/internal/documents/index",
+            json={
+                "documentId": "report-202605",
+                "documentType": "REPORT",
+                "title": "2026년 5월 생산 리스크 보고서",
+                "content": "자재 부족과 라인 병목이 주요 리스크입니다.",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "CHAT_SECURITY_003",
+        "message": "문서 인덱싱 내부 토큰이 설정되지 않았습니다.",
+    }
+
+
+def test_chat_internal_document_index_rejects_invalid_token() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        document_index_internal_token="secret-token"
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/internal/documents/index",
+            headers={"X-Internal-Token": "wrong-token"},
+            json={
+                "documentId": "report-202605",
+                "documentType": "REPORT",
+                "title": "2026년 5월 생산 리스크 보고서",
+                "content": "자재 부족과 라인 병목이 주요 리스크입니다.",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "CHAT_SECURITY_003",
+        "message": "문서 인덱싱 권한이 없습니다.",
+    }
+
+
+def test_chat_internal_document_index_calls_index_service() -> None:
+    index_service = FakeDocumentIndexService()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        document_index_internal_token="secret-token"
+    )
+    app.dependency_overrides[get_document_index_service] = lambda: index_service
+    try:
+        response = client.post(
+            "/api/v1/chat/internal/documents/index",
+            headers={"X-Internal-Token": "secret-token"},
+            json={
+                "documentId": "report-202605",
+                "documentType": "REPORT",
+                "title": "2026년 5월 생산 리스크 보고서",
+                "content": "자재 부족과 라인 병목이 주요 리스크입니다.",
+                "url": "/reports/20",
+                "allowedRoles": ["EXECUTIVE", "MANUFACTURING_MANAGER"],
+                "intentTags": ["REPORT_LOOKUP"],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "documentId": "report-202605",
+        "chunkCount": 1,
+        "indexedCount": 1,
+        "operation": {"operation_id": 100, "status": "completed"},
+        "skippedReason": None,
+    }
+    assert index_service.document is not None
+    assert index_service.document.document_id == "report-202605"
+
+
 def test_chat_openapi_documents_error_response_model() -> None:
     response = client.get("/openapi.json")
 
@@ -191,6 +296,9 @@ def test_chat_openapi_documents_error_response_model() -> None:
     recommendation_responses = schema["paths"]["/api/v1/chat/recommendations"]["post"][
         "responses"
     ]
+    index_responses = schema["paths"]["/api/v1/chat/internal/documents/index"]["post"][
+        "responses"
+    ]
 
     assert answer_responses["400"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/ErrorResponse"
@@ -198,3 +306,6 @@ def test_chat_openapi_documents_error_response_model() -> None:
     assert recommendation_responses["500"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("/ErrorResponse")
+    assert index_responses["403"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/ErrorResponse"
+    )
