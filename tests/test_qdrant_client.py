@@ -1,8 +1,11 @@
 import anyio
 import httpx
+import pytest
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.qdrant_client import QdrantDocumentSearchClient
+from app.features.chat.schemas import ChatErrorCode
 
 
 def test_qdrant_client_builds_search_url_and_headers() -> None:
@@ -64,3 +67,37 @@ def test_qdrant_client_search_returns_result_points() -> None:
         "/collections/smap_internal_documents/points/search"
     )
     assert captured_request["headers"]["api-key"] == "qdrant-token"
+
+
+def test_qdrant_client_raises_external_error_on_http_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"status": "error"})
+
+    async def run_search() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentSearchClient(Settings(), http_client=http_client)
+            await client.search({"vector": [0.1, 0.2], "limit": 1})
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_search)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_002
+    assert exc_info.value.message == "Qdrant 검색에 실패했습니다."
+
+
+def test_qdrant_client_raises_external_error_on_invalid_result_shape() -> None:
+    client = QdrantDocumentSearchClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://qdrant.local/search"),
+        json={"result": {"id": "point-1"}},
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        client._parse_response(response)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_003
+    assert exc_info.value.message == "Qdrant 응답 형식이 올바르지 않습니다."

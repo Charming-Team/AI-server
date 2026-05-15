@@ -2,10 +2,13 @@ import json
 
 import anyio
 import httpx
+import pytest
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.llm_client import LlmClient
+from app.features.chat.schemas import ChatErrorCode
 
 
 def _build_prompt() -> GroundedPrompt:
@@ -83,3 +86,37 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
     assert answer == "자재 부족과 라인 병목이 주요 위험입니다."
     assert captured_request["url"].endswith("/chat/completions")
     assert captured_request["body"]["model"] == "qwen-test"
+
+
+def test_llm_client_raises_external_error_on_http_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "llm failed"})
+
+    async def run_generate() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = LlmClient(Settings(), http_client=http_client)
+            await client.generate(_build_prompt())
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_generate)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_003
+    assert exc_info.value.message == "LLM 서버 호출에 실패했습니다."
+
+
+def test_llm_client_raises_external_error_on_invalid_response_body() -> None:
+    client = LlmClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://llm.local/chat/completions"),
+        content=b"not-json",
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        client._parse_response(response)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_002
+    assert exc_info.value.message == "LLM 응답 형식이 올바르지 않습니다."

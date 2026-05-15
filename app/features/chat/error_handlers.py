@@ -3,13 +3,26 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.schemas import ChatErrorCode, ErrorResponse
 
 
 def register_chat_error_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(ChatExternalServiceError, handle_external_service_error)
     app.add_exception_handler(RequestValidationError, handle_request_validation_error)
     app.add_exception_handler(StarletteHTTPException, handle_http_exception)
     app.add_exception_handler(Exception, handle_unexpected_exception)
+
+
+async def handle_external_service_error(
+    request: Request,
+    exc: ChatExternalServiceError,
+) -> JSONResponse:
+    return _error_response(
+        status_code=exc.status_code,
+        code=exc.code,
+        message=exc.message,
+    )
 
 
 async def handle_request_validation_error(

@@ -1,7 +1,9 @@
 import httpx
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
+from app.features.chat.schemas import ChatErrorCode
 
 
 class LlmClient:
@@ -15,21 +17,28 @@ class LlmClient:
 
     async def generate(self, prompt: GroundedPrompt) -> str:
         payload = self._build_payload(prompt)
-        if self.http_client is not None:
-            response = await self.http_client.post(
-                self._chat_completions_url,
-                json=payload,
-                headers=self._headers,
-            )
-            return self._parse_response(response)
+        try:
+            if self.http_client is not None:
+                response = await self.http_client.post(
+                    self._chat_completions_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
 
-        async with httpx.AsyncClient(timeout=self.settings.llm_timeout_seconds) as client:
-            response = await client.post(
-                self._chat_completions_url,
-                json=payload,
-                headers=self._headers,
-            )
-            return self._parse_response(response)
+            async with httpx.AsyncClient(timeout=self.settings.llm_timeout_seconds) as client:
+                response = await client.post(
+                    self._chat_completions_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
+        except httpx.HTTPError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_LLM_003,
+                message="LLM 서버 호출에 실패했습니다.",
+            ) from exc
 
     def _build_payload(self, prompt: GroundedPrompt) -> dict:
         return {
@@ -43,8 +52,21 @@ class LlmClient:
         }
 
     def _parse_response(self, response: httpx.Response) -> str:
-        response.raise_for_status()
-        body = response.json()
+        try:
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_LLM_003,
+                message="LLM 서버 호출에 실패했습니다.",
+            ) from exc
+        except ValueError as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_LLM_002,
+                message="LLM 응답 형식이 올바르지 않습니다.",
+            ) from exc
         choices = body.get("choices", [])
         if not choices:
             return ""

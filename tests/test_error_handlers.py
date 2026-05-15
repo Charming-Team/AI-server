@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.features.chat.error_handlers import register_chat_error_handlers
+from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.schemas import ChatErrorCode
 from app.main import app
 
 client = TestClient(app)
@@ -57,4 +59,27 @@ def test_unexpected_exception_returns_error_response() -> None:
     assert response.json() == {
         "code": "CHAT_SERVER_001",
         "message": "서버 처리 중 오류가 발생했습니다.",
+    }
+
+
+def test_external_service_exception_returns_error_response() -> None:
+    test_app = FastAPI()
+    register_chat_error_handlers(test_app)
+
+    @test_app.get("/qdrant-error")
+    async def qdrant_error() -> None:
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_QDRANT_002,
+            message="Qdrant 검색에 실패했습니다.",
+        )
+
+    test_client = TestClient(test_app, raise_server_exceptions=False)
+
+    response = test_client.get("/qdrant-error")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "CHAT_QDRANT_002",
+        "message": "Qdrant 검색에 실패했습니다.",
     }

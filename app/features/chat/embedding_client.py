@@ -1,6 +1,8 @@
 import httpx
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.schemas import ChatErrorCode
 
 
 class EmbeddingClient:
@@ -14,30 +16,57 @@ class EmbeddingClient:
 
     async def embed(self, text: str) -> list[float]:
         payload = self._build_payload(text)
-        if self.http_client is not None:
-            response = await self.http_client.post(
-                self._embedding_url,
-                json=payload,
-                headers=self._headers,
-            )
-            return self._parse_response(response)
+        try:
+            if self.http_client is not None:
+                response = await self.http_client.post(
+                    self._embedding_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
 
-        async with httpx.AsyncClient(timeout=self.settings.embedding_timeout_seconds) as client:
-            response = await client.post(
-                self._embedding_url,
-                json=payload,
-                headers=self._headers,
-            )
-            return self._parse_response(response)
+            async with httpx.AsyncClient(timeout=self.settings.embedding_timeout_seconds) as client:
+                response = await client.post(
+                    self._embedding_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
+        except httpx.HTTPError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_EMBEDDING_004,
+                message="임베딩 서버 호출에 실패했습니다.",
+            ) from exc
 
     def _build_payload(self, text: str) -> dict:
         return {"inputs": [text]}
 
     def _parse_response(self, response: httpx.Response) -> list[float]:
-        response.raise_for_status()
-        body = response.json()
+        try:
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_EMBEDDING_004,
+                message="임베딩 서버 호출에 실패했습니다.",
+            ) from exc
+        except ValueError as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_EMBEDDING_002,
+                message="임베딩 응답 형식이 올바르지 않습니다.",
+            ) from exc
         embedding = self._extract_embedding(body)
-        return [float(value) for value in embedding]
+        try:
+            return [float(value) for value in embedding]
+        except (TypeError, ValueError) as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_EMBEDDING_002,
+                message="임베딩 응답 형식이 올바르지 않습니다.",
+            ) from exc
 
     def _extract_embedding(self, body: object) -> list:
         if isinstance(body, list):

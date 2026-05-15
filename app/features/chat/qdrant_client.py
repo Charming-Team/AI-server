@@ -1,6 +1,8 @@
 import httpx
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.schemas import ChatErrorCode
 
 
 class QdrantDocumentSearchClient:
@@ -13,27 +15,53 @@ class QdrantDocumentSearchClient:
         self.http_client = http_client
 
     async def search(self, payload: dict) -> list[dict]:
-        if self.http_client is not None:
-            response = await self.http_client.post(
-                self._search_url,
-                json=payload,
-                headers=self._headers,
-            )
-            return self._parse_response(response)
+        try:
+            if self.http_client is not None:
+                response = await self.http_client.post(
+                    self._search_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
 
-        async with httpx.AsyncClient(timeout=self.settings.qdrant_timeout_seconds) as client:
-            response = await client.post(
-                self._search_url,
-                json=payload,
-                headers=self._headers,
-            )
-            return self._parse_response(response)
+            async with httpx.AsyncClient(timeout=self.settings.qdrant_timeout_seconds) as client:
+                response = await client.post(
+                    self._search_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_response(response)
+        except httpx.HTTPError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_QDRANT_002,
+                message="Qdrant 검색에 실패했습니다.",
+            ) from exc
 
     def _parse_response(self, response: httpx.Response) -> list[dict]:
-        response.raise_for_status()
-        result = response.json().get("result", [])
+        try:
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_QDRANT_002,
+                message="Qdrant 검색에 실패했습니다.",
+            ) from exc
+        except ValueError as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_QDRANT_003,
+                message="Qdrant 응답 형식이 올바르지 않습니다.",
+            ) from exc
+
+        result = body.get("result", [])
         if not isinstance(result, list):
-            return []
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_QDRANT_003,
+                message="Qdrant 응답 형식이 올바르지 않습니다.",
+            )
         return result
 
     @property
