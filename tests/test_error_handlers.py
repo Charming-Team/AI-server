@@ -1,12 +1,34 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings, get_settings
 from app.features.chat.error_handlers import register_chat_error_handlers
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.schemas import ChatErrorCode
 from app.main import app
 
 client = TestClient(app)
+CHAT_ANSWER_INTERNAL_TOKEN = "chat-answer-token"
+CHAT_ANSWER_HEADERS = {"X-Internal-Token": CHAT_ANSWER_INTERNAL_TOKEN}
+_MISSING_OVERRIDE = object()
+
+
+def _post_chat_answer(*, json: dict):
+    previous_override = app.dependency_overrides.get(get_settings, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
+    )
+    try:
+        return client.post(
+            "/api/v1/chat/answer",
+            headers=CHAT_ANSWER_HEADERS,
+            json=json,
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_settings, None)
+        else:
+            app.dependency_overrides[get_settings] = previous_override
 
 
 def test_validation_error_returns_error_response() -> None:

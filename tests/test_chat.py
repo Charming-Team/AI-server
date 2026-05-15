@@ -34,7 +34,8 @@ def _post_chat_answer(*, json: dict, headers: dict[str, str] | None = None):
         chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
     )
     try:
-        return _post_chat_answer(
+        return client.post(
+            "/api/v1/chat/answer",
             headers=headers or CHAT_ANSWER_HEADERS,
             json=json,
         )
@@ -43,6 +44,26 @@ def _post_chat_answer(*, json: dict, headers: dict[str, str] | None = None):
             app.dependency_overrides.pop(get_settings, None)
         else:
             app.dependency_overrides[get_settings] = previous_override
+
+
+def _build_chat_answer_payload(
+    *,
+    role: str = "MANUFACTURING_MANAGER",
+    status: str = "ACTIVE",
+    question: str = "현재 납기 위험이 높은 주문 알려줘",
+) -> dict:
+    return {
+        "sessionId": 10,
+        "messageId": 24,
+        "user": {
+            "userId": 1,
+            "role": role,
+            "companyName": "S-MAP",
+            "status": status,
+        },
+        "question": question,
+        "requestedAt": "2026-05-12T10:30:00+09:00",
+    }
 
 
 class FakeDocumentIndexService:
@@ -145,6 +166,46 @@ def _build_grounded_chat_service() -> ChatService:
     service.document_search_service = FakeGroundedDocumentSearchService()
     service.answer_generation_service = FakeGroundedAnswerGenerationService()
     return service
+
+
+def test_chat_answer_requires_configured_internal_token() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_answer_internal_token=None
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/answer",
+            headers=CHAT_ANSWER_HEADERS,
+            json=_build_chat_answer_payload(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "CHAT_SECURITY_003",
+        "message": "채팅 답변 내부 토큰이 설정되지 않았습니다.",
+    }
+
+
+def test_chat_answer_rejects_invalid_internal_token() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/answer",
+            headers={"X-Internal-Token": "wrong-token"},
+            json=_build_chat_answer_payload(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "CHAT_SECURITY_003",
+        "message": "채팅 답변 권한이 없습니다.",
+    }
 
 
 def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connected() -> None:
