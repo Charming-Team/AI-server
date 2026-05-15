@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     qdrant_collection: str = "smap_internal_documents"
     qdrant_top_k: int = 5
     qdrant_timeout_seconds: float = 10.0
+    embedding_enabled: bool = False
+    embedding_provider: str = "huggingface"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dimension: int = 1024
+    embedding_timeout_seconds: float = 30.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -89,6 +89,14 @@ class ChatSource(BaseModel):
 class DocumentSearchResult(BaseModel):
     sources: list[ChatSource] = Field(default_factory=list)
     was_searched: bool = False
+    skipped_reason: str | None = None
+
+
+class EmbeddingResult(BaseModel):
+    vector: list[float] = Field(default_factory=list)
+    was_embedded: bool = False
+    model: str | None = None
+    skipped_reason: str | None = None
 
 
 class SecurityResult(BaseModel):

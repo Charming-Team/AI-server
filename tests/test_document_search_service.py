@@ -34,10 +34,13 @@ def test_document_search_service_skips_search_when_qdrant_is_disabled() -> None:
 
 
 def test_document_search_service_marks_search_when_qdrant_is_enabled() -> None:
-    service = DocumentSearchService(Settings(qdrant_search_enabled=True))
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True, embedding_enabled=False)
+    )
     request = _build_request()
 
     result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
 
-    assert result.was_searched is True
+    assert result.was_searched is False
     assert result.sources == []
+    assert result.skipped_reason == "Embedding is disabled."
