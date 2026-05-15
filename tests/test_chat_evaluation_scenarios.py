@@ -28,7 +28,11 @@ def _post_chat_answer(*, json: dict):
             app.dependency_overrides[get_settings] = previous_override
 
 
-def _build_answer_request(role: str, question: str) -> dict:
+def _build_answer_request(
+    role: str,
+    question: str,
+    status: str = "ACTIVE",
+) -> dict:
     return {
         "sessionId": 10,
         "messageId": 24,
@@ -36,7 +40,7 @@ def _build_answer_request(role: str, question: str) -> dict:
             "userId": 1,
             "role": role,
             "companyName": "S-MAP",
-            "status": "ACTIVE",
+            "status": status,
         },
         "question": question,
         "requestedAt": "2026-05-12T10:30:00+09:00",
@@ -194,3 +198,44 @@ def test_chat_answer_evaluation_scenarios(
     assert body["urls"] == []
     assert body["modelResult"]["usedVectorSearch"] is False
     assert body["modelResult"]["usedRdbEvidence"] is False
+
+
+def test_chat_answer_evaluation_normalizes_role_and_status_text() -> None:
+    response = _post_chat_answer(
+        json=_build_answer_request(
+            " operator ",
+            "자재 재고 부족한 항목 알려줘",
+            status=" active ",
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "MATERIAL_SHORTAGE"
+    assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert body["securityResult"]["code"] == "CHAT_EVIDENCE_001"
+    assert body["modelResult"]["usedVectorSearch"] is False
+    assert body["modelResult"]["usedRdbEvidence"] is False
+    assert body["modelResult"]["usedLlmGeneration"] is False
+
+
+def test_chat_answer_evaluation_blocks_inactive_user_before_intent_lookup() -> None:
+    response = _post_chat_answer(
+        json=_build_answer_request(
+            "MANUFACTURING_MANAGER",
+            "현재 납기 위험이 높은 주문 알려줘",
+            status=" suspended ",
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "UNKNOWN"
+    assert body["securityResult"]["status"] == "BLOCKED_UNAUTHORIZED"
+    assert body["securityResult"]["code"] == "CHAT_SECURITY_004"
+    assert "계정 상태" in body["answer"]
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"]["usedVectorSearch"] is False
+    assert body["modelResult"]["usedRdbEvidence"] is False
+    assert body["modelResult"]["usedLlmGeneration"] is False
