@@ -23,3 +23,28 @@ def test_answer_output_policy_blocks_sensitive_answer() -> None:
     assert result.status == SecurityStatus.BLOCKED_SENSITIVE_REQUEST
     assert result.code == ChatErrorCode.CHAT_SECURITY_002
     assert result.reason == SENSITIVE_OUTPUT_REASON
+
+
+def test_answer_output_policy_blocks_operator_financial_answer() -> None:
+    policy = AnswerOutputPolicy()
+
+    result = policy.evaluate(
+        "납기 지연 시 예상 패널티와 계약 금액 영향이 있습니다.",
+        role="OPERATOR",
+    )
+
+    assert result is not None
+    assert result.status == SecurityStatus.BLOCKED_UNAUTHORIZED
+    assert result.code == ChatErrorCode.CHAT_SECURITY_004
+    assert "경영/재무성 정보" in (result.reason or "")
+
+
+def test_answer_output_policy_allows_executive_financial_answer() -> None:
+    policy = AnswerOutputPolicy()
+
+    result = policy.evaluate(
+        "납기 지연 시 예상 패널티와 계약 금액 영향이 있습니다.",
+        role="EXECUTIVE",
+    )
+
+    assert result is None

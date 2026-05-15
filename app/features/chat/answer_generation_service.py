@@ -63,7 +63,10 @@ class AnswerGenerationService:
                 skipped_reason=LLM_EMPTY_ANSWER,
             )
 
-        output_security_result = self.output_policy.evaluate(answer)
+        output_security_result = self.output_policy.evaluate(
+            answer,
+            role=request.user.role,
+        )
         if output_security_result is not None:
             return AnswerGenerationResult(
                 answer=(
