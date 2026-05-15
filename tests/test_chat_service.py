@@ -7,6 +7,7 @@ from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
     ChatIntent,
+    ChatSource,
     ChatUserContext,
     DocumentSearchResult,
     EvidenceItem,
@@ -46,12 +47,33 @@ class FakeEvidenceService:
 
 
 class FakeDocumentSearchService:
+    def __init__(
+        self,
+        sources: list[ChatSource] | None = None,
+        was_searched: bool = False,
+    ) -> None:
+        self.sources = sources or []
+        self.was_searched = was_searched
+
     async def search(
         self,
         request: ChatAnswerRequest,
         intent: ChatIntent,
     ) -> DocumentSearchResult:
-        return DocumentSearchResult(was_searched=False, sources=[])
+        return DocumentSearchResult(was_searched=self.was_searched, sources=self.sources)
+
+
+class FakeGeneratedAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        return AnswerGenerationResult(
+            answer="근거에 따르면 자재 부족이 주요 리스크입니다.",
+            was_generated=True,
+        )
 
 
 class FakeBlockedAnswerGenerationService:
@@ -99,3 +121,33 @@ def test_chat_service_uses_answer_output_security_result() -> None:
     assert response.security_result.status == SecurityStatus.BLOCKED_SENSITIVE_REQUEST
     assert response.security_result.reason == SENSITIVE_OUTPUT_REASON
     assert response.answer == BLOCKED_GENERATED_ANSWER
+
+
+def test_chat_service_builds_detailed_model_result_counts() -> None:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeDocumentSearchService(
+        was_searched=True,
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="자재 부족이 주요 리스크입니다.",
+            ),
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title="회사 운영 기준",
+                summary="생산계획 우선순위 기준입니다.",
+            ),
+        ],
+    )
+    service.answer_generation_service = FakeGeneratedAnswerGenerationService()
+
+    response = anyio.run(service.create_answer, _build_request())
+
+    assert response.model_result.used_vector_search is True
+    assert response.model_result.used_rdb_evidence is True
+    assert response.model_result.used_llm_generation is True
+    assert response.model_result.rdb_evidence_count == 1
+    assert response.model_result.document_source_count == 2
+    assert response.model_result.evidence_count == 3

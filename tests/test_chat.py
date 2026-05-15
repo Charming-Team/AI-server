@@ -55,6 +55,9 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
     assert body["urls"] == []
     assert body["modelResult"]["usedVectorSearch"] is False
     assert body["modelResult"]["usedRdbEvidence"] is False
+    assert body["modelResult"]["usedLlmGeneration"] is False
+    assert body["modelResult"]["rdbEvidenceCount"] == 0
+    assert body["modelResult"]["documentSourceCount"] == 0
     assert body["modelResult"]["evidenceCount"] == 0
 
 

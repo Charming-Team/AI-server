@@ -6,9 +6,12 @@ from app.features.chat.intent_classifier import IntentClassifier
 from app.features.chat.question_validator import QuestionValidator
 from app.features.chat.response_builder import ChatResponseBuilder
 from app.features.chat.schemas import (
+    AnswerGenerationResult,
     ChatAnswerRequest,
     ChatAnswerResponse,
     ChatIntent,
+    DocumentSearchResult,
+    EvidenceResult,
     ModelResult,
     SecurityResult,
     SecurityStatus,
@@ -60,10 +63,10 @@ class ChatService:
                     document_result,
                 )
             ),
-            model_result=ModelResult(
-                used_vector_search=document_result.was_searched,
-                used_rdb_evidence=evidence_result.has_evidence,
-                evidence_count=len(evidence_result.items),
+            model_result=self._build_model_result(
+                evidence_result,
+                document_result,
+                answer_result,
             ),
         )
 
@@ -82,8 +85,28 @@ class ChatService:
             model_result=ModelResult(
                 used_vector_search=False,
                 used_rdb_evidence=False,
+                used_llm_generation=False,
+                rdb_evidence_count=0,
+                document_source_count=0,
                 evidence_count=0,
             ),
+        )
+
+    def _build_model_result(
+        self,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+        answer_result: AnswerGenerationResult,
+    ) -> ModelResult:
+        rdb_evidence_count = len(evidence_result.items)
+        document_source_count = len(document_result.sources)
+        return ModelResult(
+            used_vector_search=document_result.was_searched,
+            used_rdb_evidence=evidence_result.has_evidence,
+            used_llm_generation=answer_result.was_generated,
+            rdb_evidence_count=rdb_evidence_count,
+            document_source_count=document_source_count,
+            evidence_count=rdb_evidence_count + document_source_count,
         )
 
     def _build_restricted_answer(self, security_result: SecurityResult) -> str:
