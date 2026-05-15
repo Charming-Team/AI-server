@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.features.chat.document_payload import InternalDocumentPayload, QdrantSearchPoint
 
 
@@ -12,6 +14,7 @@ def test_internal_document_payload_maps_to_chat_source() -> None:
         url="/reports/20",
         referenceType="REPORT",
         referenceId=20,
+        basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
         allowedRoles=["EXECUTIVE", "MANUFACTURING_MANAGER"],
         intentTags=["REPORT_LOOKUP", "DELIVERY_RISK"],
     )
@@ -24,6 +27,7 @@ def test_internal_document_payload_maps_to_chat_source() -> None:
     assert source.url == "/reports/20"
     assert source.reference_id == 20
     assert source.source == "report-202605:chunk-1"
+    assert source.basis_time == datetime.fromisoformat("2026-05-12T10:30:00+09:00")
 
 
 def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
@@ -37,6 +41,7 @@ def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
                 "title": "주요 자재 안전 재고 기준",
                 "chunkText": "MAT-001은 안전 재고 200KG 이상을 유지해야 합니다.",
                 "url": "/materials",
+                "basisTime": "2026-05-12T11:00:00+09:00",
                 "allowedRoles": ["MANUFACTURING_MANAGER"],
                 "intentTags": ["MATERIAL_SHORTAGE"],
             },
@@ -48,3 +53,4 @@ def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
     assert source.source_type == "MATERIAL"
     assert source.summary == "MAT-001은 안전 재고 200KG 이상을 유지해야 합니다."
     assert source.source == "material-guide"
+    assert source.basis_time == datetime.fromisoformat("2026-05-12T11:00:00+09:00")

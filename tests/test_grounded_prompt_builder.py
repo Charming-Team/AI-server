@@ -75,6 +75,7 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
                 url="/reports/20",
                 referenceId=20,
                 source="report-202605:summary",
+                basisTime=datetime.fromisoformat("2026-05-12T11:00:00+09:00"),
             )
         ]
     )
@@ -85,6 +86,7 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
     assert '"orderNo": "ORD-202605-001"' in prompt.user_prompt
     assert "2026년 5월 생산 리스크 보고서" in prompt.user_prompt
     assert "report-202605:summary" in prompt.user_prompt
+    assert "기준 시각: 2026-05-12T11:00:00+09:00" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:

@@ -47,6 +47,7 @@ class InternalDocumentPayload(BaseModel):
             url=self.url,
             reference_id=self.reference_id,
             source=self._source_name,
+            basis_time=self.basis_time,
         )
 
     @property

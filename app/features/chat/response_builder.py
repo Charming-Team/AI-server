@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.features.chat.schemas import (
     ChatErrorCode,
     ChatSource,
@@ -17,7 +19,7 @@ class ChatResponseBuilder:
         document_result: DocumentSearchResult,
     ) -> list[ChatSource]:
         sources = [
-            self._evidence_item_to_source(item)
+            self._evidence_item_to_source(item, evidence_result.basis_time)
             for item in evidence_result.items
         ]
         sources.extend(document_result.sources)
@@ -56,7 +58,11 @@ class ChatResponseBuilder:
             reason="조회된 RDB Evidence가 없고 Qdrant 검색 결과가 없습니다.",
         )
 
-    def _evidence_item_to_source(self, item: EvidenceItem) -> ChatSource:
+    def _evidence_item_to_source(
+        self,
+        item: EvidenceItem,
+        basis_time: datetime,
+    ) -> ChatSource:
         return ChatSource(
             source_type=item.type,
             title=item.title,
@@ -64,6 +70,7 @@ class ChatResponseBuilder:
             url=item.url,
             reference_id=item.reference_id,
             source=item.source,
+            basis_time=basis_time,
         )
 
     def _deduplicate_sources(self, sources: list[ChatSource]) -> list[ChatSource]:
@@ -84,4 +91,5 @@ class ChatResponseBuilder:
             source.url,
             source.source,
             source.title,
+            source.basis_time,
         )

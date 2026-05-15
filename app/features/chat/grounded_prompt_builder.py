@@ -128,6 +128,8 @@ class GroundedPromptBuilder:
             lines.append(f"   참조 ID: {source.reference_id}")
         if source.source:
             lines.append(f"   출처 키: {source.source}")
+        if source.basis_time:
+            lines.append(f"   기준 시각: {source.basis_time.isoformat()}")
         return "\n".join(lines)
 
     def _format_data(self, data: dict) -> str:
