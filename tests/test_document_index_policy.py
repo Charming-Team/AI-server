@@ -11,6 +11,7 @@ def _build_document(
     document_id: str = "report-202605",
     document_type: str = "REPORT",
     title: str = "2026년 5월 생산 리스크 보고서",
+    content: str = "자재 부족과 라인 병목이 주요 리스크입니다.",
     allowed_roles: list[str] | None = None,
     company_name: str | None = "S-MAP",
     intent_tags: list[str] | None = None,
@@ -19,7 +20,7 @@ def _build_document(
         documentId=document_id,
         documentType=document_type,
         title=title,
-        content="자재 부족과 라인 병목이 주요 리스크입니다.",
+        content=content,
         allowedRoles=(
             ["EXECUTIVE", "MANUFACTURING_MANAGER"]
             if allowed_roles is None
@@ -86,6 +87,17 @@ def test_document_index_policy_rejects_blank_required_text(
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
     assert exc_info.value.message == expected_message
+
+
+def test_document_index_policy_rejects_too_large_content() -> None:
+    policy = DocumentIndexPolicy(max_content_chars=10)
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(_build_document(content="A" * 11))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert exc_info.value.message == "문서 본문은 최대 10자까지 인덱싱할 수 있습니다."
 
 
 def test_document_index_policy_rejects_empty_roles() -> None:

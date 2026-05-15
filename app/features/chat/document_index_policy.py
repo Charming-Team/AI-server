@@ -12,9 +12,13 @@ class DocumentIndexPolicy:
         if intent != ChatIntent.UNKNOWN
     }
 
+    def __init__(self, max_content_chars: int = 100_000) -> None:
+        self.max_content_chars = max_content_chars
+
     def validate(self, document: InternalDocumentInput) -> None:
         self._validate_required_text(document.document_id, "문서 ID")
         self._validate_required_text(document.title, "문서 제목")
+        self._validate_content_length(document.content)
 
         if document.document_type not in self.allowed_document_types:
             raise ChatServiceError(
@@ -54,4 +58,14 @@ class DocumentIndexPolicy:
             status_code=400,
             code=ChatErrorCode.CHAT_DOCUMENT_002,
             message=f"{field_label}은(는) 필수입니다.",
+        )
+
+    def _validate_content_length(self, content: str) -> None:
+        if len(content) <= self.max_content_chars:
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message=f"문서 본문은 최대 {self.max_content_chars}자까지 인덱싱할 수 있습니다.",
         )

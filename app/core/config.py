@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     qdrant_top_k: int = Field(default=5, ge=1, le=20)
     qdrant_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     qdrant_timeout_seconds: float = 10.0
+    document_content_max_chars: int = Field(default=100_000, ge=1_000, le=1_000_000)
     document_chunk_size: int = 800
     document_chunk_overlap: int = 80
     document_index_internal_token: str | None = None

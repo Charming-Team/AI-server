@@ -32,7 +32,9 @@ class DocumentIndexService:
     ) -> None:
         self.settings = settings
         self.index_builder = index_builder or DocumentIndexBuilder(settings)
-        self.index_policy = index_policy or DocumentIndexPolicy()
+        self.index_policy = index_policy or DocumentIndexPolicy(
+            max_content_chars=settings.document_content_max_chars
+        )
         self.embedding_client = embedding_client or EmbeddingClient(settings)
         self.qdrant_index_client = qdrant_index_client or QdrantDocumentIndexClient(settings)
 
