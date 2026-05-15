@@ -1,5 +1,9 @@
 from app.core.config import Settings
-from app.schemas.chat import (
+from app.features.chat.answer_generation_service import AnswerGenerationService
+from app.features.chat.document_search_service import DocumentSearchService
+from app.features.chat.evidence_service import EvidenceService
+from app.features.chat.intent_classifier import IntentClassifier
+from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatAnswerResponse,
     ChatIntent,
@@ -7,10 +11,6 @@ from app.schemas.chat import (
     SecurityResult,
     SecurityStatus,
 )
-from app.services.answer_generation_service import AnswerGenerationService
-from app.services.document_search_service import DocumentSearchService
-from app.services.evidence_service import EvidenceService
-from app.services.intent_classifier import IntentClassifier
 
 
 class ChatService:

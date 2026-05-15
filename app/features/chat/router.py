@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.core.config import Settings, get_settings
-from app.schemas.chat import ChatAnswerRequest, ChatAnswerResponse
-from app.services.chat_service import ChatService
+from app.features.chat.schemas import ChatAnswerRequest, ChatAnswerResponse
+from app.features.chat.service import ChatService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 

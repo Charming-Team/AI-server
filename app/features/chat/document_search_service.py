@@ -1,6 +1,6 @@
 from app.core.config import Settings
-from app.schemas.chat import ChatAnswerRequest, ChatIntent, DocumentSearchResult
-from app.services.embedding_service import EmbeddingService
+from app.features.chat.embedding_service import EmbeddingService
+from app.features.chat.schemas import ChatAnswerRequest, ChatIntent, DocumentSearchResult
 
 
 class DocumentSearchService:

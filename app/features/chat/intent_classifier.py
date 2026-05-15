@@ -1,4 +1,4 @@
-from app.schemas.chat import ChatIntent
+from app.features.chat.schemas import ChatIntent
 
 
 class IntentClassifier:

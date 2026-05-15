@@ -1,5 +1,5 @@
 from app.core.config import Settings
-from app.schemas.chat import (
+from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
     DocumentSearchResult,

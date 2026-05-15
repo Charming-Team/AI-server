@@ -1,7 +1,7 @@
 import httpx
 
 from app.core.config import Settings
-from app.schemas.chat import ChatAnswerRequest, ChatIntent, EvidenceResult
+from app.features.chat.schemas import ChatAnswerRequest, ChatIntent, EvidenceResult
 
 
 class EvidenceService:

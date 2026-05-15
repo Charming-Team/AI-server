@@ -3,8 +3,8 @@ from datetime import datetime
 import anyio
 
 from app.core.config import Settings
-from app.schemas.chat import ChatAnswerRequest, ChatIntent, ChatUserContext
-from app.services.document_search_service import DocumentSearchService
+from app.features.chat.document_search_service import DocumentSearchService
+from app.features.chat.schemas import ChatAnswerRequest, ChatIntent, ChatUserContext
 
 
 def _build_request() -> ChatAnswerRequest:

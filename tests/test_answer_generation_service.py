@@ -3,7 +3,8 @@ from datetime import datetime
 import anyio
 
 from app.core.config import Settings
-from app.schemas.chat import (
+from app.features.chat.answer_generation_service import AnswerGenerationService
+from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatIntent,
     ChatSource,
@@ -11,7 +12,6 @@ from app.schemas.chat import (
     DocumentSearchResult,
     EvidenceResult,
 )
-from app.services.answer_generation_service import AnswerGenerationService
 
 
 def _build_request() -> ChatAnswerRequest:

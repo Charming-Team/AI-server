@@ -1,5 +1,5 @@
 from app.core.config import Settings
-from app.schemas.chat import ChatAnswerRequest, EmbeddingResult
+from app.features.chat.schemas import ChatAnswerRequest, EmbeddingResult
 
 
 class EmbeddingService:
