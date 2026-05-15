@@ -76,6 +76,7 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
                 referenceId=20,
                 source="report-202605:summary",
                 basisTime=datetime.fromisoformat("2026-05-12T11:00:00+09:00"),
+                sourceOrigin="QDRANT",
             )
         ]
     )
@@ -86,6 +87,7 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
     assert '"orderNo": "ORD-202605-001"' in prompt.user_prompt
     assert "2026년 5월 생산 리스크 보고서" in prompt.user_prompt
     assert "report-202605:summary" in prompt.user_prompt
+    assert "근거 원천: QDRANT" in prompt.user_prompt
     assert "기준 시각: 2026-05-12T11:00:00+09:00" in prompt.user_prompt
 
 

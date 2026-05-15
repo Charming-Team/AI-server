@@ -122,6 +122,8 @@ class GroundedPromptBuilder:
             f"   제목: {source.title}",
             f"   요약: {self._truncate(source.summary, self.max_summary_chars)}",
         ]
+        if source.source_origin:
+            lines.append(f"   근거 원천: {source.source_origin}")
         if source.url:
             lines.append(f"   URL: {source.url}")
         if source.reference_id is not None:
