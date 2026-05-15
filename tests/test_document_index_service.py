@@ -1,0 +1,144 @@
+import anyio
+import pytest
+
+from app.core.config import Settings
+from app.features.chat.document_index_service import DocumentIndexService
+from app.features.chat.document_payload import InternalDocumentInput, QdrantUpsertPoint
+from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.schemas import ChatErrorCode
+
+
+class FakeEmbeddingClient:
+    def __init__(self, vectors: list[list[float]]) -> None:
+        self.vectors = vectors
+        self.texts: list[str] = []
+
+    async def embed_many(self, texts: list[str]) -> list[list[float]]:
+        self.texts = texts
+        return self.vectors
+
+
+class FakeQdrantIndexClient:
+    def __init__(self) -> None:
+        self.points: list[QdrantUpsertPoint] = []
+
+    async def upsert(self, points: list[QdrantUpsertPoint]) -> dict:
+        self.points = points
+        return {
+            "operation_id": 100,
+            "status": "completed",
+        }
+
+
+def _build_document(content: str = "AAAAAAAAAA\nBBBBBBBBBB") -> InternalDocumentInput:
+    return InternalDocumentInput(
+        documentId="report-202605",
+        documentType="REPORT",
+        title="2026년 5월 생산 리스크 보고서",
+        content=content,
+        url="/reports/20",
+        allowedRoles=["EXECUTIVE", "MANUFACTURING_MANAGER"],
+        intentTags=["REPORT_LOOKUP"],
+    )
+
+
+def test_document_index_service_indexes_document_chunks_with_batch_embedding() -> None:
+    embedding_client = FakeEmbeddingClient([[0.1, 0.2], [0.3, 0.4]])
+    qdrant_index_client = FakeQdrantIndexClient()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=2,
+            document_chunk_size=10,
+        ),
+        embedding_client=embedding_client,
+        qdrant_index_client=qdrant_index_client,
+    )
+
+    result = anyio.run(service.index_document, _build_document())
+
+    assert result.document_id == "report-202605"
+    assert result.chunk_count == 2
+    assert result.indexed_count == 2
+    assert result.operation == {"operation_id": 100, "status": "completed"}
+    assert embedding_client.texts == ["AAAAAAAAAA", "BBBBBBBBBB"]
+    assert len(qdrant_index_client.points) == 2
+    assert qdrant_index_client.points[0].payload.chunk_id == "chunk-0001"
+    assert qdrant_index_client.points[1].vector == [0.3, 0.4]
+
+
+def test_document_index_service_skips_empty_content() -> None:
+    embedding_client = FakeEmbeddingClient([[0.1, 0.2]])
+    qdrant_index_client = FakeQdrantIndexClient()
+    service = DocumentIndexService(
+        Settings(embedding_enabled=True, embedding_dimension=2),
+        embedding_client=embedding_client,
+        qdrant_index_client=qdrant_index_client,
+    )
+
+    result = anyio.run(service.index_document, _build_document(content="  \n  "))
+
+    assert result.chunk_count == 0
+    assert result.indexed_count == 0
+    assert result.skipped_reason == "Document content is empty."
+    assert embedding_client.texts == []
+    assert qdrant_index_client.points == []
+
+
+def test_document_index_service_skips_when_embedding_is_disabled() -> None:
+    embedding_client = FakeEmbeddingClient([[0.1, 0.2]])
+    qdrant_index_client = FakeQdrantIndexClient()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=False,
+            document_chunk_size=10,
+        ),
+        embedding_client=embedding_client,
+        qdrant_index_client=qdrant_index_client,
+    )
+
+    result = anyio.run(service.index_document, _build_document())
+
+    assert result.chunk_count == 2
+    assert result.indexed_count == 0
+    assert result.skipped_reason == "Embedding is disabled."
+    assert embedding_client.texts == []
+    assert qdrant_index_client.points == []
+
+
+def test_document_index_service_rejects_embedding_count_mismatch() -> None:
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=2,
+            document_chunk_size=10,
+        ),
+        embedding_client=FakeEmbeddingClient([[0.1, 0.2]]),
+        qdrant_index_client=FakeQdrantIndexClient(),
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(service.index_document, _build_document())
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_002
+    assert exc_info.value.message == "임베딩 응답 개수가 문서 청크 개수와 일치하지 않습니다."
+
+
+def test_document_index_service_rejects_embedding_dimension_mismatch() -> None:
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=3,
+            document_chunk_size=10,
+        ),
+        embedding_client=FakeEmbeddingClient([[0.1, 0.2], [0.3, 0.4]]),
+        qdrant_index_client=FakeQdrantIndexClient(),
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(service.index_document, _build_document())
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_003
+    assert exc_info.value.message == "임베딩 벡터 차원이 설정값과 일치하지 않습니다."
