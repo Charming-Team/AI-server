@@ -46,15 +46,10 @@ def test_document_index_policy_rejects_unsupported_document_type() -> None:
     assert exc_info.value.message == "문서 유형은 REPORT 또는 COMPANY_INFO만 허용됩니다."
 
 
-def test_document_index_policy_requires_company_name() -> None:
+def test_document_index_policy_allows_missing_company_name() -> None:
     policy = DocumentIndexPolicy()
 
-    with pytest.raises(ChatServiceError) as exc_info:
-        policy.validate(_build_document(company_name=None))
-
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
-    assert exc_info.value.message == "문서 인덱싱에는 회사명이 필요합니다."
+    policy.validate(_build_document(company_name=None))
 
 
 def test_document_index_policy_rejects_empty_roles() -> None:

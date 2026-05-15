@@ -20,13 +20,6 @@ class DocumentIndexPolicy:
                 message="문서 유형은 REPORT 또는 COMPANY_INFO만 허용됩니다.",
             )
 
-        if not document.company_name:
-            raise ChatServiceError(
-                status_code=400,
-                code=ChatErrorCode.CHAT_DOCUMENT_002,
-                message="문서 인덱싱에는 회사명이 필요합니다.",
-            )
-
         if not document.allowed_roles:
             raise ChatServiceError(
                 status_code=400,
