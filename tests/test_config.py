@@ -10,6 +10,8 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
         qdrant_score_threshold=1.0,
         document_content_max_chars=1_000_000,
         document_max_chunks=1_000,
+        document_chunk_size=5_000,
+        document_chunk_overlap=4_999,
         llm_max_tokens=4096,
         answer_max_chars=5000,
         prompt_max_evidence_items=20,
@@ -20,6 +22,8 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     assert settings.qdrant_score_threshold == 1.0
     assert settings.document_content_max_chars == 1_000_000
     assert settings.document_max_chunks == 1_000
+    assert settings.document_chunk_size == 5_000
+    assert settings.document_chunk_overlap == 4_999
     assert settings.llm_max_tokens == 4096
     assert settings.answer_max_chars == 5000
     assert settings.prompt_max_evidence_items == 20
@@ -37,6 +41,10 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
         ("document_content_max_chars", 1_000_001),
         ("document_max_chunks", 0),
         ("document_max_chunks", 1_001),
+        ("document_chunk_size", 0),
+        ("document_chunk_size", 5_001),
+        ("document_chunk_overlap", -1),
+        ("document_chunk_overlap", 5_001),
         ("llm_max_tokens", 0),
         ("llm_max_tokens", 4097),
         ("answer_max_chars", 99),
@@ -53,3 +61,21 @@ def test_settings_rejects_chat_cost_guardrail_violations(
 ) -> None:
     with pytest.raises(ValidationError):
         Settings(**{field_name: value})
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "chunk_overlap"),
+    [
+        (100, 100),
+        (100, 101),
+    ],
+)
+def test_settings_rejects_invalid_document_chunk_overlap(
+    chunk_size: int,
+    chunk_overlap: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            document_chunk_size=chunk_size,
+            document_chunk_overlap=chunk_overlap,
+        )

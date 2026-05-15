@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     qdrant_timeout_seconds: float = 10.0
     document_content_max_chars: int = Field(default=100_000, ge=1_000, le=1_000_000)
     document_max_chunks: int = Field(default=200, ge=1, le=1_000)
-    document_chunk_size: int = 800
-    document_chunk_overlap: int = 80
+    document_chunk_size: int = Field(default=800, ge=1, le=5_000)
+    document_chunk_overlap: int = Field(default=80, ge=0, le=5_000)
     document_index_internal_token: str | None = None
     embedding_enabled: bool = False
     embedding_provider: str = "huggingface"
@@ -62,6 +62,12 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @model_validator(mode="after")
+    def validate_document_chunk_settings(self) -> "Settings":
+        if self.document_chunk_overlap >= self.document_chunk_size:
+            raise ValueError("document_chunk_overlap must be smaller than document_chunk_size")
+        return self
 
 
 @lru_cache
