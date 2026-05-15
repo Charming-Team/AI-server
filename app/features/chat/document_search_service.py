@@ -8,6 +8,10 @@ from app.features.chat.schemas import (
     ChatSource,
     DocumentSearchResult,
 )
+from app.features.chat.skip_reasons import (
+    QDRANT_NO_RESULTS,
+    QDRANT_SCORE_THRESHOLD_NOT_MET,
+)
 
 
 class DocumentSearchService:
@@ -39,6 +43,11 @@ class DocumentSearchService:
         search_payload = self._build_search_payload(embedding_result.vector, request, intent)
         points = await self.qdrant_client.search(search_payload)
         filtered_points = self._filter_points_by_score(points)
+        if not filtered_points:
+            return DocumentSearchResult(
+                was_searched=True,
+                skipped_reason=self._build_no_result_reason(points),
+            )
 
         return DocumentSearchResult(
             was_searched=True,
@@ -93,6 +102,11 @@ class DocumentSearchService:
     def _is_score_above_threshold(self, point: dict, threshold: float) -> bool:
         score = point.get("score")
         return isinstance(score, (int, float)) and score >= threshold
+
+    def _build_no_result_reason(self, points: list[dict]) -> str:
+        if points and self.settings.qdrant_score_threshold > 0:
+            return QDRANT_SCORE_THRESHOLD_NOT_MET
+        return QDRANT_NO_RESULTS
 
     def _build_sources(self, points: list[dict]) -> list[ChatSource]:
         return [

@@ -94,6 +94,38 @@ class FakeLowScoreQdrantClient:
         ]
 
 
+class FakeOnlyLowScoreQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "low-score-point",
+                "score": 0.31,
+                "payload": {
+                    "documentId": "report-low",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "낮은 유사도 보고서",
+                    "chunkText": "질문과 관련성이 낮은 보고서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
+class FakeEmptyQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return []
+
+
 def _build_request() -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -233,3 +265,35 @@ def test_document_search_service_filters_points_below_score_threshold() -> None:
     assert len(result.sources) == 1
     assert result.sources[0].title == "높은 유사도 보고서"
     assert result.sources[0].relevance_score == 0.82
+
+
+def test_document_search_service_marks_no_result_reason_when_qdrant_is_empty() -> None:
+    qdrant_client = FakeEmptyQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert result.skipped_reason == "Qdrant 검색 결과가 없습니다."
+
+
+def test_document_search_service_marks_threshold_reason_when_all_points_are_filtered() -> None:
+    qdrant_client = FakeOnlyLowScoreQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True, qdrant_score_threshold=0.65),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert result.skipped_reason == "Qdrant 관련도 기준을 통과한 검색 결과가 없습니다."
