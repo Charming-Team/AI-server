@@ -5,6 +5,7 @@ from app.features.chat.evidence_service import EvidenceService
 from app.features.chat.intent_classifier import IntentClassifier
 from app.features.chat.question_validator import QuestionValidator
 from app.features.chat.response_builder import ChatResponseBuilder
+from app.features.chat.role_access_policy import RoleAccessPolicy
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
@@ -25,6 +26,7 @@ class ChatService:
         self.security_policy = SecurityPolicy()
         self.response_builder = ChatResponseBuilder()
         self.intent_classifier = IntentClassifier()
+        self.role_access_policy = RoleAccessPolicy()
         self.evidence_service = EvidenceService(settings)
         self.document_search_service = DocumentSearchService(settings)
         self.answer_generation_service = AnswerGenerationService(settings)
@@ -39,6 +41,18 @@ class ChatService:
             return self._build_restricted_response(request, security_result)
 
         intent = self.intent_classifier.classify(request.question)
+        role_access_result = self.role_access_policy.evaluate(
+            request.user.role,
+            request.question,
+            intent,
+        )
+        if role_access_result is not None:
+            return self._build_restricted_response(
+                request,
+                role_access_result,
+                intent=intent,
+            )
+
         evidence_result = await self.evidence_service.get_evidence(request, intent)
         document_result = await self.document_search_service.search(request, evidence_result.intent)
         answer_result = await self.answer_generation_service.generate_answer(
@@ -74,11 +88,12 @@ class ChatService:
         self,
         request: ChatAnswerRequest,
         security_result: SecurityResult,
+        intent: ChatIntent = ChatIntent.UNKNOWN,
     ) -> ChatAnswerResponse:
         return ChatAnswerResponse(
             session_id=request.session_id,
             message_id=request.message_id,
-            intent=ChatIntent.UNKNOWN,
+            intent=intent,
             answer=self._build_restricted_answer(security_result),
             basis_time=request.requested_at,
             security_result=security_result,
@@ -112,6 +127,8 @@ class ChatService:
     def _build_restricted_answer(self, security_result: SecurityResult) -> str:
         if security_result.status == SecurityStatus.INVALID_REQUEST:
             return "질문 내용을 확인한 뒤 업무 데이터에 대한 질문으로 다시 요청해 주세요."
+        if security_result.status == SecurityStatus.BLOCKED_UNAUTHORIZED:
+            return "현재 역할 권한으로는 답변할 수 없는 요청입니다."
         return (
             "보안상 답변할 수 없는 요청입니다. "
             "업무 데이터에 대한 질문으로 다시 요청해 주세요."

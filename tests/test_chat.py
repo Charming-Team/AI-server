@@ -112,6 +112,65 @@ def test_chat_answer_blocks_prompt_injection_request() -> None:
     assert body["modelResult"]["usedRdbEvidence"] is False
 
 
+def test_chat_answer_blocks_operator_financial_question() -> None:
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "OPERATOR",
+                "department": "생산관리팀",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["securityResult"]["status"] == "BLOCKED_UNAUTHORIZED"
+    assert body["securityResult"]["code"] == "CHAT_SECURITY_004"
+    assert "역할 권한" in body["answer"]
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"]["usedVectorSearch"] is False
+    assert body["modelResult"]["usedRdbEvidence"] is False
+
+
+def test_chat_answer_blocks_admin_business_question() -> None:
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "ADMIN",
+                "department": "서비스관리팀",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "현재 납기 위험이 높은 주문 알려줘",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["securityResult"]["status"] == "BLOCKED_UNAUTHORIZED"
+    assert body["securityResult"]["code"] == "CHAT_SECURITY_004"
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"]["usedVectorSearch"] is False
+    assert body["modelResult"]["usedRdbEvidence"] is False
+
+
 def test_chat_answer_rejects_blank_question() -> None:
     response = client.post(
         "/api/v1/chat/answer",
