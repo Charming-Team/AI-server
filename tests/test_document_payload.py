@@ -3,6 +3,18 @@ from datetime import datetime
 from app.features.chat.document_payload import InternalDocumentPayload, QdrantSearchPoint
 
 
+def test_internal_document_payload_strips_required_text() -> None:
+    payload = InternalDocumentPayload(
+        documentId=" report-202605 ",
+        documentType="REPORT",
+        title=" 2026년 5월 생산 리스크 보고서 ",
+        chunkText="보고서 본문 청크",
+    )
+
+    assert payload.document_id == "report-202605"
+    assert payload.title == "2026년 5월 생산 리스크 보고서"
+
+
 def test_internal_document_payload_normalizes_access_metadata() -> None:
     payload = InternalDocumentPayload(
         documentId="report-202605",

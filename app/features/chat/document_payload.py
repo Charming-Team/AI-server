@@ -10,6 +10,12 @@ def _normalize_upper_text(value: str) -> str:
     return value.strip().upper()
 
 
+def _strip_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return value.strip()
+
+
 def _normalize_upper_text_list(value: Any) -> Any:
     if value is None:
         return []
@@ -46,6 +52,11 @@ class InternalDocumentInput(BaseModel):
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
 
+    @field_validator("document_id", "title", mode="before")
+    @classmethod
+    def strip_required_text(cls, value: Any) -> Any:
+        return _strip_text(value)
+
     @field_validator("document_type", mode="before")
     @classmethod
     def normalize_document_type(cls, value: Any) -> Any:
@@ -75,6 +86,11 @@ class InternalDocumentPayload(BaseModel):
     allowed_roles: list[str] = Field(default_factory=list, alias="allowedRoles")
     company_name: str | None = Field(default=None, alias="companyName")
     intent_tags: list[str] = Field(default_factory=list, alias="intentTags")
+
+    @field_validator("document_id", "title", mode="before")
+    @classmethod
+    def strip_required_text(cls, value: Any) -> Any:
+        return _strip_text(value)
 
     @field_validator("document_type", mode="before")
     @classmethod

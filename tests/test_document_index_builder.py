@@ -8,9 +8,9 @@ from app.features.chat.document_payload import InternalDocumentInput
 def test_document_index_builder_builds_single_payload_with_metadata() -> None:
     builder = DocumentIndexBuilder(Settings(document_chunk_size=500))
     document = InternalDocumentInput(
-        documentId="report-202605",
+        documentId=" report-202605 ",
         documentType="REPORT",
-        title="2026년 5월 생산 리스크 보고서",
+        title=" 2026년 5월 생산 리스크 보고서 ",
         content="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
         summary="월간 생산 리스크 요약",
         url="/reports/20",
@@ -27,6 +27,7 @@ def test_document_index_builder_builds_single_payload_with_metadata() -> None:
     assert len(payloads) == 1
     payload = payloads[0]
     assert payload.document_id == "report-202605"
+    assert payload.title == "2026년 5월 생산 리스크 보고서"
     assert payload.chunk_id == "chunk-0001"
     assert payload.chunk_text == "자재 부족과 LINE-A01 병목이 주요 리스크입니다."
     assert payload.summary == "월간 생산 리스크 요약"
