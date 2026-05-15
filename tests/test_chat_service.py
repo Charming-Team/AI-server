@@ -100,7 +100,16 @@ class FakeBlockedAnswerGenerationService:
         )
 
 
-def _build_request() -> ChatAnswerRequest:
+class FakeUnexpectedEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        raise AssertionError("비활성 계정은 RDB Evidence 조회를 호출하면 안 됩니다.")
+
+
+def _build_request(status: str = "ACTIVE") -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
         messageId=24,
@@ -108,11 +117,26 @@ def _build_request() -> ChatAnswerRequest:
             userId=1,
             role="EXECUTIVE",
             companyName="S-MAP",
-            status="ACTIVE",
+            status=status,
         ),
         question="최근 보고서 요약해줘",
         requestedAt=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
     )
+
+
+def test_chat_service_blocks_inactive_user_status_before_evidence_lookup() -> None:
+    service = ChatService(Settings())
+    service.evidence_service = FakeUnexpectedEvidenceService()
+
+    response = anyio.run(service.create_answer, _build_request(status="SUSPENDED"))
+
+    assert response.security_result.status == SecurityStatus.BLOCKED_UNAUTHORIZED
+    assert response.security_result.code == "CHAT_SECURITY_004"
+    assert response.security_result.reason == "ACTIVE 상태 사용자만 챗봇을 사용할 수 있습니다."
+    assert response.answer == "현재 계정 상태로는 챗봇을 사용할 수 없습니다."
+    assert response.model_result.used_rdb_evidence is False
+    assert response.model_result.used_vector_search is False
+    assert response.model_result.used_llm_generation is False
 
 
 def test_chat_service_uses_answer_output_security_result() -> None:

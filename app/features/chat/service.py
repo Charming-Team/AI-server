@@ -10,6 +10,7 @@ from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
     ChatAnswerResponse,
+    ChatErrorCode,
     ChatIntent,
     DocumentSearchResult,
     EvidenceResult,
@@ -32,6 +33,10 @@ class ChatService:
         self.answer_generation_service = AnswerGenerationService(settings)
 
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
+        user_status_result = self._validate_user_status(request.user.status)
+        if user_status_result is not None:
+            return self._build_restricted_response(request, user_status_result)
+
         validation_result = self.question_validator.validate(request.question)
         if validation_result is not None:
             return self._build_restricted_response(request, validation_result)
@@ -84,6 +89,16 @@ class ChatService:
             ),
         )
 
+    def _validate_user_status(self, status: str) -> SecurityResult | None:
+        if status.strip().upper() == "ACTIVE":
+            return None
+
+        return SecurityResult(
+            status=SecurityStatus.BLOCKED_UNAUTHORIZED,
+            code=ChatErrorCode.CHAT_SECURITY_004,
+            reason="ACTIVE 상태 사용자만 챗봇을 사용할 수 있습니다.",
+        )
+
     def _build_restricted_response(
         self,
         request: ChatAnswerRequest,
@@ -130,6 +145,8 @@ class ChatService:
         if security_result.status == SecurityStatus.INVALID_REQUEST:
             return "질문 내용을 확인한 뒤 업무 데이터에 대한 질문으로 다시 요청해 주세요."
         if security_result.status == SecurityStatus.BLOCKED_UNAUTHORIZED:
+            if security_result.reason and "ACTIVE 상태" in security_result.reason:
+                return "현재 계정 상태로는 챗봇을 사용할 수 없습니다."
             return "현재 역할 권한으로는 답변할 수 없는 요청입니다."
         return (
             "보안상 답변할 수 없는 요청입니다. "

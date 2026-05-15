@@ -272,6 +272,37 @@ def test_chat_answer_blocks_admin_business_question() -> None:
     assert body["modelResult"]["usedRdbEvidence"] is False
 
 
+def test_chat_answer_blocks_inactive_user_status() -> None:
+    response = client.post(
+        "/api/v1/chat/answer",
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "MANUFACTURING_MANAGER",
+                "companyName": "S-MAP",
+                "status": "SUSPENDED",
+            },
+            "question": "현재 납기 위험이 높은 주문 알려줘",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "UNKNOWN"
+    assert body["answer"] == "현재 계정 상태로는 챗봇을 사용할 수 없습니다."
+    assert body["securityResult"]["status"] == "BLOCKED_UNAUTHORIZED"
+    assert body["securityResult"]["code"] == "CHAT_SECURITY_004"
+    assert body["securityResult"]["reason"] == "ACTIVE 상태 사용자만 챗봇을 사용할 수 있습니다."
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"]["usedVectorSearch"] is False
+    assert body["modelResult"]["usedRdbEvidence"] is False
+    assert body["modelResult"]["usedLlmGeneration"] is False
+
+
 def test_chat_answer_rejects_blank_question() -> None:
     response = client.post(
         "/api/v1/chat/answer",
