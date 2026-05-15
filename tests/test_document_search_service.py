@@ -21,6 +21,11 @@ class FakeEmbeddingService:
         )
 
 
+class FakeUnexpectedEmbeddingService:
+    async def embed_query(self, request: ChatAnswerRequest) -> EmbeddingResult:
+        raise AssertionError("UNKNOWN 의도에서는 임베딩을 호출하면 안 됩니다.")
+
+
 class FakeQdrantClient:
     def __init__(self) -> None:
         self.search_payload: dict | None = None
@@ -163,6 +168,23 @@ def test_document_search_service_marks_search_when_qdrant_is_enabled() -> None:
     assert result.was_searched is False
     assert result.sources == []
     assert result.skipped_reason == "임베딩 기능이 비활성화되어 있습니다."
+
+
+def test_document_search_service_skips_search_when_intent_is_unknown() -> None:
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeUnexpectedEmbeddingService(),
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.UNKNOWN)
+
+    assert result.was_searched is False
+    assert result.sources == []
+    assert (
+        result.skipped_reason
+        == "질문 의도를 분류할 수 없어 Qdrant 문서 검색을 수행하지 않았습니다."
+    )
 
 
 def test_document_search_service_builds_qdrant_search_payload() -> None:

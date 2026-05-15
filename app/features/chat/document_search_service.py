@@ -11,6 +11,7 @@ from app.features.chat.schemas import (
 from app.features.chat.skip_reasons import (
     QDRANT_NO_RESULTS,
     QDRANT_SCORE_THRESHOLD_NOT_MET,
+    QDRANT_UNKNOWN_INTENT,
 )
 
 
@@ -32,6 +33,12 @@ class DocumentSearchService:
     ) -> DocumentSearchResult:
         if not self.settings.qdrant_search_enabled:
             return DocumentSearchResult(was_searched=False)
+
+        if intent == ChatIntent.UNKNOWN:
+            return DocumentSearchResult(
+                was_searched=False,
+                skipped_reason=QDRANT_UNKNOWN_INTENT,
+            )
 
         embedding_result = await self.embedding_service.embed_query(request)
         if not embedding_result.was_embedded:
