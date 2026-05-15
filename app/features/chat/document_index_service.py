@@ -53,6 +53,7 @@ class DocumentIndexService:
             self.index_builder.build_point(payload, vector)
             for payload, vector in zip(payloads, vectors, strict=True)
         ]
+        await self.qdrant_index_client.delete_by_document_id(document.document_id)
         operation = await self.qdrant_index_client.upsert(points)
 
         return DocumentIndexResult(

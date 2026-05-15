@@ -92,30 +92,71 @@ class QdrantDocumentIndexClient:
             return {}
 
         payload = {"points": [point.to_qdrant_point() for point in points]}
+        return await self._send_request(
+            method="put",
+            url=self._points_url,
+            payload=payload,
+            failure_message="Qdrant 문서 저장에 실패했습니다.",
+        )
+
+    async def delete_by_document_id(self, document_id: str) -> dict:
+        if not document_id:
+            return {}
+
+        payload = {
+            "filter": {
+                "must": [
+                    {
+                        "key": "documentId",
+                        "match": {"value": document_id},
+                    }
+                ]
+            }
+        }
+        return await self._send_request(
+            method="post",
+            url=self._points_delete_url,
+            payload=payload,
+            failure_message="Qdrant 기존 문서 삭제에 실패했습니다.",
+        )
+
+    async def _send_request(
+        self,
+        method: str,
+        url: str,
+        payload: dict,
+        failure_message: str,
+    ) -> dict:
         try:
             if self.http_client is not None:
-                response = await self.http_client.put(
-                    self._points_url,
+                response = await self.http_client.request(
+                    method,
+                    url,
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response)
+                return self._parse_response(response, failure_message)
 
             async with httpx.AsyncClient(timeout=self.settings.qdrant_timeout_seconds) as client:
-                response = await client.put(
-                    self._points_url,
+                response = await client.request(
+                    method,
+                    url,
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response)
+                return self._parse_response(response, failure_message)
         except httpx.HTTPError as exc:
             raise ChatExternalServiceError(
                 status_code=503,
                 code=ChatErrorCode.CHAT_QDRANT_002,
-                message="Qdrant 문서 저장에 실패했습니다.",
+                message=failure_message,
             ) from exc
 
-    def _parse_response(self, response: httpx.Response) -> dict:
+    def _parse_response(
+        self,
+        response: httpx.Response,
+        failure_message: str = "Qdrant 문서 저장에 실패했습니다.",
+    ) -> dict:
         try:
             response.raise_for_status()
             body = response.json()
@@ -123,7 +164,7 @@ class QdrantDocumentIndexClient:
             raise ChatExternalServiceError(
                 status_code=503,
                 code=ChatErrorCode.CHAT_QDRANT_002,
-                message="Qdrant 문서 저장에 실패했습니다.",
+                message=failure_message,
             ) from exc
         except ValueError as exc:
             raise ChatExternalServiceError(
@@ -153,6 +194,12 @@ class QdrantDocumentIndexClient:
         base_url = self.settings.qdrant_url.rstrip("/")
         collection = self.settings.qdrant_collection
         return f"{base_url}/collections/{collection}/points?wait=true"
+
+    @property
+    def _points_delete_url(self) -> str:
+        base_url = self.settings.qdrant_url.rstrip("/")
+        collection = self.settings.qdrant_collection
+        return f"{base_url}/collections/{collection}/points/delete?wait=true"
 
     @property
     def _headers(self) -> dict[str, str]:

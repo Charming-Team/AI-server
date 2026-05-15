@@ -138,6 +138,10 @@ def test_qdrant_index_client_builds_points_url_and_headers() -> None:
         == "http://qdrant.qdrant.svc.cluster.local:6333/collections/smap_documents/points?wait=true"
     )
     assert client._headers == {"api-key": "qdrant-token"}
+    assert (
+        client._points_delete_url
+        == "http://qdrant.qdrant.svc.cluster.local:6333/collections/smap_documents/points/delete?wait=true"
+    )
 
 
 def test_qdrant_index_client_upserts_points() -> None:
@@ -196,6 +200,84 @@ def test_qdrant_index_client_skips_empty_points() -> None:
 
     assert result == {}
     assert called is False
+
+
+def test_qdrant_index_client_deletes_points_by_document_id() -> None:
+    captured_request: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url"] = str(request.url)
+        captured_request["headers"] = dict(request.headers)
+        captured_request["body"] = request.content.decode()
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "operation_id": 99,
+                    "status": "completed",
+                },
+                "status": "ok",
+            },
+        )
+
+    async def run_delete() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentIndexClient(
+                Settings(qdrant_api_key="qdrant-token"),
+                http_client=http_client,
+            )
+            return await client.delete_by_document_id("report-202605")
+
+    result = anyio.run(run_delete)
+
+    assert result == {"operation_id": 99, "status": "completed"}
+    assert captured_request["method"] == "POST"
+    assert captured_request["url"].endswith(
+        "/collections/smap_internal_documents/points/delete?wait=true"
+    )
+    assert captured_request["headers"]["api-key"] == "qdrant-token"
+    assert '"key":"documentId"' in captured_request["body"]
+    assert '"value":"report-202605"' in captured_request["body"]
+
+
+def test_qdrant_index_client_skips_delete_without_document_id() -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"result": {}, "status": "ok"})
+
+    async def run_delete() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentIndexClient(Settings(), http_client=http_client)
+            return await client.delete_by_document_id("")
+
+    result = anyio.run(run_delete)
+
+    assert result == {}
+    assert called is False
+
+
+def test_qdrant_index_client_raises_external_error_on_delete_http_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"status": "error"})
+
+    async def run_delete() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentIndexClient(Settings(), http_client=http_client)
+            await client.delete_by_document_id("report-202605")
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_delete)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_002
+    assert exc_info.value.message == "Qdrant 기존 문서 삭제에 실패했습니다."
 
 
 def test_qdrant_index_client_raises_external_error_on_http_failure() -> None:

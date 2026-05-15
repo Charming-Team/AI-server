@@ -21,9 +21,20 @@ class FakeEmbeddingClient:
 class FakeQdrantIndexClient:
     def __init__(self) -> None:
         self.points: list[QdrantUpsertPoint] = []
+        self.deleted_document_id: str | None = None
+        self.calls: list[str] = []
+
+    async def delete_by_document_id(self, document_id: str) -> dict:
+        self.deleted_document_id = document_id
+        self.calls.append("delete")
+        return {
+            "operation_id": 99,
+            "status": "completed",
+        }
 
     async def upsert(self, points: list[QdrantUpsertPoint]) -> dict:
         self.points = points
+        self.calls.append("upsert")
         return {
             "operation_id": 100,
             "status": "completed",
@@ -62,6 +73,8 @@ def test_document_index_service_indexes_document_chunks_with_batch_embedding() -
     assert result.indexed_count == 2
     assert result.operation == {"operation_id": 100, "status": "completed"}
     assert embedding_client.texts == ["AAAAAAAAAA", "BBBBBBBBBB"]
+    assert qdrant_index_client.deleted_document_id == "report-202605"
+    assert qdrant_index_client.calls == ["delete", "upsert"]
     assert len(qdrant_index_client.points) == 2
     assert qdrant_index_client.points[0].payload.chunk_id == "chunk-0001"
     assert qdrant_index_client.points[1].vector == [0.3, 0.4]
