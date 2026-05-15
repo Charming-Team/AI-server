@@ -7,6 +7,7 @@ from app.schemas.chat import (
     SecurityResult,
     SecurityStatus,
 )
+from app.services.answer_generation_service import AnswerGenerationService
 from app.services.document_search_service import DocumentSearchService
 from app.services.evidence_service import EvidenceService
 from app.services.intent_classifier import IntentClassifier
@@ -41,6 +42,7 @@ class ChatService:
         self.intent_classifier = IntentClassifier()
         self.evidence_service = EvidenceService(settings)
         self.document_search_service = DocumentSearchService(settings)
+        self.answer_generation_service = AnswerGenerationService(settings)
 
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
         blocked_status = self._get_blocked_status(request.question)
@@ -50,15 +52,17 @@ class ChatService:
         intent = self.intent_classifier.classify(request.question)
         evidence_result = await self.evidence_service.get_evidence(request, intent)
         document_result = await self.document_search_service.search(request, evidence_result.intent)
+        answer_result = await self.answer_generation_service.generate_answer(
+            request,
+            evidence_result,
+            document_result,
+        )
 
         return ChatAnswerResponse(
             session_id=request.session_id,
             message_id=request.message_id,
             intent=evidence_result.intent,
-            answer=(
-                "현재 답변 생성을 위한 근거 조회 기능이 아직 연결되지 않았습니다. "
-                "확인 가능한 근거 데이터가 부족해 답변할 수 없습니다."
-            ),
+            answer=answer_result.answer,
             basis_time=evidence_result.basis_time,
             sources=document_result.sources,
             security_result=SecurityResult(

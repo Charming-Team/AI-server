@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
     embedding_dimension: int = 1024
     embedding_timeout_seconds: float = 30.0
+    llm_enabled: bool = False
+    llm_provider: str = "openai_compatible"
+    llm_base_url: str = "http://localhost:8001/v1"
+    llm_model: str = "local-open-source-model"
+    llm_temperature: float = 0.1
+    llm_timeout_seconds: float = 60.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

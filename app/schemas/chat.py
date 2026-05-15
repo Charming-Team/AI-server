@@ -99,6 +99,12 @@ class EmbeddingResult(BaseModel):
     skipped_reason: str | None = None
 
 
+class AnswerGenerationResult(BaseModel):
+    answer: str
+    was_generated: bool = False
+    skipped_reason: str | None = None
+
+
 class SecurityResult(BaseModel):
     status: SecurityStatus
     reason: str | None = None
