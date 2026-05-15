@@ -1,0 +1,98 @@
+from dataclasses import dataclass
+
+from app.features.chat.schemas import SecurityResult, SecurityStatus
+
+
+@dataclass(frozen=True)
+class SecurityRule:
+    status: SecurityStatus
+    reason: str
+    terms: tuple[str, ...]
+
+
+class SecurityPolicy:
+    _rules: tuple[SecurityRule, ...] = (
+        SecurityRule(
+            status=SecurityStatus.BLOCKED_PROMPT_INJECTION,
+            reason="프롬프트 인젝션 또는 시스템 지시 우회 요청으로 판단되었습니다.",
+            terms=(
+                "ignore previous",
+                "ignore instructions",
+                "disregard previous",
+                "jailbreak",
+                "developer mode",
+                "act as",
+                "이전 지시",
+                "지시 무시",
+                "규칙 무시",
+                "보안 규칙 무시",
+                "프롬프트 무시",
+                "개발자 모드",
+                "탈옥",
+                "너는 이제",
+            ),
+        ),
+        SecurityRule(
+            status=SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
+            reason="민감 정보 또는 내부 설정 정보 요청으로 판단되었습니다.",
+            terms=(
+                "system prompt",
+                "developer prompt",
+                "api key",
+                "password",
+                "secret",
+                "token",
+                "config",
+                "model name",
+                "environment variable",
+                "env",
+                "시스템 프롬프트",
+                "개발자 프롬프트",
+                "내부 프롬프트",
+                "api key",
+                "비밀번호",
+                "시크릿",
+                "토큰",
+                "설정값",
+                "환경변수",
+                "모델 정보",
+                "모델명",
+            ),
+        ),
+    )
+
+    def evaluate(self, question: str) -> SecurityResult | None:
+        normalized_question = self._normalize(question)
+        compact_question = self._compact(normalized_question)
+
+        for rule in self._rules:
+            if self._matches_rule(rule, normalized_question, compact_question):
+                return SecurityResult(status=rule.status, reason=rule.reason)
+        return None
+
+    def _matches_rule(
+        self,
+        rule: SecurityRule,
+        normalized_question: str,
+        compact_question: str,
+    ) -> bool:
+        return any(
+            self._contains_term(term, normalized_question, compact_question)
+            for term in rule.terms
+        )
+
+    def _contains_term(
+        self,
+        term: str,
+        normalized_question: str,
+        compact_question: str,
+    ) -> bool:
+        normalized_term = self._normalize(term)
+        compact_term = self._compact(normalized_term)
+        return normalized_term in normalized_question or compact_term in compact_question
+
+    def _normalize(self, text: str) -> str:
+        return text.casefold()
+
+    def _compact(self, text: str) -> str:
+        return "".join(text.split())

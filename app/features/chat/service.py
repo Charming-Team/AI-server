@@ -11,43 +11,21 @@ from app.features.chat.schemas import (
     SecurityResult,
     SecurityStatus,
 )
+from app.features.chat.security_policy import SecurityPolicy
 
 
 class ChatService:
-    _sensitive_terms = (
-        "system prompt",
-        "developer prompt",
-        "ignore previous",
-        "ignore instructions",
-        "api key",
-        "password",
-        "secret",
-        "token",
-        "config",
-        "model name",
-        "시스템 프롬프트",
-        "개발자 프롬프트",
-        "이전 지시",
-        "프롬프트 무시",
-        "api key",
-        "비밀번호",
-        "시크릿",
-        "토큰",
-        "설정값",
-        "모델 정보",
-        "모델명",
-    )
-
     def __init__(self, settings: Settings) -> None:
+        self.security_policy = SecurityPolicy()
         self.intent_classifier = IntentClassifier()
         self.evidence_service = EvidenceService(settings)
         self.document_search_service = DocumentSearchService(settings)
         self.answer_generation_service = AnswerGenerationService(settings)
 
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
-        blocked_status = self._get_blocked_status(request.question)
-        if blocked_status is not None:
-            return self._build_restricted_response(request, blocked_status)
+        security_result = self.security_policy.evaluate(request.question)
+        if security_result is not None:
+            return self._build_restricted_response(request, security_result)
 
         intent = self.intent_classifier.classify(request.question)
         evidence_result = await self.evidence_service.get_evidence(request, intent)
@@ -76,17 +54,10 @@ class ChatService:
             ),
         )
 
-    def _get_blocked_status(self, question: str) -> SecurityStatus | None:
-        normalized_question = question.lower()
-        for term in self._sensitive_terms:
-            if term.lower() in normalized_question:
-                return SecurityStatus.BLOCKED_SENSITIVE_REQUEST
-        return None
-
     def _build_restricted_response(
         self,
         request: ChatAnswerRequest,
-        status: SecurityStatus,
+        security_result: SecurityResult,
     ) -> ChatAnswerResponse:
         return ChatAnswerResponse(
             session_id=request.session_id,
@@ -97,10 +68,7 @@ class ChatService:
                 "업무 데이터에 대한 질문으로 다시 요청해 주세요."
             ),
             basis_time=request.requested_at,
-            security_result=SecurityResult(
-                status=status,
-                reason="민감 정보 또는 내부 설정 정보 요청으로 판단되었습니다.",
-            ),
+            security_result=security_result,
             model_result=ModelResult(
                 used_vector_search=False,
                 used_rdb_evidence=False,
