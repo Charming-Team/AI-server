@@ -20,7 +20,6 @@ def _build_request() -> ChatAnswerRequest:
         user=ChatUserContext(
             userId=1,
             role="EXECUTIVE",
-            department="경영기획팀",
             companyName="S-MAP",
             status="ACTIVE",
         ),

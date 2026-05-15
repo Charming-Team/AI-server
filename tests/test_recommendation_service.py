@@ -10,7 +10,6 @@ def _build_request(role: str, keyword: str | None = None) -> ChatRecommendationR
         user=ChatUserContext(
             userId=1,
             role=role,
-            department="생산관리팀",
             companyName="S-MAP",
             status="ACTIVE",
         ),

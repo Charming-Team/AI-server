@@ -9,7 +9,17 @@ from app.features.chat.document_payload import (
     InternalDocumentDeleteRequest,
     InternalDocumentInput,
 )
-from app.features.chat.router import get_document_index_service
+from app.features.chat.router import get_chat_service, get_document_index_service
+from app.features.chat.schemas import (
+    AnswerGenerationResult,
+    ChatAnswerRequest,
+    ChatIntent,
+    ChatSource,
+    DocumentSearchResult,
+    EvidenceItem,
+    EvidenceResult,
+)
+from app.features.chat.service import ChatService
 from app.main import app
 
 client = TestClient(app)
@@ -45,6 +55,78 @@ class FakeDocumentIndexService:
         )
 
 
+class FakeGroundedEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="ORDER",
+                    title="ORD-202605-001 납기 위험",
+                    summary="납기 지연 위험 등급은 WARNING입니다.",
+                    url="/orders/1001",
+                    source="ai_prediction_results",
+                    referenceId=1001,
+                    data={
+                        "riskLevel": "WARNING",
+                        "delayProbability": 0.64,
+                    },
+                )
+            ],
+        )
+
+
+class FakeGroundedDocumentSearchService:
+    async def search(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> DocumentSearchResult:
+        return DocumentSearchResult(
+            was_searched=True,
+            sources=[
+                ChatSource(
+                    sourceType="REPORT",
+                    title="5월 생산 리스크 보고서",
+                    summary="LINE-A01 병목과 자재 부족이 주요 원인입니다.",
+                    url="/reports/20",
+                    source="report-202605:chunk-1",
+                    sourceOrigin="QDRANT",
+                    relevanceScore=0.89,
+                )
+            ],
+        )
+
+
+class FakeGroundedAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        return AnswerGenerationResult(
+            answer=(
+                "ORD-202605-001은 납기 지연 위험이 WARNING이며, "
+                "근거는 예측 결과와 5월 생산 리스크 보고서입니다."
+            ),
+            was_generated=True,
+        )
+
+
+def _build_grounded_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeGroundedEvidenceService()
+    service.document_search_service = FakeGroundedDocumentSearchService()
+    service.answer_generation_service = FakeGroundedAnswerGenerationService()
+    return service
+
+
 def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connected() -> None:
     response = client.post(
         "/api/v1/chat/answer",
@@ -54,7 +136,6 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
             "user": {
                 "userId": 1,
                 "role": "MANUFACTURING_MANAGER",
-                "department": "생산관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -94,7 +175,6 @@ def test_chat_answer_blocks_sensitive_information_request() -> None:
             "user": {
                 "userId": 1,
                 "role": "MANUFACTURING_MANAGER",
-                "department": "생산관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -119,7 +199,6 @@ def test_chat_answer_blocks_prompt_injection_request() -> None:
             "user": {
                 "userId": 1,
                 "role": "MANUFACTURING_MANAGER",
-                "department": "생산관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -145,7 +224,6 @@ def test_chat_answer_blocks_operator_financial_question() -> None:
             "user": {
                 "userId": 1,
                 "role": "OPERATOR",
-                "department": "생산관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -175,7 +253,6 @@ def test_chat_answer_blocks_admin_business_question() -> None:
             "user": {
                 "userId": 1,
                 "role": "ADMIN",
-                "department": "서비스관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -204,7 +281,6 @@ def test_chat_answer_rejects_blank_question() -> None:
             "user": {
                 "userId": 1,
                 "role": "MANUFACTURING_MANAGER",
-                "department": "생산관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -230,7 +306,6 @@ def test_chat_answer_classifies_delivery_risk_intent() -> None:
             "user": {
                 "userId": 1,
                 "role": "EXECUTIVE",
-                "department": "경영기획팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -252,7 +327,6 @@ def test_chat_answer_classifies_report_lookup_intent() -> None:
             "user": {
                 "userId": 1,
                 "role": "EXECUTIVE",
-                "department": "경영기획팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
@@ -265,6 +339,64 @@ def test_chat_answer_classifies_report_lookup_intent() -> None:
     assert response.json()["intent"] == "REPORT_LOOKUP"
 
 
+def test_chat_answer_returns_grounded_answer_with_sources_and_urls() -> None:
+    app.dependency_overrides[get_chat_service] = _build_grounded_chat_service
+    try:
+        response = client.post(
+            "/api/v1/chat/answer",
+            json={
+                "sessionId": 10,
+                "messageId": 24,
+                "user": {
+                    "userId": 1,
+                    "role": "EXECUTIVE",
+                    "companyName": "S-MAP",
+                    "status": "ACTIVE",
+                },
+                "question": "현재 납기 위험이 높은 주문 알려줘",
+                "requestedAt": "2026-05-12T10:30:00+09:00",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["answer"] == (
+        "ORD-202605-001은 납기 지연 위험이 WARNING이며, "
+        "근거는 예측 결과와 5월 생산 리스크 보고서입니다."
+    )
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["securityResult"]["reason"] == "보안 필터를 통과했고 내부 근거가 확인되었습니다."
+    assert body["urls"] == [
+        {
+            "label": "ORD-202605-001 납기 위험",
+            "url": "/orders/1001",
+            "type": "ORDER",
+        },
+        {
+            "label": "5월 생산 리스크 보고서",
+            "url": "/reports/20",
+            "type": "REPORT",
+        },
+    ]
+    assert body["sources"][0]["sourceOrigin"] == "RDB"
+    assert body["sources"][0]["basisTime"] == "2026-05-12T10:30:00+09:00"
+    assert body["sources"][1]["sourceOrigin"] == "QDRANT"
+    assert body["sources"][1]["relevanceScore"] == 0.89
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": True,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 1,
+        "evidenceCount": 2,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
 def test_chat_recommendations_returns_role_based_questions() -> None:
     response = client.post(
         "/api/v1/chat/recommendations",
@@ -272,7 +404,6 @@ def test_chat_recommendations_returns_role_based_questions() -> None:
             "user": {
                 "userId": 1,
                 "role": "MANUFACTURING_MANAGER",
-                "department": "생산관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },

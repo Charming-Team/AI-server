@@ -18,7 +18,6 @@ def test_validation_error_returns_error_response() -> None:
             "user": {
                 "userId": 1,
                 "role": "MANUFACTURING_MANAGER",
-                "department": "생산관리팀",
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },

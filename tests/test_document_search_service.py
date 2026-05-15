@@ -197,7 +197,6 @@ def _build_request(company_name: str | None = "S-MAP") -> ChatAnswerRequest:
         user=ChatUserContext(
             userId=1,
             role="EXECUTIVE",
-            department="경영기획팀",
             companyName=company_name,
             status="ACTIVE",
         ),

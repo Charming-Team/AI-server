@@ -62,7 +62,6 @@ class ChatUserContext(BaseModel):
 
     user_id: int = Field(alias="userId")
     role: str
-    department: str | None = None
     company_name: str | None = Field(default=None, alias="companyName")
     status: str
 
