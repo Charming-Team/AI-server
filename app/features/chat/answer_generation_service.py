@@ -1,5 +1,6 @@
 from app.core.config import Settings
 from app.features.chat.grounded_prompt_builder import GroundedPrompt, GroundedPromptBuilder
+from app.features.chat.llm_client import LlmClient
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
@@ -18,9 +19,11 @@ class AnswerGenerationService:
         self,
         settings: Settings,
         prompt_builder: GroundedPromptBuilder | None = None,
+        llm_client: LlmClient | None = None,
     ) -> None:
         self.settings = settings
         self.prompt_builder = prompt_builder or GroundedPromptBuilder()
+        self.llm_client = llm_client or LlmClient(settings)
 
     async def generate_answer(
         self,
@@ -42,10 +45,18 @@ class AnswerGenerationService:
                 skipped_reason="LLM is disabled.",
             )
 
+        prompt = self.build_prompt(request, evidence_result, document_result)
+        answer = await self.llm_client.generate(prompt)
+        if not answer:
+            return AnswerGenerationResult(
+                answer="LLM 답변 생성 결과가 비어 있습니다.",
+                was_generated=False,
+                skipped_reason="LLM returned an empty answer.",
+            )
+
         return AnswerGenerationResult(
-            answer="LLM 답변 생성 기능이 아직 실제 모델과 연결되지 않았습니다.",
-            was_generated=False,
-            skipped_reason="LLM provider execution is not connected yet.",
+            answer=answer,
+            was_generated=True,
         )
 
     def build_prompt(
