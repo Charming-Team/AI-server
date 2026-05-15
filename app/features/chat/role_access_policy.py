@@ -8,6 +8,33 @@ from app.features.chat.schemas import (
 
 class RoleAccessPolicy:
     allowed_business_roles = {"OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"}
+    role_intent_matrix = {
+        "OPERATOR": {
+            ChatIntent.DELIVERY_RISK,
+            ChatIntent.MATERIAL_SHORTAGE,
+            ChatIntent.PRODUCTION_PLAN,
+            ChatIntent.WORK_PRIORITY,
+            ChatIntent.LINE_BOTTLENECK,
+        },
+        "EXECUTIVE": {
+            ChatIntent.DELIVERY_RISK,
+            ChatIntent.MATERIAL_SHORTAGE,
+            ChatIntent.PRODUCTION_PLAN,
+            ChatIntent.URGENT_ORDER_IMPACT,
+            ChatIntent.WORK_PRIORITY,
+            ChatIntent.LINE_BOTTLENECK,
+            ChatIntent.REPORT_LOOKUP,
+        },
+        "MANUFACTURING_MANAGER": {
+            ChatIntent.DELIVERY_RISK,
+            ChatIntent.MATERIAL_SHORTAGE,
+            ChatIntent.PRODUCTION_PLAN,
+            ChatIntent.URGENT_ORDER_IMPACT,
+            ChatIntent.WORK_PRIORITY,
+            ChatIntent.LINE_BOTTLENECK,
+            ChatIntent.REPORT_LOOKUP,
+        },
+    }
     operator_restricted_terms = (
         "계약 금액",
         "계약금액",
@@ -46,6 +73,16 @@ class RoleAccessPolicy:
                 ),
             )
 
+        if not self._is_intent_allowed(normalized_role, intent):
+            return SecurityResult(
+                status=SecurityStatus.BLOCKED_UNAUTHORIZED,
+                code=ChatErrorCode.CHAT_SECURITY_004,
+                reason=(
+                    f"{normalized_role} 역할은 {intent.value} 질문 의도에 "
+                    "접근할 수 없습니다."
+                ),
+            )
+
         if normalized_role == "OPERATOR" and self._contains_restricted_term(question):
             return SecurityResult(
                 status=SecurityStatus.BLOCKED_UNAUTHORIZED,
@@ -57,6 +94,11 @@ class RoleAccessPolicy:
             )
 
         return None
+
+    def _is_intent_allowed(self, role: str, intent: ChatIntent) -> bool:
+        if intent == ChatIntent.UNKNOWN:
+            return True
+        return intent in self.role_intent_matrix.get(role, set())
 
     def _contains_restricted_term(self, question: str) -> bool:
         normalized_question = self._normalize(question)
