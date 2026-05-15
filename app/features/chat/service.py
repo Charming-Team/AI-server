@@ -3,13 +3,13 @@ from app.features.chat.answer_generation_service import AnswerGenerationService
 from app.features.chat.document_search_service import DocumentSearchService
 from app.features.chat.evidence_service import EvidenceService
 from app.features.chat.intent_classifier import IntentClassifier
+from app.features.chat.response_builder import ChatResponseBuilder
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatAnswerResponse,
     ChatIntent,
     ModelResult,
     SecurityResult,
-    SecurityStatus,
 )
 from app.features.chat.security_policy import SecurityPolicy
 
@@ -17,6 +17,7 @@ from app.features.chat.security_policy import SecurityPolicy
 class ChatService:
     def __init__(self, settings: Settings) -> None:
         self.security_policy = SecurityPolicy()
+        self.response_builder = ChatResponseBuilder()
         self.intent_classifier = IntentClassifier()
         self.evidence_service = EvidenceService(settings)
         self.document_search_service = DocumentSearchService(settings)
@@ -35,6 +36,7 @@ class ChatService:
             evidence_result,
             document_result,
         )
+        sources = self.response_builder.build_sources(evidence_result, document_result)
 
         return ChatAnswerResponse(
             session_id=request.session_id,
@@ -42,10 +44,11 @@ class ChatService:
             intent=evidence_result.intent,
             answer=answer_result.answer,
             basis_time=evidence_result.basis_time,
-            sources=document_result.sources,
-            security_result=SecurityResult(
-                status=SecurityStatus.INSUFFICIENT_EVIDENCE,
-                reason="조회된 RDB Evidence가 없고 Qdrant 검색이 아직 연결되지 않았습니다.",
+            urls=self.response_builder.build_urls(sources),
+            sources=sources,
+            security_result=self.response_builder.build_security_result(
+                evidence_result,
+                document_result,
             ),
             model_result=ModelResult(
                 used_vector_search=document_result.was_searched,
