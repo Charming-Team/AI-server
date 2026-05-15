@@ -64,6 +64,15 @@ def test_recommendation_service_excludes_admin_from_business_questions() -> None
     assert response.fallback_used is False
 
 
+def test_recommendation_service_normalizes_role_text() -> None:
+    service = RecommendationService()
+
+    response = service.get_recommendations(_build_request(" operator "))
+
+    assert len(response.items) == 6
+    assert all("mode=read" in item.url for item in response.items)
+
+
 def test_recommendation_service_operator_gets_read_only_urls_without_money_questions() -> None:
     service = RecommendationService()
 

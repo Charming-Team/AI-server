@@ -39,6 +39,18 @@ def test_answer_output_policy_blocks_operator_financial_answer() -> None:
     assert "경영/재무성 정보" in (result.reason or "")
 
 
+def test_answer_output_policy_normalizes_role_text() -> None:
+    policy = AnswerOutputPolicy()
+
+    result = policy.evaluate(
+        "납기 지연 시 예상 패널티와 계약 금액 영향이 있습니다.",
+        role=" operator ",
+    )
+
+    assert result is not None
+    assert result.status == SecurityStatus.BLOCKED_UNAUTHORIZED
+
+
 def test_answer_output_policy_allows_executive_financial_answer() -> None:
     policy = AnswerOutputPolicy()
 

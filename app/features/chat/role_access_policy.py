@@ -35,7 +35,7 @@ class RoleAccessPolicy:
         question: str,
         intent: ChatIntent,
     ) -> SecurityResult | None:
-        normalized_role = role.upper()
+        normalized_role = role.strip().upper()
         if normalized_role not in self.allowed_business_roles:
             return SecurityResult(
                 status=SecurityStatus.BLOCKED_UNAUTHORIZED,

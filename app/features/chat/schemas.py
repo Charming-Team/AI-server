@@ -2,7 +2,13 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _normalize_upper_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return value.strip().upper()
 
 
 class ChatIntent(StrEnum):
@@ -64,6 +70,11 @@ class ChatUserContext(BaseModel):
     role: str
     company_name: str | None = Field(default=None, alias="companyName")
     status: str
+
+    @field_validator("role", "status", mode="before")
+    @classmethod
+    def normalize_access_text(cls, value: Any) -> Any:
+        return _normalize_upper_text(value)
 
 
 class ChatAnswerRequest(BaseModel):
@@ -130,6 +141,11 @@ class EvidenceLookupUser(BaseModel):
     user_id: int = Field(alias="userId")
     role: str
     company_name: str | None = Field(default=None, alias="companyName")
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalize_role(cls, value: Any) -> Any:
+        return _normalize_upper_text(value)
 
 
 class EvidenceLookupFilters(BaseModel):

@@ -170,7 +170,7 @@ class RecommendationService:
         return self._build_response(role_rules, fallback_used=True)
 
     def _filter_by_role(self, role: str) -> list[RecommendedQuestionRule]:
-        normalized_role = role.upper()
+        normalized_role = role.strip().upper()
         return [
             rule
             for rule in self._rules

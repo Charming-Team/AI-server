@@ -52,6 +52,18 @@ def test_role_access_policy_blocks_non_business_roles(role: str) -> None:
     assert "OPERATOR" in (result.reason or "")
 
 
+def test_role_access_policy_normalizes_role_text() -> None:
+    policy = RoleAccessPolicy()
+
+    result = policy.evaluate(
+        " operator ",
+        "현재 자재 재고 현황을 조회해줘",
+        ChatIntent.MATERIAL_SHORTAGE,
+    )
+
+    assert result is None
+
+
 def test_role_access_policy_blocks_operator_financial_question() -> None:
     policy = RoleAccessPolicy()
 

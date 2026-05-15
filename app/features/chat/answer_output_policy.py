@@ -61,7 +61,7 @@ class AnswerOutputPolicy:
             )
         if (
             role is not None
-            and role.upper() == "OPERATOR"
+            and role.strip().upper() == "OPERATOR"
             and self._matches_rule(
                 self._operator_financial_rule,
                 normalized_answer,
