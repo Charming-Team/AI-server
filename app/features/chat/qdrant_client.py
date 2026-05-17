@@ -1,9 +1,21 @@
+from dataclasses import dataclass
+
 import httpx
 
 from app.core.config import Settings
 from app.features.chat.document_payload import QdrantUpsertPoint
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.schemas import ChatErrorCode
+
+
+@dataclass(frozen=True)
+class QdrantCollectionCheckResult:
+    collection_name: str
+    status: str | None
+    expected_dimension: int
+    actual_dimension: int | None
+    is_dimension_matched: bool
+    points_count: int | None
 
 
 class QdrantDocumentSearchClient:
@@ -39,6 +51,28 @@ class QdrantDocumentSearchClient:
                 message="Qdrant 검색에 실패했습니다.",
             ) from exc
 
+    async def check_collection(self) -> QdrantCollectionCheckResult:
+        try:
+            if self.http_client is not None:
+                response = await self.http_client.get(
+                    self._collection_url,
+                    headers=self._headers,
+                )
+                return self._parse_collection_check_response(response)
+
+            async with httpx.AsyncClient(timeout=self.settings.qdrant_timeout_seconds) as client:
+                response = await client.get(
+                    self._collection_url,
+                    headers=self._headers,
+                )
+                return self._parse_collection_check_response(response)
+        except httpx.HTTPError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_QDRANT_002,
+                message="Qdrant 컬렉션 조회에 실패했습니다.",
+            ) from exc
+
     def _parse_response(self, response: httpx.Response) -> list[dict]:
         try:
             response.raise_for_status()
@@ -65,11 +99,91 @@ class QdrantDocumentSearchClient:
             )
         return result
 
+    def _parse_collection_check_response(
+        self,
+        response: httpx.Response,
+    ) -> QdrantCollectionCheckResult:
+        try:
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_QDRANT_002,
+                message="Qdrant 컬렉션 조회에 실패했습니다.",
+            ) from exc
+        except ValueError as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_QDRANT_003,
+                message="Qdrant 응답 형식이 올바르지 않습니다.",
+            ) from exc
+
+        result = body.get("result")
+        if not isinstance(result, dict):
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_QDRANT_003,
+                message="Qdrant 응답 형식이 올바르지 않습니다.",
+            )
+
+        actual_dimension = self._extract_vector_dimension(result)
+        return QdrantCollectionCheckResult(
+            collection_name=self.settings.qdrant_collection,
+            status=self._optional_text(result.get("status")),
+            expected_dimension=self.settings.embedding_dimension,
+            actual_dimension=actual_dimension,
+            is_dimension_matched=actual_dimension == self.settings.embedding_dimension,
+            points_count=self._optional_int(result.get("points_count")),
+        )
+
+    def _extract_vector_dimension(self, result: dict) -> int | None:
+        config = result.get("config")
+        if not isinstance(config, dict):
+            return None
+
+        params = config.get("params")
+        if not isinstance(params, dict):
+            return None
+
+        vectors = params.get("vectors")
+        if not isinstance(vectors, dict):
+            return None
+
+        size = vectors.get("size")
+        if isinstance(size, int):
+            return size
+
+        named_vector_sizes = [
+            vector_config.get("size")
+            for vector_config in vectors.values()
+            if isinstance(vector_config, dict)
+        ]
+        if len(named_vector_sizes) == 1 and isinstance(named_vector_sizes[0], int):
+            return named_vector_sizes[0]
+        return None
+
+    def _optional_text(self, value: object) -> str | None:
+        if isinstance(value, str):
+            return value
+        return None
+
+    def _optional_int(self, value: object) -> int | None:
+        if isinstance(value, int):
+            return value
+        return None
+
     @property
     def _search_url(self) -> str:
         base_url = self.settings.qdrant_url.rstrip("/")
         collection = self.settings.qdrant_collection
         return f"{base_url}/collections/{collection}/points/search"
+
+    @property
+    def _collection_url(self) -> str:
+        base_url = self.settings.qdrant_url.rstrip("/")
+        collection = self.settings.qdrant_collection
+        return f"{base_url}/collections/{collection}"
 
     @property
     def _headers(self) -> dict[str, str]:

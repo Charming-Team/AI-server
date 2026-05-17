@@ -42,6 +42,10 @@ def test_qdrant_client_builds_search_url_and_headers() -> None:
         client._search_url
         == "http://qdrant.qdrant.svc.cluster.local:6333/collections/smap_documents/points/search"
     )
+    assert (
+        client._collection_url
+        == "http://qdrant.qdrant.svc.cluster.local:6333/collections/smap_documents"
+    )
     assert client._headers == {"api-key": "qdrant-token"}
 
 
@@ -88,6 +92,161 @@ def test_qdrant_client_search_returns_result_points() -> None:
         "/collections/smap_internal_documents/points/search"
     )
     assert captured_request["headers"]["api-key"] == "qdrant-token"
+
+
+def test_qdrant_client_checks_collection_dimension() -> None:
+    captured_request: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url"] = str(request.url)
+        captured_request["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "status": "green",
+                    "points_count": 12,
+                    "config": {
+                        "params": {
+                            "vectors": {
+                                "size": 1024,
+                                "distance": "Cosine",
+                            }
+                        }
+                    },
+                },
+                "status": "ok",
+            },
+        )
+
+    async def run_check():
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentSearchClient(
+                Settings(qdrant_api_key="qdrant-token", embedding_dimension=1024),
+                http_client=http_client,
+            )
+            return await client.check_collection()
+
+    result = anyio.run(run_check)
+
+    assert captured_request["method"] == "GET"
+    assert captured_request["url"].endswith("/collections/smap_internal_documents")
+    assert captured_request["headers"]["api-key"] == "qdrant-token"
+    assert result.collection_name == "smap_internal_documents"
+    assert result.status == "green"
+    assert result.expected_dimension == 1024
+    assert result.actual_dimension == 1024
+    assert result.is_dimension_matched is True
+    assert result.points_count == 12
+
+
+def test_qdrant_client_marks_collection_dimension_mismatch() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "status": "green",
+                    "points_count": 0,
+                    "config": {
+                        "params": {
+                            "vectors": {
+                                "size": 384,
+                                "distance": "Cosine",
+                            }
+                        }
+                    },
+                },
+                "status": "ok",
+            },
+        )
+
+    async def run_check():
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentSearchClient(
+                Settings(embedding_dimension=1024),
+                http_client=http_client,
+            )
+            return await client.check_collection()
+
+    result = anyio.run(run_check)
+
+    assert result.expected_dimension == 1024
+    assert result.actual_dimension == 384
+    assert result.is_dimension_matched is False
+
+
+def test_qdrant_client_checks_single_named_vector_dimension() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "config": {
+                        "params": {
+                            "vectors": {
+                                "document": {
+                                    "size": 1024,
+                                    "distance": "Cosine",
+                                }
+                            }
+                        }
+                    }
+                },
+                "status": "ok",
+            },
+        )
+
+    async def run_check():
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentSearchClient(
+                Settings(embedding_dimension=1024),
+                http_client=http_client,
+            )
+            return await client.check_collection()
+
+    result = anyio.run(run_check)
+
+    assert result.actual_dimension == 1024
+    assert result.is_dimension_matched is True
+
+
+def test_qdrant_client_raises_external_error_on_collection_http_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"status": "error"})
+
+    async def run_check() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentSearchClient(Settings(), http_client=http_client)
+            await client.check_collection()
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_check)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_002
+    assert exc_info.value.message == "Qdrant 컬렉션 조회에 실패했습니다."
+
+
+def test_qdrant_client_raises_external_error_on_invalid_collection_shape() -> None:
+    client = QdrantDocumentSearchClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("GET", "http://qdrant.local/collections/docs"),
+        json={"result": []},
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        client._parse_collection_check_response(response)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_003
+    assert exc_info.value.message == "Qdrant 응답 형식이 올바르지 않습니다."
 
 
 def test_qdrant_client_raises_external_error_on_http_failure() -> None:
