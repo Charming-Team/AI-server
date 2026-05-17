@@ -1,5 +1,6 @@
 from app.core.config import Settings
 from app.features.chat.answer_generation_service import AnswerGenerationService
+from app.features.chat.audit_logger import ChatAuditLogger
 from app.features.chat.document_search_service import DocumentSearchService
 from app.features.chat.evidence_access_policy import EvidenceAccessPolicy
 from app.features.chat.evidence_service import EvidenceService
@@ -33,19 +34,29 @@ class ChatService:
         self.evidence_service = EvidenceService(settings)
         self.document_search_service = DocumentSearchService(settings)
         self.answer_generation_service = AnswerGenerationService(settings)
+        self.audit_logger = ChatAuditLogger()
 
     async def create_answer(self, request: ChatAnswerRequest) -> ChatAnswerResponse:
         user_status_result = self._validate_user_status(request.user.status)
         if user_status_result is not None:
-            return self._build_restricted_response(request, user_status_result)
+            return self._finalize_response(
+                request,
+                self._build_restricted_response(request, user_status_result),
+            )
 
         validation_result = self.question_validator.validate(request.question)
         if validation_result is not None:
-            return self._build_restricted_response(request, validation_result)
+            return self._finalize_response(
+                request,
+                self._build_restricted_response(request, validation_result),
+            )
 
         security_result = self.security_policy.evaluate(request.question)
         if security_result is not None:
-            return self._build_restricted_response(request, security_result)
+            return self._finalize_response(
+                request,
+                self._build_restricted_response(request, security_result),
+            )
 
         intent = self.intent_classifier.classify(request.question)
         role_access_result = self.role_access_policy.evaluate(
@@ -54,10 +65,13 @@ class ChatService:
             intent,
         )
         if role_access_result is not None:
-            return self._build_restricted_response(
+            return self._finalize_response(
                 request,
-                role_access_result,
-                intent=intent,
+                self._build_restricted_response(
+                    request,
+                    role_access_result,
+                    intent=intent,
+                ),
             )
 
         evidence_result = await self.evidence_service.get_evidence(request, intent)
@@ -73,27 +87,38 @@ class ChatService:
         )
         sources = self.response_builder.build_sources(evidence_result, document_result)
 
-        return ChatAnswerResponse(
-            session_id=request.session_id,
-            message_id=request.message_id,
-            intent=evidence_result.intent,
-            answer=answer_result.answer,
-            basis_time=evidence_result.basis_time,
-            urls=self.response_builder.build_urls(sources),
-            sources=sources,
-            security_result=(
-                answer_result.security_result
-                or self.response_builder.build_security_result(
+        return self._finalize_response(
+            request,
+            ChatAnswerResponse(
+                session_id=request.session_id,
+                message_id=request.message_id,
+                intent=evidence_result.intent,
+                answer=answer_result.answer,
+                basis_time=evidence_result.basis_time,
+                urls=self.response_builder.build_urls(sources),
+                sources=sources,
+                security_result=(
+                    answer_result.security_result
+                    or self.response_builder.build_security_result(
+                        evidence_result,
+                        document_result,
+                    )
+                ),
+                model_result=self._build_model_result(
                     evidence_result,
                     document_result,
-                )
-            ),
-            model_result=self._build_model_result(
-                evidence_result,
-                document_result,
-                answer_result,
+                    answer_result,
+                ),
             ),
         )
+
+    def _finalize_response(
+        self,
+        request: ChatAnswerRequest,
+        response: ChatAnswerResponse,
+    ) -> ChatAnswerResponse:
+        self.audit_logger.log_answer_response(request, response)
+        return response
 
     def _validate_user_status(self, status: str) -> SecurityResult | None:
         if status.strip().upper() == "ACTIVE":

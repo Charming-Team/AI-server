@@ -6,6 +6,7 @@ from app.core.config import Settings
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
+    ChatAnswerResponse,
     ChatIntent,
     ChatSource,
     ChatUserContext,
@@ -117,6 +118,20 @@ class FakeBlockedAnswerGenerationService:
         )
 
 
+class FakeAuditLogger:
+    def __init__(self) -> None:
+        self.requests: list[ChatAnswerRequest] = []
+        self.responses: list[ChatAnswerResponse] = []
+
+    def log_answer_response(
+        self,
+        request: ChatAnswerRequest,
+        response: ChatAnswerResponse,
+    ) -> None:
+        self.requests.append(request)
+        self.responses.append(response)
+
+
 class FakeUnexpectedEvidenceService:
     async def get_evidence(
         self,
@@ -216,6 +231,8 @@ def _build_request(
 def test_chat_service_blocks_inactive_user_status_before_evidence_lookup() -> None:
     service = ChatService(Settings())
     service.evidence_service = FakeUnexpectedEvidenceService()
+    audit_logger = FakeAuditLogger()
+    service.audit_logger = audit_logger
 
     response = anyio.run(service.create_answer, _build_request(status="SUSPENDED"))
 
@@ -226,6 +243,8 @@ def test_chat_service_blocks_inactive_user_status_before_evidence_lookup() -> No
     assert response.model_result.used_rdb_evidence is False
     assert response.model_result.used_vector_search is False
     assert response.model_result.used_llm_generation is False
+    assert audit_logger.requests == [_build_request(status="SUSPENDED")]
+    assert audit_logger.responses == [response]
 
 
 def test_chat_service_uses_answer_output_security_result() -> None:
@@ -247,6 +266,7 @@ def test_chat_service_uses_answer_output_security_result() -> None:
 
 def test_chat_service_builds_detailed_model_result_counts() -> None:
     service = ChatService(Settings())
+    audit_logger = FakeAuditLogger()
     service.evidence_service = FakeEvidenceService()
     service.document_search_service = FakeDocumentSearchService(
         was_searched=True,
@@ -264,8 +284,10 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
         ],
     )
     service.answer_generation_service = FakeGeneratedAnswerGenerationService()
+    service.audit_logger = audit_logger
 
-    response = anyio.run(service.create_answer, _build_request())
+    request = _build_request()
+    response = anyio.run(service.create_answer, request)
 
     assert response.model_result.used_vector_search is True
     assert response.model_result.used_rdb_evidence is True
@@ -275,6 +297,8 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
     assert response.model_result.evidence_count == 3
     assert response.model_result.vector_search_skipped_reason is None
     assert response.model_result.llm_generation_skipped_reason is None
+    assert audit_logger.requests == [request]
+    assert audit_logger.responses == [response]
 
 
 def test_chat_service_sanitizes_operator_financial_evidence_before_llm() -> None:
