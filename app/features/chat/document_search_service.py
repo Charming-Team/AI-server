@@ -11,8 +11,8 @@ from app.features.chat.schemas import (
     DocumentSearchResult,
 )
 from app.features.chat.skip_reasons import (
-    QDRANT_NO_RESULTS,
     QDRANT_GROUNDING_SECURITY_BLOCKED,
+    QDRANT_NO_RESULTS,
     QDRANT_OPERATOR_RESTRICTED_CONTENT,
     QDRANT_ROLE_NOT_ALLOWED,
     QDRANT_SCORE_THRESHOLD_NOT_MET,
