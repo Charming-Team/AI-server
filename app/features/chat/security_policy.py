@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.features.chat.schemas import ChatErrorCode, SecurityResult, SecurityStatus
+from app.features.chat.sensitive_pattern_policy import SensitivePatternPolicy
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,18 @@ class SecurityPolicy:
         ),
     )
 
+    _sensitive_pattern_reason = (
+        "민감 정보 또는 내부 설정 정보로 보이는 패턴이 포함된 것으로 판단되었습니다."
+    )
+
+    def __init__(
+        self,
+        sensitive_pattern_policy: SensitivePatternPolicy | None = None,
+    ) -> None:
+        self.sensitive_pattern_policy = (
+            sensitive_pattern_policy or SensitivePatternPolicy()
+        )
+
     def evaluate(self, question: str) -> SecurityResult | None:
         normalized_question = self._normalize(question)
         compact_question = self._compact(normalized_question)
@@ -75,6 +88,12 @@ class SecurityPolicy:
                     code=rule.code,
                     reason=rule.reason,
                 )
+        if self.sensitive_pattern_policy.contains_sensitive_pattern(question):
+            return SecurityResult(
+                status=SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
+                code=ChatErrorCode.CHAT_SECURITY_002,
+                reason=self._sensitive_pattern_reason,
+            )
         return None
 
     def _matches_rule(

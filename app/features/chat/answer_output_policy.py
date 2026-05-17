@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from app.features.chat.role_access_policy import RoleAccessPolicy
 from app.features.chat.schemas import ChatErrorCode, SecurityResult, SecurityStatus
+from app.features.chat.sensitive_pattern_policy import SensitivePatternPolicy
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,14 @@ class AnswerOutputPolicy:
         terms=RoleAccessPolicy.operator_restricted_terms,
     )
 
+    def __init__(
+        self,
+        sensitive_pattern_policy: SensitivePatternPolicy | None = None,
+    ) -> None:
+        self.sensitive_pattern_policy = (
+            sensitive_pattern_policy or SensitivePatternPolicy()
+        )
+
     def evaluate(self, answer: str, *, role: str | None = None) -> SecurityResult | None:
         normalized_answer = self._normalize(answer)
         compact_answer = self._compact(normalized_answer)
@@ -54,6 +63,12 @@ class AnswerOutputPolicy:
             self._contains_term(term, normalized_answer, compact_answer)
             for term in self._sensitive_rule.terms
         ):
+            return SecurityResult(
+                status=SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
+                code=self._sensitive_rule.code,
+                reason=self._sensitive_rule.reason,
+            )
+        if self.sensitive_pattern_policy.contains_sensitive_pattern(answer):
             return SecurityResult(
                 status=SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
                 code=self._sensitive_rule.code,

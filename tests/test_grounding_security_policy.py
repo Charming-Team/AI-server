@@ -40,6 +40,24 @@ def test_grounding_security_policy_blocks_nested_sensitive_evidence_data() -> No
     assert policy.allows_evidence_item(item) is False
 
 
+def test_grounding_security_policy_blocks_nested_secret_like_pattern() -> None:
+    policy = GroundingSecurityPolicy()
+    item = EvidenceItem(
+        type="REPORT",
+        title="월간 생산 리스크 보고서",
+        summary="자재 부족이 주요 리스크입니다.",
+        source="reports",
+        data={
+            "notes": [
+                "운영 확인 필요",
+                "Authorization: Bearer abcDEF1234567890abcDEF1234567890",
+            ]
+        },
+    )
+
+    assert policy.allows_evidence_item(item) is False
+
+
 def test_grounding_security_policy_blocks_qdrant_point_prompt_injection() -> None:
     policy = GroundingSecurityPolicy()
     point = {

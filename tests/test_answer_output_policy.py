@@ -25,6 +25,19 @@ def test_answer_output_policy_blocks_sensitive_answer() -> None:
     assert result.reason == SENSITIVE_OUTPUT_REASON
 
 
+def test_answer_output_policy_blocks_secret_like_pattern() -> None:
+    policy = AnswerOutputPolicy()
+
+    result = policy.evaluate(
+        "Authorization: Bearer abcDEF1234567890abcDEF1234567890abcDEF1234567890"
+    )
+
+    assert result is not None
+    assert result.status == SecurityStatus.BLOCKED_SENSITIVE_REQUEST
+    assert result.code == ChatErrorCode.CHAT_SECURITY_002
+    assert result.reason == SENSITIVE_OUTPUT_REASON
+
+
 def test_answer_output_policy_blocks_operator_financial_answer() -> None:
     policy = AnswerOutputPolicy()
 

@@ -22,6 +22,20 @@ from app.features.chat.security_policy import SecurityPolicy
             SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
             ChatErrorCode.CHAT_SECURITY_002,
         ),
+        (
+            "Authorization: Bearer abcDEF1234567890abcDEF1234567890abcDEF1234567890",
+            SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
+            ChatErrorCode.CHAT_SECURITY_002,
+        ),
+        (
+            (
+                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+                "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+            ),
+            SecurityStatus.BLOCKED_SENSITIVE_REQUEST,
+            ChatErrorCode.CHAT_SECURITY_002,
+        ),
     ],
 )
 def test_security_policy_blocks_unsafe_questions(
