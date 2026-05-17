@@ -55,6 +55,4 @@ wandb/
 
 # Local design drafts
 docs/
-AGENTS.md
-DEVELOPMENT_STANDARDS.md
-SECURITY_REPORT.md
+*.md
