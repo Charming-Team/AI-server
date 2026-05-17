@@ -1,5 +1,6 @@
 from typing import Any
 
+from app.features.chat.grounding_security_policy import GroundingSecurityPolicy
 from app.features.chat.role_access_policy import RoleAccessPolicy
 from app.features.chat.schemas import ChatUserContext, EvidenceItem, EvidenceResult
 
@@ -31,6 +32,14 @@ class EvidenceAccessPolicy:
     )
     _redacted_value = "[권한 제한]"
 
+    def __init__(
+        self,
+        grounding_security_policy: GroundingSecurityPolicy | None = None,
+    ) -> None:
+        self.grounding_security_policy = (
+            grounding_security_policy or GroundingSecurityPolicy()
+        )
+
     def sanitize(
         self,
         role: str | ChatUserContext,
@@ -60,6 +69,9 @@ class EvidenceAccessPolicy:
         role: str,
     ) -> EvidenceItem | None:
         if not self._is_role_allowed(item, role):
+            return None
+
+        if not self.grounding_security_policy.allows_evidence_item(item):
             return None
 
         if role != "OPERATOR":

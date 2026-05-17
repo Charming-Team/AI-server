@@ -2,6 +2,7 @@ from app.core.config import Settings
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import QdrantSearchPoint
 from app.features.chat.embedding_service import EmbeddingService
+from app.features.chat.grounding_security_policy import GroundingSecurityPolicy
 from app.features.chat.qdrant_client import QdrantDocumentSearchClient
 from app.features.chat.schemas import (
     ChatAnswerRequest,
@@ -11,6 +12,7 @@ from app.features.chat.schemas import (
 )
 from app.features.chat.skip_reasons import (
     QDRANT_NO_RESULTS,
+    QDRANT_GROUNDING_SECURITY_BLOCKED,
     QDRANT_OPERATOR_RESTRICTED_CONTENT,
     QDRANT_ROLE_NOT_ALLOWED,
     QDRANT_SCORE_THRESHOLD_NOT_MET,
@@ -25,11 +27,15 @@ class DocumentSearchService:
         embedding_service: EmbeddingService | None = None,
         qdrant_client: QdrantDocumentSearchClient | None = None,
         document_access_policy: DocumentAccessPolicy | None = None,
+        grounding_security_policy: GroundingSecurityPolicy | None = None,
     ) -> None:
         self.settings = settings
         self.embedding_service = embedding_service or EmbeddingService(settings)
         self.qdrant_client = qdrant_client or QdrantDocumentSearchClient(settings)
         self.document_access_policy = document_access_policy or DocumentAccessPolicy()
+        self.grounding_security_policy = (
+            grounding_security_policy or GroundingSecurityPolicy()
+        )
 
     async def search(
         self,
@@ -59,7 +65,10 @@ class DocumentSearchService:
             role_filtered_points,
             request.user.role,
         )
-        filtered_points = self._filter_points_by_score(access_filtered_points)
+        security_filtered_points = self._filter_points_by_grounding_security(
+            access_filtered_points
+        )
+        filtered_points = self._filter_points_by_score(security_filtered_points)
         if not filtered_points:
             return DocumentSearchResult(
                 was_searched=True,
@@ -67,6 +76,7 @@ class DocumentSearchService:
                     points,
                     role_filtered_points,
                     access_filtered_points,
+                    security_filtered_points,
                 ),
             )
 
@@ -146,6 +156,13 @@ class DocumentSearchService:
             if self.document_access_policy.allows_point(point, role)
         ]
 
+    def _filter_points_by_grounding_security(self, points: list[dict]) -> list[dict]:
+        return [
+            point
+            for point in points
+            if self.grounding_security_policy.allows_qdrant_point(point)
+        ]
+
     def _is_score_above_threshold(self, point: dict, threshold: float) -> bool:
         score = point.get("score")
         return isinstance(score, (int, float)) and score >= threshold
@@ -155,12 +172,15 @@ class DocumentSearchService:
         points: list[dict],
         role_filtered_points: list[dict],
         access_filtered_points: list[dict],
+        security_filtered_points: list[dict],
     ) -> str:
         if points and not role_filtered_points:
             return QDRANT_ROLE_NOT_ALLOWED
         if role_filtered_points and not access_filtered_points:
             return QDRANT_OPERATOR_RESTRICTED_CONTENT
-        if access_filtered_points and self.settings.qdrant_score_threshold > 0:
+        if access_filtered_points and not security_filtered_points:
+            return QDRANT_GROUNDING_SECURITY_BLOCKED
+        if security_filtered_points and self.settings.qdrant_score_threshold > 0:
             return QDRANT_SCORE_THRESHOLD_NOT_MET
         return QDRANT_NO_RESULTS
 
