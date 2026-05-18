@@ -42,7 +42,7 @@ class EvidenceService:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response)
+                return self._parse_response(response, expected_intent=intent)
 
             async with httpx.AsyncClient(
                 timeout=self.settings.evidence_lookup_timeout_seconds
@@ -52,7 +52,7 @@ class EvidenceService:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response)
+                return self._parse_response(response, expected_intent=intent)
         except httpx.HTTPError as exc:
             raise ChatExternalServiceError(
                 status_code=503,
@@ -102,10 +102,14 @@ class EvidenceService:
         )
         return lookup_request.model_dump(mode="json", by_alias=True)
 
-    def _parse_response(self, response: httpx.Response) -> EvidenceResult:
+    def _parse_response(
+        self,
+        response: httpx.Response,
+        expected_intent: ChatIntent,
+    ) -> EvidenceResult:
         try:
             response.raise_for_status()
-            return EvidenceResult.model_validate(response.json())
+            result = EvidenceResult.model_validate(response.json())
         except httpx.HTTPStatusError as exc:
             raise ChatExternalServiceError(
                 status_code=503,
@@ -118,3 +122,11 @@ class EvidenceService:
                 code=ChatErrorCode.CHAT_EVIDENCE_003,
                 message="RDB Evidence 응답 형식이 올바르지 않습니다.",
             ) from exc
+
+        if result.intent != expected_intent:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_EVIDENCE_003,
+                message="RDB Evidence 응답 의도가 요청 의도와 일치하지 않습니다.",
+            )
+        return result

@@ -175,3 +175,39 @@ def test_evidence_service_raises_custom_error_on_invalid_response() -> None:
     assert exc_info.value.status_code == 502
     assert exc_info.value.code == ChatErrorCode.CHAT_EVIDENCE_003
     assert exc_info.value.message == "RDB Evidence 응답 형식이 올바르지 않습니다."
+
+
+def test_evidence_service_rejects_response_intent_mismatch() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "intent": "REPORT_LOOKUP",
+                "basisTime": "2026-05-12T10:35:00+09:00",
+                "items": [],
+            },
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            service = EvidenceService(
+                Settings(
+                    evidence_lookup_enabled=True,
+                    evidence_lookup_base_url="http://spring.local",
+                ),
+                http_client=http_client,
+            )
+            await service.get_evidence(_build_request(), ChatIntent.MATERIAL_SHORTAGE)
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_EVIDENCE_003
+    assert (
+        exc_info.value.message
+        == "RDB Evidence 응답 의도가 요청 의도와 일치하지 않습니다."
+    )
