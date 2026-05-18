@@ -94,6 +94,49 @@ def test_qdrant_client_search_returns_result_points() -> None:
     assert captured_request["headers"]["api-key"] == "qdrant-token"
 
 
+@pytest.mark.parametrize(
+    ("settings", "expected_message"),
+    [
+        (
+            Settings(qdrant_url=" "),
+            "Qdrant 필수 설정이 누락되었습니다: qdrant_url",
+        ),
+        (
+            Settings(qdrant_collection=" "),
+            "Qdrant 필수 설정이 누락되었습니다: qdrant_collection",
+        ),
+        (
+            Settings(qdrant_url=" ", qdrant_collection=" "),
+            "Qdrant 필수 설정이 누락되었습니다: qdrant_url, qdrant_collection",
+        ),
+    ],
+)
+def test_qdrant_search_client_requires_settings_before_search(
+    settings: Settings,
+    expected_message: str,
+) -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"result": []})
+
+    async def run_search() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentSearchClient(settings, http_client=http_client)
+            await client.search({"vector": [0.1, 0.2], "limit": 1})
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_search)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_001
+    assert exc_info.value.message == expected_message
+    assert called is False
+
+
 def test_qdrant_client_checks_collection_dimension() -> None:
     captured_request: dict = {}
 
@@ -380,6 +423,34 @@ def test_qdrant_index_client_upserts_points() -> None:
     assert captured_request["headers"]["api-key"] == "qdrant-token"
     assert '"points":[{"id":"point-1","vector":[0.1,0.2,0.3]' in captured_request["body"]
     assert '"documentId":"report-202605"' in captured_request["body"]
+
+
+def test_qdrant_index_client_requires_settings_before_upsert() -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"result": {}, "status": "ok"})
+
+    async def run_upsert() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentIndexClient(
+                Settings(qdrant_collection=" "),
+                http_client=http_client,
+            )
+            await client.upsert([_build_upsert_point()])
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_upsert)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_001
+    assert exc_info.value.message == (
+        "Qdrant 필수 설정이 누락되었습니다: qdrant_collection"
+    )
+    assert called is False
 
 
 def test_qdrant_index_client_skips_empty_points() -> None:

@@ -18,6 +18,23 @@ class QdrantCollectionCheckResult:
     points_count: int | None
 
 
+def validate_qdrant_settings(settings: Settings) -> None:
+    missing_fields: list[str] = []
+    if not settings.qdrant_url.strip():
+        missing_fields.append("qdrant_url")
+    if not settings.qdrant_collection.strip():
+        missing_fields.append("qdrant_collection")
+
+    if not missing_fields:
+        return
+
+    raise ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_QDRANT_001,
+        message=f"Qdrant 필수 설정이 누락되었습니다: {', '.join(missing_fields)}",
+    )
+
+
 class QdrantDocumentSearchClient:
     def __init__(
         self,
@@ -28,6 +45,7 @@ class QdrantDocumentSearchClient:
         self.http_client = http_client
 
     async def search(self, payload: dict) -> list[dict]:
+        validate_qdrant_settings(self.settings)
         try:
             if self.http_client is not None:
                 response = await self.http_client.post(
@@ -52,6 +70,7 @@ class QdrantDocumentSearchClient:
             ) from exc
 
     async def check_collection(self) -> QdrantCollectionCheckResult:
+        validate_qdrant_settings(self.settings)
         try:
             if self.http_client is not None:
                 response = await self.http_client.get(
@@ -213,6 +232,7 @@ class QdrantDocumentIndexClient:
         if not points:
             return {}
 
+        validate_qdrant_settings(self.settings)
         payload = {"points": [point.to_qdrant_point() for point in points]}
         return await self._send_request(
             method="put",
@@ -225,6 +245,7 @@ class QdrantDocumentIndexClient:
         if not document_id:
             return {}
 
+        validate_qdrant_settings(self.settings)
         payload = {
             "filter": {
                 "must": [
@@ -247,6 +268,7 @@ class QdrantDocumentIndexClient:
         dimension: int | None = None,
         distance: str = "Cosine",
     ) -> dict:
+        validate_qdrant_settings(self.settings)
         payload = {
             "vectors": {
                 "size": dimension or self.settings.embedding_dimension,
