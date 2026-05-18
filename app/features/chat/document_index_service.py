@@ -210,12 +210,24 @@ class DocumentIndexService:
         )
 
     def _sanitize_operation(self, operation: dict) -> dict:
-        sanitized_operation: dict = {}
-        if "operation_id" in operation:
-            sanitized_operation["operation_id"] = operation["operation_id"]
-        if "status" in operation:
-            sanitized_operation["status"] = operation["status"]
-        return sanitized_operation
+        operation_id = operation.get("operation_id")
+        status = operation.get("status")
+        if isinstance(operation_id, bool) or not isinstance(operation_id, int):
+            self._raise_invalid_qdrant_operation()
+        if not isinstance(status, str):
+            self._raise_invalid_qdrant_operation()
+
+        return {
+            "operation_id": operation_id,
+            "status": status,
+        }
+
+    def _raise_invalid_qdrant_operation(self) -> None:
+        raise ChatExternalServiceError(
+            status_code=502,
+            code=ChatErrorCode.CHAT_QDRANT_003,
+            message="Qdrant operation 응답 형식이 올바르지 않습니다.",
+        )
 
     def _finalize_index_result(
         self,

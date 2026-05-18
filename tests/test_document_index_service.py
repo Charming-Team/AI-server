@@ -49,6 +49,24 @@ class FakeQdrantIndexClient:
         }
 
 
+class FakeInvalidOperationQdrantIndexClient(FakeQdrantIndexClient):
+    async def upsert(self, points: list[QdrantUpsertPoint]) -> dict:
+        self.points = points
+        self.calls.append("upsert")
+        return {
+            "operation_id": "100",
+            "status": "completed",
+        }
+
+    async def delete_by_document_id(self, document_id: str) -> dict:
+        self.deleted_document_id = document_id
+        self.calls.append("delete")
+        return {
+            "operation_id": 99,
+            "status": None,
+        }
+
+
 class FakeAuditLogger:
     def __init__(self) -> None:
         self.index_logs: list[tuple[InternalDocumentInput, object]] = []
@@ -329,6 +347,52 @@ def test_document_index_service_rejects_embedding_count_mismatch() -> None:
     assert exc_info.value.status_code == 502
     assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_002
     assert exc_info.value.message == "임베딩 응답 개수가 문서 청크 개수와 일치하지 않습니다."
+
+
+def test_document_index_service_rejects_invalid_qdrant_upsert_operation() -> None:
+    qdrant_index_client = FakeInvalidOperationQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=2,
+            document_chunk_size=10,
+            document_chunk_overlap=0,
+        ),
+        embedding_client=FakeEmbeddingClient([[0.1, 0.2], [0.3, 0.4]]),
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    document = _build_document()
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(service.index_document, document)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_003
+    assert exc_info.value.message == "Qdrant operation 응답 형식이 올바르지 않습니다."
+    assert qdrant_index_client.calls == ["delete", "upsert"]
+    assert audit_logger.index_failure_logs == [(document, exc_info.value)]
+
+
+def test_document_index_service_rejects_invalid_qdrant_delete_operation() -> None:
+    qdrant_index_client = FakeInvalidOperationQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(),
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    request = InternalDocumentDeleteRequest(documentId="report-202605")
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(service.delete_document, request)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_003
+    assert exc_info.value.message == "Qdrant operation 응답 형식이 올바르지 않습니다."
+    assert qdrant_index_client.calls == ["delete"]
+    assert audit_logger.delete_failure_logs == [(request, exc_info.value)]
 
 
 def test_document_index_service_requires_embedding_settings_when_enabled() -> None:
