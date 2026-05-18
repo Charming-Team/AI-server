@@ -1,6 +1,10 @@
 import logging
 from typing import Any
 
+from app.features.chat.document_payload import (
+    InternalDocumentDeleteRequest,
+    InternalDocumentInput,
+)
 from app.features.chat.schemas import ChatAnswerRequest, ChatAnswerResponse
 
 
@@ -16,6 +20,26 @@ class ChatAuditLogger:
         self.logger.info(
             "chat_answer_completed",
             extra={"chat_audit": self.build_answer_payload(request, response)},
+        )
+
+    def log_document_index_result(
+        self,
+        document: InternalDocumentInput,
+        result: Any,
+    ) -> None:
+        self.logger.info(
+            "chat_document_index_completed",
+            extra={"chat_audit": self.build_document_index_payload(document, result)},
+        )
+
+    def log_document_delete_result(
+        self,
+        request: InternalDocumentDeleteRequest,
+        result: Any,
+    ) -> None:
+        self.logger.info(
+            "chat_document_delete_completed",
+            extra={"chat_audit": self.build_document_delete_payload(request, result)},
         )
 
     def build_answer_payload(
@@ -48,4 +72,41 @@ class ChatAuditLogger:
             "evidenceCount": response.model_result.evidence_count,
             "urlCount": len(response.urls),
             "sourceCount": len(response.sources),
+        }
+
+    def build_document_index_payload(
+        self,
+        document: InternalDocumentInput,
+        result: Any,
+    ) -> dict[str, Any]:
+        return {
+            "event": "chat_document_index_completed",
+            "documentId": document.document_id,
+            "documentType": document.document_type,
+            "requestedByRole": document.requested_by_role,
+            "allowedRoles": document.allowed_roles,
+            "companyName": document.company_name,
+            "intentTags": document.intent_tags,
+            "hasUrl": bool(document.url),
+            "hasSummary": bool(document.summary),
+            "contentLength": len(document.content),
+            "operationType": result.operation_type,
+            "chunkCount": result.chunk_count,
+            "indexedCount": result.indexed_count,
+            "skippedReason": result.skipped_reason,
+            "operationStatus": result.operation.get("status"),
+            "operationId": result.operation.get("operation_id"),
+        }
+
+    def build_document_delete_payload(
+        self,
+        request: InternalDocumentDeleteRequest,
+        result: Any,
+    ) -> dict[str, Any]:
+        return {
+            "event": "chat_document_delete_completed",
+            "documentId": request.document_id,
+            "operationType": result.operation_type,
+            "operationStatus": result.operation.get("status"),
+            "operationId": result.operation.get("operation_id"),
         }

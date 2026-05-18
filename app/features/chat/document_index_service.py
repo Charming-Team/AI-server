@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import Settings
+from app.features.chat.audit_logger import ChatAuditLogger
 from app.features.chat.document_index_builder import DocumentIndexBuilder
 from app.features.chat.document_index_policy import DocumentIndexPolicy
 from app.features.chat.document_payload import (
@@ -44,6 +45,7 @@ class DocumentIndexService:
         index_policy: DocumentIndexPolicy | None = None,
         embedding_client: EmbeddingClient | None = None,
         qdrant_index_client: QdrantDocumentIndexClient | None = None,
+        audit_logger: ChatAuditLogger | None = None,
     ) -> None:
         self.settings = settings
         self.index_builder = index_builder or DocumentIndexBuilder(settings)
@@ -52,20 +54,27 @@ class DocumentIndexService:
         )
         self.embedding_client = embedding_client or EmbeddingClient(settings)
         self.qdrant_index_client = qdrant_index_client or QdrantDocumentIndexClient(settings)
+        self.audit_logger = audit_logger or ChatAuditLogger()
 
     async def index_document(self, document: InternalDocumentInput) -> DocumentIndexResult:
         self.index_policy.validate(document)
 
         payloads = self.index_builder.build_payloads(document)
         if not payloads:
-            return self._skipped_result(document, DOCUMENT_CONTENT_EMPTY, chunk_count=0)
+            return self._finalize_index_result(
+                document,
+                self._skipped_result(document, DOCUMENT_CONTENT_EMPTY, chunk_count=0),
+            )
         self._validate_chunk_count(len(payloads))
 
         if not self.settings.embedding_enabled:
-            return self._skipped_result(
+            return self._finalize_index_result(
                 document,
-                EMBEDDING_DISABLED,
-                chunk_count=len(payloads),
+                self._skipped_result(
+                    document,
+                    EMBEDDING_DISABLED,
+                    chunk_count=len(payloads),
+                ),
             )
 
         validate_embedding_settings(self.settings)
@@ -81,11 +90,14 @@ class DocumentIndexService:
         await self.qdrant_index_client.delete_by_document_id(document.document_id)
         operation = await self.qdrant_index_client.upsert(points)
 
-        return DocumentIndexResult(
-            document_id=document.document_id,
-            chunk_count=len(payloads),
-            indexed_count=len(points),
-            operation=operation,
+        return self._finalize_index_result(
+            document,
+            DocumentIndexResult(
+                document_id=document.document_id,
+                chunk_count=len(payloads),
+                indexed_count=len(points),
+                operation=operation,
+            ),
         )
 
     async def delete_document(
@@ -96,9 +108,12 @@ class DocumentIndexService:
         operation = await self.qdrant_index_client.delete_by_document_id(
             request.document_id
         )
-        return DocumentDeleteResult(
-            document_id=request.document_id,
-            operation=operation,
+        return self._finalize_delete_result(
+            request,
+            DocumentDeleteResult(
+                document_id=request.document_id,
+                operation=operation,
+            ),
         )
 
     def _validate_vectors(
@@ -156,3 +171,19 @@ class DocumentIndexService:
             indexed_count=0,
             skipped_reason=skipped_reason,
         )
+
+    def _finalize_index_result(
+        self,
+        document: InternalDocumentInput,
+        result: DocumentIndexResult,
+    ) -> DocumentIndexResult:
+        self.audit_logger.log_document_index_result(document, result)
+        return result
+
+    def _finalize_delete_result(
+        self,
+        request: InternalDocumentDeleteRequest,
+        result: DocumentDeleteResult,
+    ) -> DocumentDeleteResult:
+        self.audit_logger.log_document_delete_result(request, result)
+        return result

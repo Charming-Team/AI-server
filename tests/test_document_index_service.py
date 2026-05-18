@@ -45,6 +45,26 @@ class FakeQdrantIndexClient:
         }
 
 
+class FakeAuditLogger:
+    def __init__(self) -> None:
+        self.index_logs: list[tuple[InternalDocumentInput, object]] = []
+        self.delete_logs: list[tuple[InternalDocumentDeleteRequest, object]] = []
+
+    def log_document_index_result(
+        self,
+        document: InternalDocumentInput,
+        result: object,
+    ) -> None:
+        self.index_logs.append((document, result))
+
+    def log_document_delete_result(
+        self,
+        request: InternalDocumentDeleteRequest,
+        result: object,
+    ) -> None:
+        self.delete_logs.append((request, result))
+
+
 def _build_document(content: str = "AAAAAAAAAA\nBBBBBBBBBB") -> InternalDocumentInput:
     return InternalDocumentInput(
         documentId="report-202605",
@@ -87,6 +107,29 @@ def test_document_index_service_indexes_document_chunks_with_batch_embedding() -
     assert qdrant_index_client.points[1].vector == [0.3, 0.4]
 
 
+def test_document_index_service_logs_index_result_without_document_body() -> None:
+    embedding_client = FakeEmbeddingClient([[0.1, 0.2], [0.3, 0.4]])
+    qdrant_index_client = FakeQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=2,
+            document_chunk_size=10,
+            document_chunk_overlap=0,
+        ),
+        embedding_client=embedding_client,
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    document = _build_document()
+
+    result = anyio.run(service.index_document, document)
+
+    assert audit_logger.index_logs == [(document, result)]
+    assert audit_logger.delete_logs == []
+
+
 def test_document_index_service_deletes_document_by_id() -> None:
     qdrant_index_client = FakeQdrantIndexClient()
     service = DocumentIndexService(
@@ -104,6 +147,22 @@ def test_document_index_service_deletes_document_by_id() -> None:
     assert result.operation == {"operation_id": 99, "status": "completed"}
     assert qdrant_index_client.deleted_document_id == "report-202605"
     assert qdrant_index_client.calls == ["delete"]
+
+
+def test_document_index_service_logs_delete_result() -> None:
+    qdrant_index_client = FakeQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(),
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    request = InternalDocumentDeleteRequest(documentId=" report-202605 ")
+
+    result = anyio.run(service.delete_document, request)
+
+    assert audit_logger.delete_logs == [(request, result)]
+    assert audit_logger.index_logs == []
 
 
 def test_document_index_service_rejects_blank_delete_document_id() -> None:
