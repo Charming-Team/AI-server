@@ -170,6 +170,65 @@ class FakeMixedRoleQdrantClient:
         ]
 
 
+class FakeMixedIntentQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "wrong-intent-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "delivery-risk-report",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "납기 위험 보고서",
+                    "chunkText": "납기 위험 관련 문서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            },
+            {
+                "id": "report-lookup-point",
+                "score": 0.88,
+                "payload": {
+                    "documentId": "monthly-report",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "월간 생산 리스크 보고서",
+                    "chunkText": "월간 보고서 요약 문서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+        ]
+
+
+class FakeWrongIntentQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "wrong-intent-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "delivery-risk-report",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "납기 위험 보고서",
+                    "chunkText": "납기 위험 관련 문서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            }
+        ]
+
+
 class FakeUnauthorizedRoleQdrantClient:
     def __init__(self) -> None:
         self.search_payload: dict | None = None
@@ -527,6 +586,38 @@ def test_document_search_service_filters_sources_outside_user_role() -> None:
     assert qdrant_client.search_payload is not None
     assert len(result.sources) == 1
     assert result.sources[0].title == "경영진 생산 리스크 보고서"
+
+
+def test_document_search_service_filters_sources_outside_intent() -> None:
+    qdrant_client = FakeMixedIntentQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert qdrant_client.search_payload is not None
+    assert len(result.sources) == 1
+    assert result.sources[0].title == "월간 생산 리스크 보고서"
+
+
+def test_document_search_service_marks_intent_reason_when_all_points_are_not_allowed() -> None:
+    qdrant_client = FakeWrongIntentQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert result.skipped_reason == "Qdrant 검색 결과가 질문 의도 범위를 통과하지 못했습니다."
 
 
 def test_document_search_service_marks_role_reason_when_all_points_are_not_allowed() -> None:

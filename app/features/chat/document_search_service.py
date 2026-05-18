@@ -16,6 +16,7 @@ from app.features.chat.schemas import (
 )
 from app.features.chat.skip_reasons import (
     QDRANT_GROUNDING_SECURITY_BLOCKED,
+    QDRANT_INTENT_NOT_ALLOWED,
     QDRANT_NO_RESULTS,
     QDRANT_OPERATOR_RESTRICTED_CONTENT,
     QDRANT_ROLE_NOT_ALLOWED,
@@ -65,8 +66,12 @@ class DocumentSearchService:
         search_payload = self._build_search_payload(embedding_result.vector, request, intent)
         points = await self.qdrant_client.search(search_payload)
         role_filtered_points = self._filter_points_by_role(points, request.user.role)
-        access_filtered_points = self._filter_points_by_content_access(
+        intent_filtered_points = self._filter_points_by_intent(
             role_filtered_points,
+            intent,
+        )
+        access_filtered_points = self._filter_points_by_content_access(
+            intent_filtered_points,
             request.user.role,
         )
         security_filtered_points = self._filter_points_by_grounding_security(
@@ -79,6 +84,7 @@ class DocumentSearchService:
                 skipped_reason=self._build_no_result_reason(
                     points,
                     role_filtered_points,
+                    intent_filtered_points,
                     access_filtered_points,
                     security_filtered_points,
                 ),
@@ -142,6 +148,33 @@ class DocumentSearchService:
             for allowed_role in allowed_roles
         )
 
+    def _filter_points_by_intent(
+        self,
+        points: list[dict],
+        intent: ChatIntent,
+    ) -> list[dict]:
+        return [
+            point
+            for point in points
+            if self._is_intent_allowed(point, intent)
+        ]
+
+    def _is_intent_allowed(self, point: dict, intent: ChatIntent) -> bool:
+        payload = point.get("payload")
+        if not isinstance(payload, dict):
+            return False
+
+        intent_tags = payload.get("intentTags")
+        if not isinstance(intent_tags, list):
+            return False
+
+        normalized_intent = intent.value.strip().upper()
+        return any(
+            isinstance(intent_tag, str)
+            and intent_tag.strip().upper() == normalized_intent
+            for intent_tag in intent_tags
+        )
+
     def _filter_points_by_score(self, points: list[dict]) -> list[dict]:
         threshold = self.settings.qdrant_score_threshold
         if threshold <= 0:
@@ -175,12 +208,15 @@ class DocumentSearchService:
         self,
         points: list[dict],
         role_filtered_points: list[dict],
+        intent_filtered_points: list[dict],
         access_filtered_points: list[dict],
         security_filtered_points: list[dict],
     ) -> str:
         if points and not role_filtered_points:
             return QDRANT_ROLE_NOT_ALLOWED
-        if role_filtered_points and not access_filtered_points:
+        if role_filtered_points and not intent_filtered_points:
+            return QDRANT_INTENT_NOT_ALLOWED
+        if intent_filtered_points and not access_filtered_points:
             return QDRANT_OPERATOR_RESTRICTED_CONTENT
         if access_filtered_points and not security_filtered_points:
             return QDRANT_GROUNDING_SECURITY_BLOCKED
