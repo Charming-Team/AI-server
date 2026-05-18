@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import Settings
 from app.features.chat.audit_logger import ChatAuditLogger
+from app.features.chat.document_id_policy import document_id_format_error
 from app.features.chat.document_index_builder import DocumentIndexBuilder
 from app.features.chat.document_index_policy import DocumentIndexPolicy
 from app.features.chat.document_payload import (
@@ -165,13 +166,21 @@ class DocumentIndexService:
             )
 
         security_result = self.security_policy.evaluate(document_id)
-        if security_result is None:
+        if security_result is not None:
+            raise ChatServiceError(
+                status_code=400,
+                code=security_result.code or ChatErrorCode.CHAT_SECURITY_002,
+                message="문서 ID에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
+            )
+
+        format_error = document_id_format_error(document_id)
+        if format_error is None:
             return
 
         raise ChatServiceError(
             status_code=400,
-            code=security_result.code or ChatErrorCode.CHAT_SECURITY_002,
-            message="문서 ID에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message=format_error,
         )
 
     def _validate_chunk_count(self, chunk_count: int) -> None:

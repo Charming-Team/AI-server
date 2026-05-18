@@ -223,6 +223,29 @@ def test_document_index_service_rejects_unsafe_delete_document_id() -> None:
     assert qdrant_index_client.calls == []
 
 
+def test_document_index_service_rejects_invalid_delete_document_id_format() -> None:
+    qdrant_index_client = FakeQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(),
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    request = InternalDocumentDeleteRequest(documentId="report 202605")
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(service.delete_document, request)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert (
+        exc_info.value.message
+        == "문서 ID는 영문, 숫자, '.', '_', ':', '-'만 사용할 수 있습니다."
+    )
+    assert audit_logger.delete_failure_logs == [(request, exc_info.value)]
+    assert qdrant_index_client.calls == []
+
+
 def test_document_index_service_rejects_blank_delete_document_id() -> None:
     qdrant_index_client = FakeQdrantIndexClient()
     service = DocumentIndexService(

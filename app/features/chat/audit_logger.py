@@ -1,11 +1,16 @@
 import logging
 from typing import Any
 
+from app.features.chat.document_id_policy import is_safe_document_id
 from app.features.chat.document_payload import (
     InternalDocumentDeleteRequest,
     InternalDocumentInput,
 )
-from app.features.chat.schemas import ChatAnswerRequest, ChatAnswerResponse, ChatErrorCode
+from app.features.chat.schemas import (
+    ChatAnswerRequest,
+    ChatAnswerResponse,
+    ChatErrorCode,
+)
 
 
 class ChatAuditLogger:
@@ -166,7 +171,7 @@ class ChatAuditLogger:
         }
 
     def _failure_document_id(self, document_id: str, error: Any) -> str | None:
-        if self._is_security_failure(error):
+        if self._is_security_failure(error) or not is_safe_document_id(document_id):
             return None
         return document_id
 

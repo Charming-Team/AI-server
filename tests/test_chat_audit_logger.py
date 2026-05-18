@@ -204,7 +204,7 @@ def test_chat_audit_logger_builds_document_delete_failure_payload() -> None:
 
     assert payload == {
         "event": "chat_document_delete_failed",
-        "documentId": "",
+        "documentId": None,
         "documentIdLength": 0,
         "statusCode": 400,
         "errorCode": "CHAT_DOCUMENT_002",
