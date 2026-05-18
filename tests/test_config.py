@@ -19,6 +19,26 @@ def test_env_example_covers_all_settings_fields() -> None:
     assert expected_keys - env_keys == set()
 
 
+def test_env_example_loads_as_valid_settings() -> None:
+    settings = Settings(_env_file=".env.example")
+
+    assert settings.app_name == "S-MAP AI Server"
+    assert settings.cors_origins == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    assert settings.evidence_lookup_enabled is False
+    assert settings.qdrant_search_enabled is False
+    assert settings.embedding_enabled is False
+    assert settings.llm_enabled is False
+    assert settings.qdrant_top_k == 5
+    assert settings.document_chunk_size == 800
+    assert settings.document_chunk_overlap == 80
+    assert settings.embedding_dimension == 1024
+    assert settings.llm_max_tokens == 1024
+    assert settings.answer_max_chars == 2000
+
+
 def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     settings = Settings(
         qdrant_top_k=20,
