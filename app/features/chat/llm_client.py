@@ -6,6 +6,23 @@ from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.schemas import ChatErrorCode
 
 
+def validate_llm_settings(settings: Settings) -> None:
+    missing_fields: list[str] = []
+    if not settings.llm_base_url.strip():
+        missing_fields.append("llm_base_url")
+    if not settings.llm_model.strip():
+        missing_fields.append("llm_model")
+
+    if not missing_fields:
+        return
+
+    raise ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_LLM_001,
+        message=f"LLM 필수 설정이 누락되었습니다: {', '.join(missing_fields)}",
+    )
+
+
 class LlmClient:
     def __init__(
         self,
@@ -16,6 +33,7 @@ class LlmClient:
         self.http_client = http_client
 
     async def generate(self, prompt: GroundedPrompt) -> str:
+        validate_llm_settings(self.settings)
         payload = self._build_payload(prompt)
         try:
             if self.http_client is not None:

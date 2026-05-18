@@ -88,6 +88,49 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
     assert captured_request["body"]["model"] == "qwen-test"
 
 
+@pytest.mark.parametrize(
+    ("settings", "expected_message"),
+    [
+        (
+            Settings(llm_base_url=" "),
+            "LLM 필수 설정이 누락되었습니다: llm_base_url",
+        ),
+        (
+            Settings(llm_model=" "),
+            "LLM 필수 설정이 누락되었습니다: llm_model",
+        ),
+        (
+            Settings(llm_base_url=" ", llm_model=" "),
+            "LLM 필수 설정이 누락되었습니다: llm_base_url, llm_model",
+        ),
+    ],
+)
+def test_llm_client_requires_settings_before_request(
+    settings: Settings,
+    expected_message: str,
+) -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"choices": []})
+
+    async def run_generate() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = LlmClient(settings, http_client=http_client)
+            await client.generate(_build_prompt())
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_generate)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_001
+    assert exc_info.value.message == expected_message
+    assert called is False
+
+
 def test_llm_client_raises_external_error_on_http_failure() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"error": "llm failed"})
