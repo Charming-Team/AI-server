@@ -57,6 +57,13 @@ class DocumentIndexService:
         self.audit_logger = audit_logger or ChatAuditLogger()
 
     async def index_document(self, document: InternalDocumentInput) -> DocumentIndexResult:
+        try:
+            return await self._index_document(document)
+        except ChatServiceError as exc:
+            self.audit_logger.log_document_index_failure(document, exc)
+            raise
+
+    async def _index_document(self, document: InternalDocumentInput) -> DocumentIndexResult:
         self.index_policy.validate(document)
 
         payloads = self.index_builder.build_payloads(document)
@@ -101,6 +108,16 @@ class DocumentIndexService:
         )
 
     async def delete_document(
+        self,
+        request: InternalDocumentDeleteRequest,
+    ) -> DocumentDeleteResult:
+        try:
+            return await self._delete_document(request)
+        except ChatServiceError as exc:
+            self.audit_logger.log_document_delete_failure(request, exc)
+            raise
+
+    async def _delete_document(
         self,
         request: InternalDocumentDeleteRequest,
     ) -> DocumentDeleteResult:

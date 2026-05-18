@@ -42,6 +42,26 @@ class ChatAuditLogger:
             extra={"chat_audit": self.build_document_delete_payload(request, result)},
         )
 
+    def log_document_index_failure(
+        self,
+        document: InternalDocumentInput,
+        error: Any,
+    ) -> None:
+        self.logger.warning(
+            "chat_document_index_failed",
+            extra={"chat_audit": self.build_document_index_failure_payload(document, error)},
+        )
+
+    def log_document_delete_failure(
+        self,
+        request: InternalDocumentDeleteRequest,
+        error: Any,
+    ) -> None:
+        self.logger.warning(
+            "chat_document_delete_failed",
+            extra={"chat_audit": self.build_document_delete_failure_payload(request, error)},
+        )
+
     def build_answer_payload(
         self,
         request: ChatAnswerRequest,
@@ -109,4 +129,36 @@ class ChatAuditLogger:
             "operationType": result.operation_type,
             "operationStatus": result.operation.get("status"),
             "operationId": result.operation.get("operation_id"),
+        }
+
+    def build_document_index_failure_payload(
+        self,
+        document: InternalDocumentInput,
+        error: Any,
+    ) -> dict[str, Any]:
+        return {
+            "event": "chat_document_index_failed",
+            "documentId": document.document_id,
+            "documentType": document.document_type,
+            "requestedByRole": document.requested_by_role,
+            "allowedRoles": document.allowed_roles,
+            "companyName": document.company_name,
+            "intentTags": document.intent_tags,
+            "hasUrl": bool(document.url),
+            "hasSummary": bool(document.summary),
+            "contentLength": len(document.content),
+            "statusCode": error.status_code,
+            "errorCode": error.code.value,
+        }
+
+    def build_document_delete_failure_payload(
+        self,
+        request: InternalDocumentDeleteRequest,
+        error: Any,
+    ) -> dict[str, Any]:
+        return {
+            "event": "chat_document_delete_failed",
+            "documentId": request.document_id,
+            "statusCode": error.status_code,
+            "errorCode": error.code.value,
         }

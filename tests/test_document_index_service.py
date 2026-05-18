@@ -49,6 +49,10 @@ class FakeAuditLogger:
     def __init__(self) -> None:
         self.index_logs: list[tuple[InternalDocumentInput, object]] = []
         self.delete_logs: list[tuple[InternalDocumentDeleteRequest, object]] = []
+        self.index_failure_logs: list[tuple[InternalDocumentInput, object]] = []
+        self.delete_failure_logs: list[
+            tuple[InternalDocumentDeleteRequest, object]
+        ] = []
 
     def log_document_index_result(
         self,
@@ -63,6 +67,20 @@ class FakeAuditLogger:
         result: object,
     ) -> None:
         self.delete_logs.append((request, result))
+
+    def log_document_index_failure(
+        self,
+        document: InternalDocumentInput,
+        error: object,
+    ) -> None:
+        self.index_failure_logs.append((document, error))
+
+    def log_document_delete_failure(
+        self,
+        request: InternalDocumentDeleteRequest,
+        error: object,
+    ) -> None:
+        self.delete_failure_logs.append((request, error))
 
 
 def _build_document(content: str = "AAAAAAAAAA\nBBBBBBBBBB") -> InternalDocumentInput:
@@ -163,6 +181,24 @@ def test_document_index_service_logs_delete_result() -> None:
 
     assert audit_logger.delete_logs == [(request, result)]
     assert audit_logger.index_logs == []
+
+
+def test_document_index_service_logs_delete_failure() -> None:
+    qdrant_index_client = FakeQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(),
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    request = InternalDocumentDeleteRequest(documentId=" ")
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(service.delete_document, request)
+
+    assert audit_logger.delete_failure_logs == [(request, exc_info.value)]
+    assert audit_logger.delete_logs == []
+    assert qdrant_index_client.calls == []
 
 
 def test_document_index_service_rejects_blank_delete_document_id() -> None:
@@ -294,6 +330,33 @@ def test_document_index_service_rejects_invalid_document_before_external_calls()
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert embedding_client.texts == []
+    assert qdrant_index_client.calls == []
+
+
+def test_document_index_service_logs_index_failure() -> None:
+    embedding_client = FakeEmbeddingClient([[0.1, 0.2]])
+    qdrant_index_client = FakeQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=2,
+            document_chunk_size=10,
+            document_chunk_overlap=0,
+        ),
+        embedding_client=embedding_client,
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    document = _build_document()
+    document.allowed_roles = ["ADMIN"]
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(service.index_document, document)
+
+    assert audit_logger.index_failure_logs == [(document, exc_info.value)]
+    assert audit_logger.index_logs == []
     assert embedding_client.texts == []
     assert qdrant_index_client.calls == []
 

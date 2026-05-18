@@ -10,9 +10,11 @@ from app.features.chat.document_payload import (
     InternalDocumentDeleteRequest,
     InternalDocumentInput,
 )
+from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatAnswerResponse,
+    ChatErrorCode,
     ChatIntent,
     ChatUserContext,
     ModelResult,
@@ -143,4 +145,65 @@ def test_chat_audit_logger_builds_document_delete_payload() -> None:
         "operationType": "DELETE",
         "operationStatus": "completed",
         "operationId": 99,
+    }
+
+
+def test_chat_audit_logger_builds_safe_document_index_failure_payload() -> None:
+    document = InternalDocumentInput(
+        documentId="report-202605",
+        documentType="REPORT",
+        title="2026년 5월 생산 리스크 보고서",
+        summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+        content="문서 원문입니다.",
+        url="/reports/20",
+        allowedRoles=["EXECUTIVE", "MANUFACTURING_MANAGER"],
+        companyName="S-MAP",
+        intentTags=["REPORT_LOOKUP"],
+        requestedByRole="MANUFACTURING_MANAGER",
+    )
+    error = ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_SECURITY_001,
+        message="문서에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
+    )
+
+    payload = ChatAuditLogger().build_document_index_failure_payload(document, error)
+    serialized_payload = json.dumps(payload, ensure_ascii=False)
+
+    assert payload == {
+        "event": "chat_document_index_failed",
+        "documentId": "report-202605",
+        "documentType": "REPORT",
+        "requestedByRole": "MANUFACTURING_MANAGER",
+        "allowedRoles": ["EXECUTIVE", "MANUFACTURING_MANAGER"],
+        "companyName": "S-MAP",
+        "intentTags": ["REPORT_LOOKUP"],
+        "hasUrl": True,
+        "hasSummary": True,
+        "contentLength": 9,
+        "statusCode": 400,
+        "errorCode": "CHAT_SECURITY_001",
+    }
+    assert document.title not in serialized_payload
+    assert document.summary not in serialized_payload
+    assert document.content not in serialized_payload
+    assert document.url not in serialized_payload
+    assert error.message not in serialized_payload
+
+
+def test_chat_audit_logger_builds_document_delete_failure_payload() -> None:
+    request = InternalDocumentDeleteRequest(documentId=" ")
+    error = ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_DOCUMENT_002,
+        message="문서 ID은(는) 필수입니다.",
+    )
+
+    payload = ChatAuditLogger().build_document_delete_failure_payload(request, error)
+
+    assert payload == {
+        "event": "chat_document_delete_failed",
+        "documentId": "",
+        "statusCode": 400,
+        "errorCode": "CHAT_DOCUMENT_002",
     }
