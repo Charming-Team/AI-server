@@ -1,7 +1,22 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+
+
+def test_env_example_covers_all_settings_fields() -> None:
+    env_example = Path(".env.example").read_text(encoding="utf-8")
+    env_keys = {
+        line.split("=", maxsplit=1)[0]
+        for line in env_example.splitlines()
+        if line and not line.startswith("#") and "=" in line
+    }
+
+    expected_keys = {field_name.upper() for field_name in Settings.model_fields}
+
+    assert expected_keys - env_keys == set()
 
 
 def test_settings_accepts_chat_cost_guardrail_limits() -> None:
