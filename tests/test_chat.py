@@ -581,6 +581,26 @@ def test_chat_recommendations_rejects_invalid_internal_token() -> None:
     }
 
 
+def test_chat_recommendations_rejects_inactive_user() -> None:
+    response = _post_chat_recommendations(
+        json={
+            "user": {
+                "userId": 1,
+                "role": "MANUFACTURING_MANAGER",
+                "companyName": "S-MAP",
+                "status": "SUSPENDED",
+            },
+            "keyword": "라인",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "CHAT_SECURITY_004",
+        "message": "ACTIVE 상태 사용자만 추천 질문을 조회할 수 있습니다.",
+    }
+
+
 def test_chat_recommendations_returns_role_based_questions() -> None:
     response = _post_chat_recommendations(
         json={

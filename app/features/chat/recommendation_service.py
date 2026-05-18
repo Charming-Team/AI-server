@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 
+from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import (
+    ChatErrorCode,
     ChatIntent,
     ChatRecommendationRequest,
     ChatRecommendationResponse,
@@ -156,6 +158,8 @@ class RecommendationService:
         self,
         request: ChatRecommendationRequest,
     ) -> ChatRecommendationResponse:
+        self._validate_active_user(request.user.status)
+
         role_rules = self._filter_by_role(request.user.role)
         keyword = self._normalize(request.keyword or "")
         if not keyword:
@@ -168,6 +172,16 @@ class RecommendationService:
             return self._build_response(keyword_rules, fallback_used=False)
 
         return self._build_response(role_rules, fallback_used=True)
+
+    def _validate_active_user(self, status: str) -> None:
+        if status.strip().upper() == "ACTIVE":
+            return
+
+        raise ChatServiceError(
+            status_code=403,
+            code=ChatErrorCode.CHAT_SECURITY_004,
+            message="ACTIVE 상태 사용자만 추천 질문을 조회할 수 있습니다.",
+        )
 
     def _filter_by_role(self, role: str) -> list[RecommendedQuestionRule]:
         normalized_role = role.strip().upper()

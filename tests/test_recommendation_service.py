@@ -1,17 +1,25 @@
+import pytest
+
+from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.recommendation_service import RecommendationService
 from app.features.chat.schemas import (
+    ChatErrorCode,
     ChatRecommendationRequest,
     ChatUserContext,
 )
 
 
-def _build_request(role: str, keyword: str | None = None) -> ChatRecommendationRequest:
+def _build_request(
+    role: str,
+    keyword: str | None = None,
+    status: str = "ACTIVE",
+) -> ChatRecommendationRequest:
     return ChatRecommendationRequest(
         user=ChatUserContext(
             userId=1,
             role=role,
             companyName="S-MAP",
-            status="ACTIVE",
+            status=status,
         ),
         keyword=keyword,
     )
@@ -31,6 +39,17 @@ def test_recommendation_service_returns_role_based_questions() -> None:
     assert "라인 가동률과 병목 현황을 요약해줘" in questions
     assert "자재 부족으로 영향받는 생산계획을 알려줘" not in questions
     assert response.fallback_used is False
+
+
+def test_recommendation_service_rejects_inactive_user() -> None:
+    service = RecommendationService()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        service.get_recommendations(_build_request("EXECUTIVE", status="SUSPENDED"))
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == ChatErrorCode.CHAT_SECURITY_004
+    assert exc_info.value.message == "ACTIVE 상태 사용자만 추천 질문을 조회할 수 있습니다."
 
 
 def test_recommendation_service_filters_by_keyword() -> None:
