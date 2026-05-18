@@ -1,5 +1,11 @@
 import pytest
 
+from app.features.chat.access_control import (
+    BUSINESS_ROLES,
+    OPERATOR_RESTRICTED_TERMS,
+    OPERATOR_ROLE,
+    ROLE_INTENT_MATRIX,
+)
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.recommendation_service import (
     RecommendationService,
@@ -11,6 +17,7 @@ from app.features.chat.schemas import (
     ChatRecommendationRequest,
     ChatUserContext,
 )
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 def _build_request(
@@ -27,6 +34,65 @@ def _build_request(
         ),
         keyword=keyword,
     )
+
+
+def _normalize_rule_text(value: str) -> str:
+    return "".join(value.casefold().split())
+
+
+def _contains_operator_restricted_term(rule: RecommendedQuestionRule) -> bool:
+    target = _normalize_rule_text(
+        " ".join(
+            (
+                rule.question,
+                rule.category,
+                rule.intent.value,
+                rule.url,
+            )
+        )
+    )
+    return any(
+        _normalize_rule_text(term) in target
+        for term in OPERATOR_RESTRICTED_TERMS
+    )
+
+
+def test_recommendation_rules_have_unique_ids_and_required_fields() -> None:
+    rules = RecommendationService._rules
+    question_ids = [rule.question_id for rule in rules]
+
+    assert len(question_ids) == len(set(question_ids))
+    for rule in rules:
+        assert rule.question_id.strip()
+        assert rule.question.strip()
+        assert rule.category.strip()
+        assert rule.url.strip()
+        assert rule.allowed_roles
+
+
+def test_recommendation_rules_use_safe_internal_urls() -> None:
+    for rule in RecommendationService._rules:
+        assert normalize_internal_url(rule.url) == rule.url
+
+
+def test_recommendation_rules_follow_business_role_and_intent_matrix() -> None:
+    for rule in RecommendationService._rules:
+        assert set(rule.allowed_roles) <= set(BUSINESS_ROLES)
+        for role in rule.allowed_roles:
+            assert rule.intent in ROLE_INTENT_MATRIX[role]
+
+
+def test_recommendation_rules_keep_operator_items_read_only_and_non_financial() -> None:
+    operator_rules = [
+        rule
+        for rule in RecommendationService._rules
+        if OPERATOR_ROLE in rule.allowed_roles
+    ]
+
+    assert operator_rules
+    for rule in operator_rules:
+        assert "mode=read" in _normalize_rule_text(rule.url)
+        assert not _contains_operator_restricted_term(rule)
 
 
 def test_recommendation_service_returns_role_based_questions() -> None:
