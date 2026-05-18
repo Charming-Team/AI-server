@@ -1,5 +1,8 @@
 from app.core.config import Settings
-from app.features.chat.embedding_client import EmbeddingClient
+from app.features.chat.embedding_client import (
+    EmbeddingClient,
+    validate_embedding_settings,
+)
 from app.features.chat.schemas import ChatAnswerRequest, EmbeddingResult
 from app.features.chat.skip_reasons import (
     EMBEDDING_DIMENSION_MISMATCH,
@@ -25,6 +28,7 @@ class EmbeddingService:
                 skipped_reason=EMBEDDING_DISABLED,
             )
 
+        validate_embedding_settings(self.settings)
         vector = await self.embedding_client.embed(request.question)
         if not vector:
             return EmbeddingResult(

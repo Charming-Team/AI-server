@@ -162,6 +162,34 @@ def test_embedding_client_embed_many_skips_empty_texts() -> None:
     assert called is False
 
 
+def test_embedding_client_requires_embedding_settings_before_request() -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json=[[0.1, 0.2]])
+
+    async def run_embed_many() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = EmbeddingClient(
+                Settings(embedding_base_url=" "),
+                http_client=http_client,
+            )
+            await client.embed_many(["최근 보고서 요약해줘"])
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_embed_many)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_001
+    assert exc_info.value.message == (
+        "임베딩 필수 설정이 누락되었습니다: embedding_base_url"
+    )
+    assert called is False
+
+
 def test_embedding_client_parses_openai_compatible_embedding_response() -> None:
     client = EmbeddingClient(Settings())
     response = httpx.Response(

@@ -187,6 +187,33 @@ def test_document_index_service_rejects_embedding_count_mismatch() -> None:
     assert exc_info.value.message == "임베딩 응답 개수가 문서 청크 개수와 일치하지 않습니다."
 
 
+def test_document_index_service_requires_embedding_settings_when_enabled() -> None:
+    embedding_client = FakeEmbeddingClient([[0.1, 0.2], [0.3, 0.4]])
+    qdrant_index_client = FakeQdrantIndexClient()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_base_url=" ",
+            embedding_dimension=2,
+            document_chunk_size=10,
+            document_chunk_overlap=0,
+        ),
+        embedding_client=embedding_client,
+        qdrant_index_client=qdrant_index_client,
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(service.index_document, _build_document())
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_001
+    assert exc_info.value.message == (
+        "임베딩 필수 설정이 누락되었습니다: embedding_base_url"
+    )
+    assert embedding_client.texts == []
+    assert qdrant_index_client.calls == []
+
+
 def test_document_index_service_rejects_invalid_document_before_external_calls() -> None:
     embedding_client = FakeEmbeddingClient([[0.1, 0.2]])
     qdrant_index_client = FakeQdrantIndexClient()

@@ -5,6 +5,25 @@ from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.schemas import ChatErrorCode
 
 
+def validate_embedding_settings(settings: Settings) -> None:
+    missing_fields: list[str] = []
+    if not settings.embedding_base_url.strip():
+        missing_fields.append("embedding_base_url")
+    if not settings.embedding_path.strip():
+        missing_fields.append("embedding_path")
+    if not settings.embedding_model.strip():
+        missing_fields.append("embedding_model")
+
+    if not missing_fields:
+        return
+
+    raise ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_EMBEDDING_001,
+        message=f"임베딩 필수 설정이 누락되었습니다: {', '.join(missing_fields)}",
+    )
+
+
 class EmbeddingClient:
     def __init__(
         self,
@@ -24,6 +43,7 @@ class EmbeddingClient:
         if not texts:
             return []
 
+        validate_embedding_settings(self.settings)
         unique_texts = self._deduplicate_texts(texts)
         payload = self._build_payloads(unique_texts)
         try:

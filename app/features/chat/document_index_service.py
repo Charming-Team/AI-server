@@ -7,7 +7,10 @@ from app.features.chat.document_payload import (
     InternalDocumentDeleteRequest,
     InternalDocumentInput,
 )
-from app.features.chat.embedding_client import EmbeddingClient
+from app.features.chat.embedding_client import (
+    EmbeddingClient,
+    validate_embedding_settings,
+)
 from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.qdrant_client import QdrantDocumentIndexClient
 from app.features.chat.schemas import ChatErrorCode
@@ -65,6 +68,7 @@ class DocumentIndexService:
                 chunk_count=len(payloads),
             )
 
+        validate_embedding_settings(self.settings)
         vectors = await self.embedding_client.embed_many(
             [payload.chunk_text for payload in payloads]
         )

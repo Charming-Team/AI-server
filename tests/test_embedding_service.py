@@ -1,10 +1,12 @@
 from datetime import datetime
 
 import anyio
+import pytest
 
 from app.core.config import Settings
 from app.features.chat.embedding_service import EmbeddingService
-from app.features.chat.schemas import ChatAnswerRequest, ChatUserContext
+from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.schemas import ChatAnswerRequest, ChatErrorCode, ChatUserContext
 
 
 class FakeEmbeddingClient:
@@ -68,6 +70,51 @@ def test_embedding_service_returns_vector_when_enabled() -> None:
     assert result.vector == [0.1, 0.2, 0.3]
     assert result.model == "BAAI/bge-m3"
     assert embedding_client.text == "최근 보고서 요약해줘"
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_message"),
+    [
+        (
+            Settings(embedding_enabled=True, embedding_base_url=" "),
+            "임베딩 필수 설정이 누락되었습니다: embedding_base_url",
+        ),
+        (
+            Settings(embedding_enabled=True, embedding_path=" "),
+            "임베딩 필수 설정이 누락되었습니다: embedding_path",
+        ),
+        (
+            Settings(embedding_enabled=True, embedding_model=" "),
+            "임베딩 필수 설정이 누락되었습니다: embedding_model",
+        ),
+        (
+            Settings(
+                embedding_enabled=True,
+                embedding_base_url=" ",
+                embedding_path=" ",
+                embedding_model=" ",
+            ),
+            (
+                "임베딩 필수 설정이 누락되었습니다: "
+                "embedding_base_url, embedding_path, embedding_model"
+            ),
+        ),
+    ],
+)
+def test_embedding_service_requires_embedding_settings_when_enabled(
+    settings: Settings,
+    expected_message: str,
+) -> None:
+    embedding_client = FakeEmbeddingClient([0.1, 0.2, 0.3])
+    service = EmbeddingService(settings, embedding_client=embedding_client)
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(service.embed_query, _build_request())
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_001
+    assert exc_info.value.message == expected_message
+    assert embedding_client.text is None
 
 
 def test_embedding_service_rejects_dimension_mismatch() -> None:
