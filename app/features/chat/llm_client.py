@@ -67,14 +67,37 @@ class LlmClient:
                 code=ChatErrorCode.CHAT_LLM_002,
                 message="LLM 응답 형식이 올바르지 않습니다.",
             ) from exc
+
+        if not isinstance(body, dict):
+            self._raise_invalid_response_shape()
+
         choices = body.get("choices", [])
         if not choices:
             return ""
-        message = choices[0].get("message", {})
+        if not isinstance(choices, list):
+            self._raise_invalid_response_shape()
+
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            self._raise_invalid_response_shape()
+
+        message = first_choice.get("message", {})
+        if not isinstance(message, dict):
+            self._raise_invalid_response_shape()
+
         content = message.get("content", "")
-        if not isinstance(content, str):
+        if content is None:
             return ""
+        if not isinstance(content, str):
+            self._raise_invalid_response_shape()
         return content.strip()
+
+    def _raise_invalid_response_shape(self) -> None:
+        raise ChatExternalServiceError(
+            status_code=502,
+            code=ChatErrorCode.CHAT_LLM_002,
+            message="LLM 응답 형식이 올바르지 않습니다.",
+        )
 
     @property
     def _chat_completions_url(self) -> str:

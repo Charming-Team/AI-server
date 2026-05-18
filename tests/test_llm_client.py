@@ -120,3 +120,42 @@ def test_llm_client_raises_external_error_on_invalid_response_body() -> None:
     assert exc_info.value.status_code == 502
     assert exc_info.value.code == ChatErrorCode.CHAT_LLM_002
     assert exc_info.value.message == "LLM 응답 형식이 올바르지 않습니다."
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        ["not-a-dict"],
+        {"choices": "not-a-list"},
+        {"choices": ["not-a-dict"]},
+        {"choices": [{"message": "not-a-dict"}]},
+        {"choices": [{"message": {"content": ["not-a-string"]}}]},
+    ],
+)
+def test_llm_client_raises_external_error_on_invalid_response_shape(
+    body: object,
+) -> None:
+    client = LlmClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://llm.local/chat/completions"),
+        json=body,
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        client._parse_response(response)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_002
+    assert exc_info.value.message == "LLM 응답 형식이 올바르지 않습니다."
+
+
+def test_llm_client_returns_empty_answer_on_missing_content() -> None:
+    client = LlmClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://llm.local/chat/completions"),
+        json={"choices": [{"message": {"content": None}}]},
+    )
+
+    assert client._parse_response(response) == ""
