@@ -1,11 +1,15 @@
+from pydantic import ValidationError
+
 from app.core.config import Settings
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import QdrantSearchPoint
 from app.features.chat.embedding_service import EmbeddingService
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounding_security_policy import GroundingSecurityPolicy
 from app.features.chat.qdrant_client import QdrantDocumentSearchClient
 from app.features.chat.schemas import (
     ChatAnswerRequest,
+    ChatErrorCode,
     ChatIntent,
     ChatSource,
     DocumentSearchResult,
@@ -185,7 +189,14 @@ class DocumentSearchService:
         return QDRANT_NO_RESULTS
 
     def _build_sources(self, points: list[dict]) -> list[ChatSource]:
-        return [
-            QdrantSearchPoint.model_validate(point).to_chat_source()
-            for point in points
-        ]
+        try:
+            return [
+                QdrantSearchPoint.model_validate(point).to_chat_source()
+                for point in points
+            ]
+        except ValidationError as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_QDRANT_003,
+                message="Qdrant 문서 payload 형식이 올바르지 않습니다.",
+            ) from exc

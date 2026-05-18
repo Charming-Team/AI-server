@@ -1,11 +1,14 @@
 from datetime import datetime
 
 import anyio
+import pytest
 
 from app.core.config import Settings
 from app.features.chat.document_search_service import DocumentSearchService
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.schemas import (
     ChatAnswerRequest,
+    ChatErrorCode,
     ChatIntent,
     ChatUserContext,
     EmbeddingResult,
@@ -445,6 +448,31 @@ def test_document_search_service_builds_sources_from_qdrant_points() -> None:
     assert sources[0].title == "LINE-A01 병목 대응 가이드"
     assert sources[0].source == "process-guide:line-a01"
     assert sources[0].relevance_score == 0.88
+
+
+def test_document_search_service_raises_custom_error_on_invalid_point_payload() -> None:
+    service = DocumentSearchService(Settings())
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        service._build_sources(
+            [
+                {
+                    "id": "invalid-point",
+                    "score": 0.88,
+                    "payload": {
+                        "documentId": "process-guide",
+                        "documentType": "PROCESS",
+                        "title": "LINE-A01 병목 대응 가이드",
+                        "allowedRoles": ["MANUFACTURING_MANAGER"],
+                        "intentTags": ["LINE_BOTTLENECK"],
+                    },
+                }
+            ]
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_003
+    assert exc_info.value.message == "Qdrant 문서 payload 형식이 올바르지 않습니다."
 
 
 def test_document_search_service_searches_qdrant_when_embedding_is_ready() -> None:
