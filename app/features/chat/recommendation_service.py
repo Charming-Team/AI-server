@@ -14,6 +14,7 @@ from app.features.chat.schemas import (
     ChatRecommendationResponse,
     ChatRecommendedQuestion,
 )
+from app.features.chat.security_policy import SecurityPolicy
 
 
 @dataclass(frozen=True)
@@ -161,12 +162,16 @@ class RecommendationService:
         ),
     )
 
+    def __init__(self, security_policy: SecurityPolicy | None = None) -> None:
+        self.security_policy = security_policy or SecurityPolicy()
+
     def get_recommendations(
         self,
         request: ChatRecommendationRequest,
     ) -> ChatRecommendationResponse:
         self._validate_active_user(request.user.status)
         self._validate_business_role(request.user.role)
+        self._validate_keyword(request.keyword)
 
         role_rules = self._filter_by_role(request.user.role)
         keyword = self._normalize(request.keyword or "")
@@ -199,6 +204,20 @@ class RecommendationService:
             status_code=403,
             code=ChatErrorCode.CHAT_SECURITY_004,
             message="현재 역할 권한으로는 추천 질문을 조회할 수 없습니다.",
+        )
+
+    def _validate_keyword(self, keyword: str | None) -> None:
+        if keyword is None or not keyword.strip():
+            return
+
+        security_result = self.security_policy.evaluate(keyword)
+        if security_result is None:
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=security_result.code or ChatErrorCode.CHAT_SECURITY_001,
+            message="추천 질문 키워드에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
         )
 
     def _filter_by_role(self, role: str) -> list[RecommendedQuestionRule]:
