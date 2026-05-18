@@ -124,6 +124,77 @@ class FakeGroundedAnswerGenerationService:
         )
 
 
+class FakeUnsafeUrlEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="ORDER",
+                    title="ORD-202605-003 납기 위험",
+                    summary="납기 지연 위험 등급은 WARNING입니다.",
+                    url="https://evil.example/orders/1003",
+                    source="ai_prediction_results",
+                    referenceId=1003,
+                )
+            ],
+        )
+
+
+class FakeUnsafeUrlDocumentSearchService:
+    async def search(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> DocumentSearchResult:
+        return DocumentSearchResult(
+            was_searched=True,
+            sources=[
+                ChatSource(
+                    sourceType="REPORT",
+                    title="외부 URL 생산 리스크 보고서",
+                    summary="외부 URL이 섞인 문서 검색 결과입니다.",
+                    url="//evil.example/reports/21",
+                    source="unsafe-report:chunk-1",
+                    sourceOrigin="QDRANT",
+                    relevanceScore=0.91,
+                ),
+                ChatSource(
+                    sourceType="REPORT",
+                    title="내부 URL 생산 리스크 보고서",
+                    summary="내부 화면 이동이 가능한 문서 검색 결과입니다.",
+                    url=" /reports/21 ",
+                    source="safe-report:chunk-1",
+                    sourceOrigin="QDRANT",
+                    relevanceScore=0.87,
+                ),
+            ],
+        )
+
+
+class FakeUnsafeUrlAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.items
+        assert document_result.sources
+        return AnswerGenerationResult(
+            answer=(
+                "ORD-202605-003은 납기 지연 위험이 WARNING이며, "
+                "내부 URL 생산 리스크 보고서를 근거로 확인했습니다."
+            ),
+            was_generated=True,
+        )
+
+
 class FakeOperatorFinancialEvidenceService:
     async def get_evidence(
         self,
@@ -273,6 +344,14 @@ def _build_grounded_chat_service() -> ChatService:
     service.evidence_service = FakeGroundedEvidenceService()
     service.document_search_service = FakeGroundedDocumentSearchService()
     service.answer_generation_service = FakeGroundedAnswerGenerationService()
+    return service
+
+
+def _build_unsafe_url_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeUnsafeUrlEvidenceService()
+    service.document_search_service = FakeUnsafeUrlDocumentSearchService()
+    service.answer_generation_service = FakeUnsafeUrlAnswerGenerationService()
     return service
 
 
@@ -591,6 +670,84 @@ def test_chat_answer_evaluation_returns_grounded_answer_with_sources() -> None:
         "rdbEvidenceCount": 1,
         "documentSourceCount": 1,
         "evidenceCount": 2,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_keeps_only_internal_urls_in_sources_and_urls() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_unsafe_url_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "EXECUTIVE",
+                "현재 납기 위험이 높은 주문 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["answer"] == (
+        "ORD-202605-003은 납기 지연 위험이 WARNING이며, "
+        "내부 URL 생산 리스크 보고서를 근거로 확인했습니다."
+    )
+    assert body["urls"] == [
+        {
+            "label": "내부 URL 생산 리스크 보고서",
+            "url": "/reports/21",
+            "type": "REPORT",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "ORDER",
+            "title": "ORD-202605-003 납기 위험",
+            "summary": "납기 지연 위험 등급은 WARNING입니다.",
+            "url": None,
+            "referenceId": 1003,
+            "source": "ai_prediction_results",
+            "basisTime": "2026-05-12T10:30:00+09:00",
+            "sourceOrigin": "RDB",
+            "relevanceScore": None,
+        },
+        {
+            "sourceType": "REPORT",
+            "title": "외부 URL 생산 리스크 보고서",
+            "summary": "외부 URL이 섞인 문서 검색 결과입니다.",
+            "url": None,
+            "referenceId": None,
+            "source": "unsafe-report:chunk-1",
+            "basisTime": None,
+            "sourceOrigin": "QDRANT",
+            "relevanceScore": 0.91,
+        },
+        {
+            "sourceType": "REPORT",
+            "title": "내부 URL 생산 리스크 보고서",
+            "summary": "내부 화면 이동이 가능한 문서 검색 결과입니다.",
+            "url": "/reports/21",
+            "referenceId": None,
+            "source": "safe-report:chunk-1",
+            "basisTime": None,
+            "sourceOrigin": "QDRANT",
+            "relevanceScore": 0.87,
+        },
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": True,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 2,
+        "evidenceCount": 3,
         "vectorSearchSkippedReason": None,
         "llmGenerationSkippedReason": None,
     }
