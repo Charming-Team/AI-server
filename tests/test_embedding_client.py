@@ -85,6 +85,63 @@ def test_embedding_client_embed_many_sends_single_batch_request() -> None:
     }
 
 
+def test_embedding_client_embed_many_deduplicates_repeated_texts() -> None:
+    captured_request: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["body"] = json.loads(request.content.decode())
+        return httpx.Response(200, json=[[0.1, 0.2], [0.3, 0.4]])
+
+    async def run_embed_many() -> list[list[float]]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = EmbeddingClient(
+                Settings(embedding_base_url="http://embedding.local"),
+                http_client=http_client,
+            )
+            return await client.embed_many(
+                [
+                    "반복 보고서 청크",
+                    "다른 보고서 청크",
+                    "반복 보고서 청크",
+                ]
+            )
+
+    vectors = anyio.run(run_embed_many)
+
+    assert captured_request["body"] == {
+        "inputs": [
+            "반복 보고서 청크",
+            "다른 보고서 청크",
+        ]
+    }
+    assert vectors == [[0.1, 0.2], [0.3, 0.4], [0.1, 0.2]]
+
+
+def test_embedding_client_rejects_deduplicated_response_count_mismatch() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[[0.1, 0.2]])
+
+    async def run_embed_many() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = EmbeddingClient(Settings(), http_client=http_client)
+            await client.embed_many(
+                [
+                    "반복 보고서 청크",
+                    "다른 보고서 청크",
+                    "반복 보고서 청크",
+                ]
+            )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_embed_many)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_EMBEDDING_002
+    assert exc_info.value.message == "임베딩 응답 개수가 요청 텍스트 개수와 일치하지 않습니다."
+
+
 def test_embedding_client_embed_many_skips_empty_texts() -> None:
     called = False
 

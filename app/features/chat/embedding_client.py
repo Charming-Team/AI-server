@@ -24,7 +24,8 @@ class EmbeddingClient:
         if not texts:
             return []
 
-        payload = self._build_payloads(texts)
+        unique_texts = self._deduplicate_texts(texts)
+        payload = self._build_payloads(unique_texts)
         try:
             if self.http_client is not None:
                 response = await self.http_client.post(
@@ -32,7 +33,8 @@ class EmbeddingClient:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_batch_response(response)
+                vectors = self._parse_batch_response(response)
+                return self._restore_duplicate_vectors(texts, unique_texts, vectors)
 
             async with httpx.AsyncClient(timeout=self.settings.embedding_timeout_seconds) as client:
                 response = await client.post(
@@ -40,13 +42,43 @@ class EmbeddingClient:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_batch_response(response)
+                vectors = self._parse_batch_response(response)
+                return self._restore_duplicate_vectors(texts, unique_texts, vectors)
         except httpx.HTTPError as exc:
             raise ChatExternalServiceError(
                 status_code=503,
                 code=ChatErrorCode.CHAT_EMBEDDING_004,
                 message="임베딩 서버 호출에 실패했습니다.",
             ) from exc
+
+    def _deduplicate_texts(self, texts: list[str]) -> list[str]:
+        unique_texts: list[str] = []
+        seen_texts: set[str] = set()
+        for text in texts:
+            if text in seen_texts:
+                continue
+            seen_texts.add(text)
+            unique_texts.append(text)
+        return unique_texts
+
+    def _restore_duplicate_vectors(
+        self,
+        original_texts: list[str],
+        unique_texts: list[str],
+        vectors: list[list[float]],
+    ) -> list[list[float]]:
+        if len(unique_texts) == len(original_texts):
+            return vectors
+
+        if len(vectors) != len(unique_texts):
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_EMBEDDING_002,
+                message="임베딩 응답 개수가 요청 텍스트 개수와 일치하지 않습니다.",
+            )
+
+        vector_by_text = dict(zip(unique_texts, vectors, strict=True))
+        return [vector_by_text[text] for text in original_texts]
 
     def _build_payload(self, text: str) -> dict:
         return {"inputs": [text]}
