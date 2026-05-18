@@ -119,6 +119,27 @@ def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:
     assert result.items[0].title == "MAT-001 재고 부족"
 
 
+def test_evidence_service_requires_internal_token_when_lookup_is_enabled() -> None:
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            evidence_lookup_base_url="http://spring.local",
+            evidence_lookup_internal_token=None,
+        )
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(
+            service.get_evidence,
+            _build_request(),
+            ChatIntent.MATERIAL_SHORTAGE,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_SECURITY_003
+    assert exc_info.value.message == "RDB Evidence 내부 토큰이 설정되지 않았습니다."
+
+
 def test_evidence_service_raises_custom_error_on_lookup_failure() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -135,6 +156,7 @@ def test_evidence_service_raises_custom_error_on_lookup_failure() -> None:
                 Settings(
                     evidence_lookup_enabled=True,
                     evidence_lookup_base_url="http://spring.local",
+                    evidence_lookup_internal_token="internal-token",
                 ),
                 http_client=http_client,
             )
@@ -164,6 +186,7 @@ def test_evidence_service_raises_custom_error_on_invalid_response() -> None:
                 Settings(
                     evidence_lookup_enabled=True,
                     evidence_lookup_base_url="http://spring.local",
+                    evidence_lookup_internal_token="internal-token",
                 ),
                 http_client=http_client,
             )
@@ -197,6 +220,7 @@ def test_evidence_service_rejects_response_intent_mismatch() -> None:
                 Settings(
                     evidence_lookup_enabled=True,
                     evidence_lookup_base_url="http://spring.local",
+                    evidence_lookup_internal_token="internal-token",
                 ),
                 http_client=http_client,
             )
