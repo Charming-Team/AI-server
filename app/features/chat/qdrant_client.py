@@ -90,13 +90,14 @@ class QdrantDocumentSearchClient:
                 message="Qdrant 응답 형식이 올바르지 않습니다.",
             ) from exc
 
+        if not isinstance(body, dict):
+            self._raise_invalid_response_shape()
+
         result = body.get("result", [])
         if not isinstance(result, list):
-            raise ChatExternalServiceError(
-                status_code=502,
-                code=ChatErrorCode.CHAT_QDRANT_003,
-                message="Qdrant 응답 형식이 올바르지 않습니다.",
-            )
+            self._raise_invalid_response_shape()
+        if not all(isinstance(point, dict) for point in result):
+            self._raise_invalid_response_shape()
         return result
 
     def _parse_collection_check_response(
@@ -120,13 +121,12 @@ class QdrantDocumentSearchClient:
                 message="Qdrant 응답 형식이 올바르지 않습니다.",
             ) from exc
 
+        if not isinstance(body, dict):
+            self._raise_invalid_response_shape()
+
         result = body.get("result")
         if not isinstance(result, dict):
-            raise ChatExternalServiceError(
-                status_code=502,
-                code=ChatErrorCode.CHAT_QDRANT_003,
-                message="Qdrant 응답 형식이 올바르지 않습니다.",
-            )
+            self._raise_invalid_response_shape()
 
         actual_dimension = self._extract_vector_dimension(result)
         return QdrantCollectionCheckResult(
@@ -173,6 +173,13 @@ class QdrantDocumentSearchClient:
         if isinstance(value, int):
             return value
         return None
+
+    def _raise_invalid_response_shape(self) -> None:
+        raise ChatExternalServiceError(
+            status_code=502,
+            code=ChatErrorCode.CHAT_QDRANT_003,
+            message="Qdrant 응답 형식이 올바르지 않습니다.",
+        )
 
     @property
     def _search_url(self) -> str:

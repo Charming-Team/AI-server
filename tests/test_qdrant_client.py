@@ -251,12 +251,21 @@ def test_qdrant_client_marks_collection_not_found() -> None:
     assert exc_info.value.message == "Qdrant 컬렉션 조회에 실패했습니다."
 
 
-def test_qdrant_client_raises_external_error_on_invalid_collection_shape() -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        ["not-a-dict"],
+        {"result": []},
+    ],
+)
+def test_qdrant_client_raises_external_error_on_invalid_collection_shape(
+    body: object,
+) -> None:
     client = QdrantDocumentSearchClient(Settings())
     response = httpx.Response(
         200,
         request=httpx.Request("GET", "http://qdrant.local/collections/docs"),
-        json={"result": []},
+        json=body,
     )
 
     with pytest.raises(ChatExternalServiceError) as exc_info:
@@ -285,12 +294,22 @@ def test_qdrant_client_raises_external_error_on_http_failure() -> None:
     assert exc_info.value.message == "Qdrant 검색에 실패했습니다."
 
 
-def test_qdrant_client_raises_external_error_on_invalid_result_shape() -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        ["not-a-dict"],
+        {"result": {"id": "point-1"}},
+        {"result": ["not-a-dict"]},
+    ],
+)
+def test_qdrant_client_raises_external_error_on_invalid_result_shape(
+    body: object,
+) -> None:
     client = QdrantDocumentSearchClient(Settings())
     response = httpx.Response(
         200,
         request=httpx.Request("POST", "http://qdrant.local/search"),
-        json={"result": {"id": "point-1"}},
+        json=body,
     )
 
     with pytest.raises(ChatExternalServiceError) as exc_info:
