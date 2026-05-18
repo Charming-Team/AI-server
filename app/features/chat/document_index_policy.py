@@ -7,6 +7,7 @@ from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
+from app.features.chat.security_policy import SecurityPolicy
 from app.features.chat.source_url_policy import normalize_internal_url
 
 
@@ -24,15 +25,18 @@ class DocumentIndexPolicy:
         self,
         max_content_chars: int = 100_000,
         document_access_policy: DocumentAccessPolicy | None = None,
+        security_policy: SecurityPolicy | None = None,
     ) -> None:
         self.max_content_chars = max_content_chars
         self.document_access_policy = document_access_policy or DocumentAccessPolicy()
+        self.security_policy = security_policy or SecurityPolicy()
 
     def validate(self, document: InternalDocumentInput) -> None:
         self._validate_required_text(document.document_id, "문서 ID")
         self._validate_required_text(document.title, "문서 제목")
         self._validate_content_length(document.content)
         self._validate_url(document.url)
+        self._validate_grounding_security(document)
 
         if document.document_type not in self.allowed_document_types:
             raise ChatServiceError(
@@ -132,3 +136,24 @@ class DocumentIndexPolicy:
             code=ChatErrorCode.CHAT_DOCUMENT_002,
             message="문서 URL은 내부 상대 경로만 허용됩니다.",
         )
+
+    def _validate_grounding_security(self, document: InternalDocumentInput) -> None:
+        for value in (
+            document.document_id,
+            document.title,
+            document.summary,
+            document.content,
+            document.url,
+        ):
+            if not value:
+                continue
+
+            security_result = self.security_policy.evaluate(value)
+            if security_result is None:
+                continue
+
+            raise ChatServiceError(
+                status_code=400,
+                code=security_result.code or ChatErrorCode.CHAT_SECURITY_002,
+                message="문서에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
+            )
