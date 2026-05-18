@@ -119,6 +119,77 @@ def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:
     assert result.items[0].title == "MAT-001 재고 부족"
 
 
+def test_evidence_service_normalizes_lookup_path() -> None:
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_base_url="http://spring.local/",
+            evidence_lookup_path="internal/chat/evidence",
+            evidence_lookup_internal_token="internal-token",
+        )
+    )
+
+    assert service._evidence_lookup_url == "http://spring.local/internal/chat/evidence"
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_message"),
+    [
+        (
+            Settings(
+                evidence_lookup_enabled=True,
+                evidence_lookup_base_url=" ",
+                evidence_lookup_internal_token="internal-token",
+            ),
+            "RDB Evidence 필수 설정이 누락되었습니다: evidence_lookup_base_url",
+        ),
+        (
+            Settings(
+                evidence_lookup_enabled=True,
+                evidence_lookup_path=" ",
+                evidence_lookup_internal_token="internal-token",
+            ),
+            "RDB Evidence 필수 설정이 누락되었습니다: evidence_lookup_path",
+        ),
+        (
+            Settings(
+                evidence_lookup_enabled=True,
+                evidence_lookup_base_url=" ",
+                evidence_lookup_path=" ",
+                evidence_lookup_internal_token="internal-token",
+            ),
+            (
+                "RDB Evidence 필수 설정이 누락되었습니다: "
+                "evidence_lookup_base_url, evidence_lookup_path"
+            ),
+        ),
+    ],
+)
+def test_evidence_service_requires_lookup_settings_when_enabled(
+    settings: Settings,
+    expected_message: str,
+) -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"items": []})
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            service = EvidenceService(settings, http_client=http_client)
+            await service.get_evidence(_build_request(), ChatIntent.MATERIAL_SHORTAGE)
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_EVIDENCE_004
+    assert exc_info.value.message == expected_message
+    assert called is False
+
+
 def test_evidence_service_requires_internal_token_when_lookup_is_enabled() -> None:
     service = EvidenceService(
         Settings(

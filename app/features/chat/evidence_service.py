@@ -15,6 +15,33 @@ from app.features.chat.schemas import (
 )
 
 
+def validate_evidence_lookup_settings(settings: Settings) -> None:
+    missing_fields: list[str] = []
+    if not settings.evidence_lookup_base_url.strip():
+        missing_fields.append("evidence_lookup_base_url")
+    if not settings.evidence_lookup_path.strip():
+        missing_fields.append("evidence_lookup_path")
+
+    if missing_fields:
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_EVIDENCE_004,
+            message=(
+                "RDB Evidence 필수 설정이 누락되었습니다: "
+                f"{', '.join(missing_fields)}"
+            ),
+        )
+
+    if settings.evidence_lookup_internal_token:
+        return
+
+    raise ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_SECURITY_003,
+        message="RDB Evidence 내부 토큰이 설정되지 않았습니다.",
+    )
+
+
 class EvidenceService:
     def __init__(
         self,
@@ -34,7 +61,7 @@ class EvidenceService:
         if not self.settings.evidence_lookup_enabled:
             return self._empty_result(request, intent)
 
-        self._validate_lookup_settings()
+        validate_evidence_lookup_settings(self.settings)
         payload = self._build_payload(request, intent)
         try:
             if self.http_client is not None:
@@ -74,23 +101,17 @@ class EvidenceService:
 
     @property
     def _evidence_lookup_url(self) -> str:
-        return f"{self.settings.evidence_lookup_base_url}{self.settings.evidence_lookup_path}"
+        base_url = self.settings.evidence_lookup_base_url.rstrip("/")
+        path = self.settings.evidence_lookup_path.strip()
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return f"{base_url}{path}"
 
     @property
     def _headers(self) -> dict[str, str]:
         if not self.settings.evidence_lookup_internal_token:
             return {}
         return {"X-Internal-Token": self.settings.evidence_lookup_internal_token}
-
-    def _validate_lookup_settings(self) -> None:
-        if self.settings.evidence_lookup_internal_token:
-            return
-
-        raise ChatExternalServiceError(
-            status_code=503,
-            code=ChatErrorCode.CHAT_SECURITY_003,
-            message="RDB Evidence 내부 토큰이 설정되지 않았습니다.",
-        )
 
     def _build_payload(
         self,
