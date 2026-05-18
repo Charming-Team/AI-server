@@ -217,7 +217,7 @@ def test_qdrant_client_checks_single_named_vector_dimension() -> None:
 
 def test_qdrant_client_raises_external_error_on_collection_http_failure() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(404, json={"status": "error"})
+        return httpx.Response(500, json={"status": "error"})
 
     async def run_check() -> None:
         transport = httpx.MockTransport(handler)
@@ -229,6 +229,24 @@ def test_qdrant_client_raises_external_error_on_collection_http_failure() -> Non
         anyio.run(run_check)
 
     assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_002
+    assert exc_info.value.message == "Qdrant 컬렉션 조회에 실패했습니다."
+
+
+def test_qdrant_client_marks_collection_not_found() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"status": "error"})
+
+    async def run_check() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentSearchClient(Settings(), http_client=http_client)
+            await client.check_collection()
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_check)
+
+    assert exc_info.value.status_code == 404
     assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_002
     assert exc_info.value.message == "Qdrant 컬렉션 조회에 실패했습니다."
 
@@ -301,6 +319,10 @@ def test_qdrant_index_client_builds_points_url_and_headers() -> None:
         client._points_delete_url
         == "http://qdrant.qdrant.svc.cluster.local:6333/collections/smap_documents/points/delete?wait=true"
     )
+    assert (
+        client._collection_url
+        == "http://qdrant.qdrant.svc.cluster.local:6333/collections/smap_documents"
+    )
 
 
 def test_qdrant_index_client_upserts_points() -> None:
@@ -359,6 +381,53 @@ def test_qdrant_index_client_skips_empty_points() -> None:
 
     assert result == {}
     assert called is False
+
+
+def test_qdrant_index_client_creates_collection() -> None:
+    captured_request: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["method"] = request.method
+        captured_request["url"] = str(request.url)
+        captured_request["headers"] = dict(request.headers)
+        captured_request["body"] = request.content.decode()
+        return httpx.Response(200, json={"result": True, "status": "ok"})
+
+    async def run_create() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentIndexClient(
+                Settings(qdrant_api_key="qdrant-token", embedding_dimension=1024),
+                http_client=http_client,
+            )
+            return await client.create_collection(distance="Cosine")
+
+    result = anyio.run(run_create)
+
+    assert result == {"result": True, "status": "ok"}
+    assert captured_request["method"] == "PUT"
+    assert captured_request["url"].endswith("/collections/smap_internal_documents")
+    assert captured_request["headers"]["api-key"] == "qdrant-token"
+    assert '"size":1024' in captured_request["body"]
+    assert '"distance":"Cosine"' in captured_request["body"]
+
+
+def test_qdrant_index_client_raises_external_error_on_create_http_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"status": "error"})
+
+    async def run_create() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = QdrantDocumentIndexClient(Settings(), http_client=http_client)
+            await client.create_collection()
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run_create)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_002
+    assert exc_info.value.message == "Qdrant 컬렉션 생성에 실패했습니다."
 
 
 def test_qdrant_index_client_deletes_points_by_document_id() -> None:

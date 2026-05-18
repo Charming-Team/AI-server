@@ -6,9 +6,10 @@ from dataclasses import asdict
 from typing import Any, TextIO
 
 from app.core.config import Settings
-from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.qdrant_client import (
     QdrantCollectionCheckResult,
+    QdrantDocumentIndexClient,
     QdrantDocumentSearchClient,
 )
 from app.features.chat.schemas import ChatErrorCode, ErrorResponse
@@ -20,7 +21,7 @@ DIMENSION_MISMATCH_MESSAGE = (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Qdrant 컬렉션과 FastAPI 임베딩 설정이 맞는지 점검합니다."
+        description="Qdrant 컬렉션이 없으면 생성하고, 있으면 dimension을 확인합니다."
     )
     parser.add_argument("--qdrant-url", help="Qdrant base URL")
     parser.add_argument("--collection", help="Qdrant collection name")
@@ -29,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--embedding-dimension",
         type=int,
         help="Expected embedding vector dimension",
+    )
+    parser.add_argument(
+        "--distance",
+        default="Cosine",
+        choices=("Cosine", "Euclid", "Dot", "Manhattan"),
+        help="Qdrant vector distance",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -63,6 +70,11 @@ async def check_collection(settings: Settings) -> QdrantCollectionCheckResult:
     return await client.check_collection()
 
 
+async def create_collection(settings: Settings, distance: str) -> dict:
+    client = QdrantDocumentIndexClient(settings)
+    return await client.create_collection(distance=distance)
+
+
 def build_dimension_mismatch_error(
     result: QdrantCollectionCheckResult,
 ) -> ErrorResponse | None:
@@ -79,38 +91,57 @@ def build_dimension_mismatch_error(
     )
 
 
-def format_text_result(result: QdrantCollectionCheckResult) -> str:
-    check_status = "PASS" if result.is_dimension_matched else "FAIL"
+async def ensure_collection(settings: Settings, distance: str) -> dict[str, Any]:
+    try:
+        check_result = await check_collection(settings)
+    except ChatExternalServiceError as exc:
+        if exc.status_code != 404:
+            raise
+        operation = await create_collection(settings, distance)
+        check_result = await check_collection(settings)
+        return {
+            "action": "CREATED",
+            "operation": operation,
+            "collection": asdict(check_result),
+            "error": None,
+        }
+
+    error = build_dimension_mismatch_error(check_result)
+    return {
+        "action": "EXISTS" if check_result.is_dimension_matched else "MISMATCH",
+        "operation": None,
+        "collection": asdict(check_result),
+        "error": error.model_dump(mode="json") if error is not None else None,
+    }
+
+
+def format_text_result(result: dict[str, Any]) -> str:
+    collection = result["collection"]
+    points_count = (
+        collection["points_count"] if collection["points_count"] is not None else "unknown"
+    )
     lines = [
-        f"status={check_status}",
-        f"collection={result.collection_name}",
-        f"qdrantStatus={result.status or 'unknown'}",
-        f"expectedDimension={result.expected_dimension}",
-        f"actualDimension={result.actual_dimension or 'unknown'}",
-        f"pointsCount={result.points_count if result.points_count is not None else 'unknown'}",
+        f"action={result['action']}",
+        f"collection={collection['collection_name']}",
+        f"qdrantStatus={collection['status'] or 'unknown'}",
+        f"expectedDimension={collection['expected_dimension']}",
+        f"actualDimension={collection['actual_dimension'] or 'unknown'}",
+        f"dimensionMatched={collection['is_dimension_matched']}",
+        f"pointsCount={points_count}",
     ]
-    error = build_dimension_mismatch_error(result)
-    if error is not None:
+    error = result.get("error")
+    if isinstance(error, dict):
         lines.extend(
             [
-                f"code={error.code}",
-                f"message={error.message}",
+                f"code={error['code']}",
+                f"message={error['message']}",
             ]
         )
     return "\n".join(lines)
 
 
-def format_json_result(result: QdrantCollectionCheckResult) -> str:
-    error = build_dimension_mismatch_error(result)
-    return json.dumps(
-        {
-            "checkStatus": "PASS" if result.is_dimension_matched else "FAIL",
-            **asdict(result),
-            "error": error.model_dump(mode="json") if error is not None else None,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
+def format_json_result(result: dict[str, Any]) -> str:
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 def main(
@@ -124,9 +155,9 @@ def main(
     settings = build_settings(args)
 
     try:
-        result = asyncio.run(check_collection(settings))
+        result = asyncio.run(ensure_collection(settings, args.distance))
     except ChatServiceError as exc:
-        print(f"Qdrant 컬렉션 점검 실패: {exc.message}", file=error_output)
+        print(f"Qdrant 컬렉션 생성/점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
         return 1
 
@@ -134,7 +165,7 @@ def main(
         print(format_json_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
-    return 0 if result.is_dimension_matched else 2
+    return 2 if result["action"] == "MISMATCH" else 0
 
 
 if __name__ == "__main__":

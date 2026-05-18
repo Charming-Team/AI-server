@@ -107,8 +107,9 @@ class QdrantDocumentSearchClient:
             response.raise_for_status()
             body = response.json()
         except httpx.HTTPStatusError as exc:
+            status_code = 404 if exc.response.status_code == 404 else 503
             raise ChatExternalServiceError(
-                status_code=503,
+                status_code=status_code,
                 code=ChatErrorCode.CHAT_QDRANT_002,
                 message="Qdrant 컬렉션 조회에 실패했습니다.",
             ) from exc
@@ -234,6 +235,40 @@ class QdrantDocumentIndexClient:
             failure_message="Qdrant 기존 문서 삭제에 실패했습니다.",
         )
 
+    async def create_collection(
+        self,
+        dimension: int | None = None,
+        distance: str = "Cosine",
+    ) -> dict:
+        payload = {
+            "vectors": {
+                "size": dimension or self.settings.embedding_dimension,
+                "distance": distance,
+            }
+        }
+        try:
+            if self.http_client is not None:
+                response = await self.http_client.put(
+                    self._collection_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_create_collection_response(response)
+
+            async with httpx.AsyncClient(timeout=self.settings.qdrant_timeout_seconds) as client:
+                response = await client.put(
+                    self._collection_url,
+                    json=payload,
+                    headers=self._headers,
+                )
+                return self._parse_create_collection_response(response)
+        except httpx.HTTPError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_QDRANT_002,
+                message="Qdrant 컬렉션 생성에 실패했습니다.",
+            ) from exc
+
     async def _send_request(
         self,
         method: str,
@@ -303,6 +338,34 @@ class QdrantDocumentIndexClient:
             )
         return result
 
+    def _parse_create_collection_response(self, response: httpx.Response) -> dict:
+        try:
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_QDRANT_002,
+                message="Qdrant 컬렉션 생성에 실패했습니다.",
+            ) from exc
+        except ValueError as exc:
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_QDRANT_003,
+                message="Qdrant 응답 형식이 올바르지 않습니다.",
+            ) from exc
+
+        if not isinstance(body, dict):
+            raise ChatExternalServiceError(
+                status_code=502,
+                code=ChatErrorCode.CHAT_QDRANT_003,
+                message="Qdrant 응답 형식이 올바르지 않습니다.",
+            )
+        return {
+            "result": body.get("result"),
+            "status": body.get("status"),
+        }
+
     @property
     def _points_url(self) -> str:
         base_url = self.settings.qdrant_url.rstrip("/")
@@ -314,6 +377,12 @@ class QdrantDocumentIndexClient:
         base_url = self.settings.qdrant_url.rstrip("/")
         collection = self.settings.qdrant_collection
         return f"{base_url}/collections/{collection}/points/delete?wait=true"
+
+    @property
+    def _collection_url(self) -> str:
+        base_url = self.settings.qdrant_url.rstrip("/")
+        collection = self.settings.qdrant_collection
+        return f"{base_url}/collections/{collection}"
 
     @property
     def _headers(self) -> dict[str, str]:
