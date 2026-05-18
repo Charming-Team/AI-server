@@ -86,6 +86,7 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
                 "qdrant_collection": ChatErrorCode.CHAT_QDRANT_001,
             },
         ),
+        _chat_grounding_pipeline_component(settings),
         _integration_component(
             name="embedding",
             enabled=settings.embedding_enabled,
@@ -115,6 +116,23 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
             },
         ),
     ]
+
+
+def _chat_grounding_pipeline_component(settings: Settings) -> ReadinessComponent:
+    if settings.evidence_lookup_enabled or settings.qdrant_search_enabled:
+        return ReadinessComponent(
+            name="chatGroundingPipeline",
+            enabled=True,
+            configured=True,
+        )
+
+    return ReadinessComponent(
+        name="chatGroundingPipeline",
+        enabled=True,
+        configured=False,
+        code=ChatErrorCode.CHAT_EVIDENCE_001,
+        reason="챗봇 답변에는 RDB Evidence 또는 Qdrant 검색 중 하나가 필요합니다.",
+    )
 
 
 def _document_index_pipeline_component(settings: Settings) -> ReadinessComponent:
