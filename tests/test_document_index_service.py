@@ -49,7 +49,7 @@ class FakeQdrantIndexClient:
         }
 
 
-class FakeInvalidOperationQdrantIndexClient(FakeQdrantIndexClient):
+class FakeInvalidUpsertOperationQdrantIndexClient(FakeQdrantIndexClient):
     async def upsert(self, points: list[QdrantUpsertPoint]) -> dict:
         self.points = points
         self.calls.append("upsert")
@@ -58,6 +58,8 @@ class FakeInvalidOperationQdrantIndexClient(FakeQdrantIndexClient):
             "status": "completed",
         }
 
+
+class FakeInvalidDeleteOperationQdrantIndexClient(FakeQdrantIndexClient):
     async def delete_by_document_id(self, document_id: str) -> dict:
         self.deleted_document_id = document_id
         self.calls.append("delete")
@@ -65,6 +67,11 @@ class FakeInvalidOperationQdrantIndexClient(FakeQdrantIndexClient):
             "operation_id": 99,
             "status": None,
         }
+
+    async def upsert(self, points: list[QdrantUpsertPoint]) -> dict:
+        raise AssertionError(
+            "delete operation 형식이 잘못되면 upsert를 호출하면 안 됩니다."
+        )
 
 
 class FakeAuditLogger:
@@ -350,7 +357,7 @@ def test_document_index_service_rejects_embedding_count_mismatch() -> None:
 
 
 def test_document_index_service_rejects_invalid_qdrant_upsert_operation() -> None:
-    qdrant_index_client = FakeInvalidOperationQdrantIndexClient()
+    qdrant_index_client = FakeInvalidUpsertOperationQdrantIndexClient()
     audit_logger = FakeAuditLogger()
     service = DocumentIndexService(
         Settings(
@@ -375,8 +382,34 @@ def test_document_index_service_rejects_invalid_qdrant_upsert_operation() -> Non
     assert audit_logger.index_failure_logs == [(document, exc_info.value)]
 
 
+def test_document_index_service_rejects_invalid_qdrant_pre_delete_operation() -> None:
+    qdrant_index_client = FakeInvalidDeleteOperationQdrantIndexClient()
+    audit_logger = FakeAuditLogger()
+    service = DocumentIndexService(
+        Settings(
+            embedding_enabled=True,
+            embedding_dimension=2,
+            document_chunk_size=10,
+            document_chunk_overlap=0,
+        ),
+        embedding_client=FakeEmbeddingClient([[0.1, 0.2], [0.3, 0.4]]),
+        qdrant_index_client=qdrant_index_client,
+        audit_logger=audit_logger,
+    )
+    document = _build_document()
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(service.index_document, document)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_003
+    assert exc_info.value.message == "Qdrant operation 응답 형식이 올바르지 않습니다."
+    assert qdrant_index_client.calls == ["delete"]
+    assert audit_logger.index_failure_logs == [(document, exc_info.value)]
+
+
 def test_document_index_service_rejects_invalid_qdrant_delete_operation() -> None:
-    qdrant_index_client = FakeInvalidOperationQdrantIndexClient()
+    qdrant_index_client = FakeInvalidDeleteOperationQdrantIndexClient()
     audit_logger = FakeAuditLogger()
     service = DocumentIndexService(
         Settings(),
