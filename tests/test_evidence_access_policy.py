@@ -150,3 +150,33 @@ def test_evidence_access_policy_filters_unsafe_grounding_items() -> None:
     result = policy.sanitize("EXECUTIVE", evidence_result)
 
     assert [item.title for item in result.items] == ["정상 보고서"]
+
+
+def test_evidence_access_policy_sanitizes_unsafe_url() -> None:
+    policy = EvidenceAccessPolicy()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="외부 URL 보고서",
+                summary="자재 부족이 주요 리스크입니다.",
+                url="https://evil.example/reports/20",
+                source="reports",
+                allowedRoles=["EXECUTIVE"],
+            ),
+            EvidenceItem(
+                type="REPORT",
+                title="내부 URL 보고서",
+                summary="라인 병목이 주요 리스크입니다.",
+                url=" /reports/20 ",
+                source="reports",
+                allowedRoles=["EXECUTIVE"],
+            ),
+        ],
+    )
+
+    result = policy.sanitize("EXECUTIVE", evidence_result)
+
+    assert [item.url for item in result.items] == [None, "/reports/20"]

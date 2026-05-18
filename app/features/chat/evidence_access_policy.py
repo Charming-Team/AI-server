@@ -3,6 +3,7 @@ from typing import Any
 from app.features.chat.access_control import OPERATOR_RESTRICTED_TERMS, OPERATOR_ROLE
 from app.features.chat.grounding_security_policy import GroundingSecurityPolicy
 from app.features.chat.schemas import ChatUserContext, EvidenceItem, EvidenceResult
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 class EvidenceAccessPolicy:
@@ -74,14 +75,26 @@ class EvidenceAccessPolicy:
         if not self.grounding_security_policy.allows_evidence_item(item):
             return None
 
-        if role != OPERATOR_ROLE:
-            return item
+        sanitized_item = self._sanitize_url(item)
 
-        if self._contains_restricted_term(item.title) or self._contains_restricted_term(
-            item.summary
+        if role != OPERATOR_ROLE:
+            return sanitized_item
+
+        if self._contains_restricted_term(
+            sanitized_item.title
+        ) or self._contains_restricted_term(
+            sanitized_item.summary
         ):
             return None
-        return item.model_copy(update={"data": self._sanitize_data(item.data)})
+        return sanitized_item.model_copy(
+            update={"data": self._sanitize_data(sanitized_item.data)}
+        )
+
+    def _sanitize_url(self, item: EvidenceItem) -> EvidenceItem:
+        safe_url = normalize_internal_url(item.url)
+        if item.url == safe_url:
+            return item
+        return item.model_copy(update={"url": safe_url})
 
     def _is_role_allowed(self, item: EvidenceItem, role: str) -> bool:
         return not item.allowed_roles or role in item.allowed_roles

@@ -10,6 +10,7 @@ from app.features.chat.schemas import (
     SecurityResult,
     SecurityStatus,
 )
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 class ChatResponseBuilder:
@@ -84,18 +85,7 @@ class ChatResponseBuilder:
         return source.model_copy(update={"url": safe_url})
 
     def _safe_internal_url(self, url: str | None) -> str | None:
-        if not url:
-            return None
-
-        stripped_url = url.strip()
-        if (
-            not stripped_url.startswith("/")
-            or stripped_url.startswith("//")
-            or "\\" in stripped_url
-            or any(char.isspace() for char in stripped_url)
-        ):
-            return None
-        return stripped_url
+        return normalize_internal_url(url)
 
     def _truncate_source_summary(self, summary: str) -> str:
         if len(summary) <= self._max_source_summary_chars:

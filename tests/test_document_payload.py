@@ -109,6 +109,20 @@ def test_internal_document_payload_maps_to_chat_source() -> None:
     assert source.relevance_score is None
 
 
+def test_internal_document_payload_removes_unsafe_url_from_chat_source() -> None:
+    payload = InternalDocumentPayload(
+        documentId="report-202605",
+        documentType="REPORT",
+        title="2026년 5월 생산 리스크 보고서",
+        chunkText="보고서 본문 청크",
+        url="https://evil.example/reports/20",
+    )
+
+    source = payload.to_chat_source()
+
+    assert source.url is None
+
+
 def test_qdrant_search_point_maps_payload_to_chat_source() -> None:
     point = QdrantSearchPoint.model_validate(
         {

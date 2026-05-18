@@ -7,6 +7,7 @@ from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 class DocumentIndexPolicy:
@@ -123,12 +124,7 @@ class DocumentIndexPolicy:
         if not url:
             return
 
-        if (
-            url.startswith("/")
-            and not url.startswith("//")
-            and "\\" not in url
-            and not any(char.isspace() for char in url)
-        ):
+        if normalize_internal_url(url) is not None:
             return
 
         raise ChatServiceError(

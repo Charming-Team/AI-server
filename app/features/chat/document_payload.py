@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.features.chat.schemas import ChatSource
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 def _normalize_upper_text(value: str) -> str:
@@ -146,7 +147,7 @@ class InternalDocumentPayload(BaseModel):
             source_type=self.document_type,
             title=self.title,
             summary=self._source_summary,
-            url=self.url,
+            url=normalize_internal_url(self.url),
             reference_id=self.reference_id,
             source=self._source_name,
             basis_time=self.basis_time,
