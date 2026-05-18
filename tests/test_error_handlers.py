@@ -31,6 +31,27 @@ def _post_chat_answer(*, json: dict):
             app.dependency_overrides[get_settings] = previous_override
 
 
+def _post_chat_answer_raw(*, content: str):
+    previous_override = app.dependency_overrides.get(get_settings, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
+    )
+    try:
+        return client.post(
+            "/api/v1/chat/answer",
+            headers={
+                **CHAT_ANSWER_HEADERS,
+                "Content-Type": "application/json",
+            },
+            content=content,
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_settings, None)
+        else:
+            app.dependency_overrides[get_settings] = previous_override
+
+
 def test_validation_error_returns_error_response() -> None:
     response = _post_chat_answer(
         json={
@@ -42,6 +63,39 @@ def test_validation_error_returns_error_response() -> None:
                 "companyName": "S-MAP",
                 "status": "ACTIVE",
             },
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "CHAT_REQUEST_001",
+        "message": "요청 본문 형식이 올바르지 않습니다.",
+    }
+
+
+def test_malformed_json_returns_error_response() -> None:
+    response = _post_chat_answer_raw(content='{"sessionId": 10,')
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "CHAT_REQUEST_001",
+        "message": "요청 본문 형식이 올바르지 않습니다.",
+    }
+
+
+def test_question_length_validation_returns_error_response() -> None:
+    response = _post_chat_answer(
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "MANUFACTURING_MANAGER",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "가" * 1001,
             "requestedAt": "2026-05-12T10:30:00+09:00",
         },
     )
