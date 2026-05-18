@@ -1,11 +1,11 @@
 from typing import Any
 
+from app.features.chat.access_control import OPERATOR_RESTRICTED_TERMS, OPERATOR_ROLE
 from app.features.chat.document_payload import InternalDocumentInput
-from app.features.chat.role_access_policy import RoleAccessPolicy
 
 
 class DocumentAccessPolicy:
-    _operator_role = "OPERATOR"
+    _operator_role = OPERATOR_ROLE
 
     def allows_document(self, document: InternalDocumentInput) -> bool:
         if not self._includes_operator(document.allowed_roles):
@@ -45,7 +45,7 @@ class DocumentAccessPolicy:
         compact_value = self._compact(normalized_value)
         return any(
             self._contains_term(term, normalized_value, compact_value)
-            for term in RoleAccessPolicy.operator_restricted_terms
+            for term in OPERATOR_RESTRICTED_TERMS
         )
 
     def _contains_term(

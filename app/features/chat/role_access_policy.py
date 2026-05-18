@@ -1,3 +1,9 @@
+from app.features.chat.access_control import (
+    BUSINESS_ROLES,
+    OPERATOR_RESTRICTED_TERMS,
+    OPERATOR_ROLE,
+    ROLE_INTENT_MATRIX,
+)
 from app.features.chat.schemas import (
     ChatErrorCode,
     ChatIntent,
@@ -7,54 +13,9 @@ from app.features.chat.schemas import (
 
 
 class RoleAccessPolicy:
-    allowed_business_roles = {"OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"}
-    role_intent_matrix = {
-        "OPERATOR": {
-            ChatIntent.DELIVERY_RISK,
-            ChatIntent.MATERIAL_SHORTAGE,
-            ChatIntent.PRODUCTION_PLAN,
-            ChatIntent.WORK_PRIORITY,
-            ChatIntent.LINE_BOTTLENECK,
-        },
-        "EXECUTIVE": {
-            ChatIntent.DELIVERY_RISK,
-            ChatIntent.MATERIAL_SHORTAGE,
-            ChatIntent.PRODUCTION_PLAN,
-            ChatIntent.URGENT_ORDER_IMPACT,
-            ChatIntent.WORK_PRIORITY,
-            ChatIntent.LINE_BOTTLENECK,
-            ChatIntent.REPORT_LOOKUP,
-        },
-        "MANUFACTURING_MANAGER": {
-            ChatIntent.DELIVERY_RISK,
-            ChatIntent.MATERIAL_SHORTAGE,
-            ChatIntent.PRODUCTION_PLAN,
-            ChatIntent.URGENT_ORDER_IMPACT,
-            ChatIntent.WORK_PRIORITY,
-            ChatIntent.LINE_BOTTLENECK,
-            ChatIntent.REPORT_LOOKUP,
-        },
-    }
-    operator_restricted_terms = (
-        "계약 금액",
-        "계약금액",
-        "패널티",
-        "지체상금",
-        "매출",
-        "수익",
-        "손익",
-        "비용",
-        "원가",
-        "금액",
-        "돈",
-        "financial",
-        "finance",
-        "contract amount",
-        "penalty",
-        "revenue",
-        "profit",
-        "cost",
-    )
+    allowed_business_roles = BUSINESS_ROLES
+    role_intent_matrix = ROLE_INTENT_MATRIX
+    operator_restricted_terms = OPERATOR_RESTRICTED_TERMS
 
     def evaluate(
         self,
@@ -83,7 +44,7 @@ class RoleAccessPolicy:
                 ),
             )
 
-        if normalized_role == "OPERATOR" and self._contains_restricted_term(question):
+        if normalized_role == OPERATOR_ROLE and self._contains_restricted_term(question):
             return SecurityResult(
                 status=SecurityStatus.BLOCKED_UNAUTHORIZED,
                 code=ChatErrorCode.CHAT_SECURITY_004,

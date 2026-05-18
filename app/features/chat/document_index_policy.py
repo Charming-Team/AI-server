@@ -1,3 +1,7 @@
+from app.features.chat.access_control import (
+    BUSINESS_ROLES,
+    COMPANY_INFO_INDEXER_ROLES,
+)
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.exceptions import ChatServiceError
@@ -6,8 +10,8 @@ from app.features.chat.schemas import ChatErrorCode, ChatIntent
 
 class DocumentIndexPolicy:
     allowed_document_types = {"REPORT", "COMPANY_INFO"}
-    allowed_roles = {"OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"}
-    company_info_indexer_roles = {"ADMIN", "MANUFACTURING_MANAGER"}
+    allowed_roles = BUSINESS_ROLES
+    company_info_indexer_roles = COMPANY_INFO_INDEXER_ROLES
     allowed_intent_tags = {
         intent.value
         for intent in ChatIntent

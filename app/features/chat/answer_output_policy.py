@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from app.features.chat.role_access_policy import RoleAccessPolicy
+from app.features.chat.access_control import OPERATOR_RESTRICTED_TERMS, OPERATOR_ROLE
 from app.features.chat.schemas import ChatErrorCode, SecurityResult, SecurityStatus
 from app.features.chat.sensitive_pattern_policy import SensitivePatternPolicy
 
@@ -44,7 +44,7 @@ class AnswerOutputPolicy:
             "OPERATOR 역할 답변에 금액, 계약, 패널티 등 "
             "경영/재무성 정보가 포함된 것으로 판단되었습니다."
         ),
-        terms=RoleAccessPolicy.operator_restricted_terms,
+        terms=OPERATOR_RESTRICTED_TERMS,
     )
 
     def __init__(
@@ -76,7 +76,7 @@ class AnswerOutputPolicy:
             )
         if (
             role is not None
-            and role.strip().upper() == "OPERATOR"
+            and role.strip().upper() == OPERATOR_ROLE
             and self._matches_rule(
                 self._operator_financial_rule,
                 normalized_answer,

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from app.features.chat.access_control import BUSINESS_ROLES
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import (
     ChatErrorCode,
@@ -22,7 +23,7 @@ class RecommendedQuestionRule:
 
 class RecommendationService:
     _max_items = 6
-    _business_roles = {"OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"}
+    _business_roles = BUSINESS_ROLES
 
     _rules: tuple[RecommendedQuestionRule, ...] = (
         RecommendedQuestionRule(
