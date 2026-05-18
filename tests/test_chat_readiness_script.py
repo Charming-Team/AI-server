@@ -114,6 +114,28 @@ def test_check_chat_readiness_script_prints_json(
     assert '"name": "chatGroundingPipeline"' in stdout.getvalue()
 
 
+@pytest.mark.parametrize("argv", [[], ["--json"]])
+def test_check_chat_readiness_script_does_not_expose_secret_values(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        check_chat_readiness,
+        "build_settings",
+        lambda args: _ready_settings(),
+    )
+    stdout = StringIO()
+
+    exit_code = check_chat_readiness.main(argv, stdout=stdout)
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "answer-token" not in output
+    assert "recommendation-token" not in output
+    assert "document-token" not in output
+    assert "evidence-token" not in output
+
+
 def test_check_chat_readiness_script_returns_one_on_settings_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
