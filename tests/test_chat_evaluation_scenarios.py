@@ -3,10 +3,12 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings
 from app.features.chat.document_search_service import DocumentSearchService
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.router import get_chat_service
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
+    ChatErrorCode,
     ChatIntent,
     ChatSource,
     DocumentSearchResult,
@@ -105,6 +107,19 @@ class FakeGroundedDocumentSearchService:
                     relevanceScore=0.89,
                 )
             ],
+        )
+
+
+class FakeFailingEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_EVIDENCE_002,
+            message="RDB Evidence 조회에 실패했습니다.",
         )
 
 
@@ -342,6 +357,14 @@ class FakeOperatorQdrantSafeAnswerGenerationService:
 def _build_grounded_chat_service() -> ChatService:
     service = ChatService(Settings())
     service.evidence_service = FakeGroundedEvidenceService()
+    service.document_search_service = FakeGroundedDocumentSearchService()
+    service.answer_generation_service = FakeGroundedAnswerGenerationService()
+    return service
+
+
+def _build_failing_evidence_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeFailingEvidenceService()
     service.document_search_service = FakeGroundedDocumentSearchService()
     service.answer_generation_service = FakeGroundedAnswerGenerationService()
     return service
@@ -672,6 +695,29 @@ def test_chat_answer_evaluation_returns_grounded_answer_with_sources() -> None:
         "evidenceCount": 2,
         "vectorSearchSkippedReason": None,
         "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_returns_error_response_when_evidence_lookup_fails() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_failing_evidence_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "MANUFACTURING_MANAGER",
+                "자재 부족으로 영향받는 생산계획 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "CHAT_EVIDENCE_002",
+        "message": "RDB Evidence 조회에 실패했습니다.",
     }
 
 
