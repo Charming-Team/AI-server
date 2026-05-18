@@ -13,6 +13,8 @@ from app.features.chat.schemas import (
 
 
 class ChatResponseBuilder:
+    _max_source_summary_chars = 300
+
     def build_sources(
         self,
         evidence_result: EvidenceResult,
@@ -66,13 +68,18 @@ class ChatResponseBuilder:
         return ChatSource(
             source_type=item.type,
             title=item.title,
-            summary=item.summary,
+            summary=self._truncate_source_summary(item.summary),
             url=item.url,
             reference_id=item.reference_id,
             source=item.source,
             basis_time=basis_time,
             source_origin="RDB",
         )
+
+    def _truncate_source_summary(self, summary: str) -> str:
+        if len(summary) <= self._max_source_summary_chars:
+            return summary
+        return f"{summary[: self._max_source_summary_chars - 3]}..."
 
     def _deduplicate_sources(self, sources: list[ChatSource]) -> list[ChatSource]:
         deduplicated_sources: list[ChatSource] = []

@@ -92,6 +92,25 @@ def test_response_builder_builds_unique_urls_from_sources() -> None:
     assert urls[0].type == "REPORT"
 
 
+def test_response_builder_truncates_long_evidence_source_summary() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = _build_evidence_result(
+        [
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="A" * 400,
+                source="reports",
+            )
+        ]
+    )
+
+    sources = builder.build_sources(evidence_result, DocumentSearchResult(sources=[]))
+
+    assert len(sources[0].summary) == 300
+    assert sources[0].summary == f"{'A' * 297}..."
+
+
 def test_response_builder_returns_insufficient_evidence_without_sources() -> None:
     builder = ChatResponseBuilder()
     evidence_result = _build_evidence_result([])
