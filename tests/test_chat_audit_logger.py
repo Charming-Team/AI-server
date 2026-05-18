@@ -172,7 +172,8 @@ def test_chat_audit_logger_builds_safe_document_index_failure_payload() -> None:
 
     assert payload == {
         "event": "chat_document_index_failed",
-        "documentId": "report-202605",
+        "documentId": None,
+        "documentIdLength": 13,
         "documentType": "REPORT",
         "requestedByRole": "MANUFACTURING_MANAGER",
         "allowedRoles": ["EXECUTIVE", "MANUFACTURING_MANAGER"],
@@ -204,6 +205,31 @@ def test_chat_audit_logger_builds_document_delete_failure_payload() -> None:
     assert payload == {
         "event": "chat_document_delete_failed",
         "documentId": "",
+        "documentIdLength": 0,
         "statusCode": 400,
         "errorCode": "CHAT_DOCUMENT_002",
     }
+
+
+def test_chat_audit_logger_redacts_document_id_on_security_failure() -> None:
+    request = InternalDocumentDeleteRequest(
+        documentId="Bearer abcDEF1234567890abcDEF1234567890"
+    )
+    error = ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_SECURITY_002,
+        message="문서 ID에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
+    )
+
+    payload = ChatAuditLogger().build_document_delete_failure_payload(request, error)
+    serialized_payload = json.dumps(payload, ensure_ascii=False)
+
+    assert payload == {
+        "event": "chat_document_delete_failed",
+        "documentId": None,
+        "documentIdLength": 39,
+        "statusCode": 400,
+        "errorCode": "CHAT_SECURITY_002",
+    }
+    assert request.document_id not in serialized_payload
+    assert error.message not in serialized_payload

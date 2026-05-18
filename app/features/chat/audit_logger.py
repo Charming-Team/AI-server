@@ -5,7 +5,7 @@ from app.features.chat.document_payload import (
     InternalDocumentDeleteRequest,
     InternalDocumentInput,
 )
-from app.features.chat.schemas import ChatAnswerRequest, ChatAnswerResponse
+from app.features.chat.schemas import ChatAnswerRequest, ChatAnswerResponse, ChatErrorCode
 
 
 class ChatAuditLogger:
@@ -138,7 +138,8 @@ class ChatAuditLogger:
     ) -> dict[str, Any]:
         return {
             "event": "chat_document_index_failed",
-            "documentId": document.document_id,
+            "documentId": self._failure_document_id(document.document_id, error),
+            "documentIdLength": len(document.document_id),
             "documentType": document.document_type,
             "requestedByRole": document.requested_by_role,
             "allowedRoles": document.allowed_roles,
@@ -158,7 +159,19 @@ class ChatAuditLogger:
     ) -> dict[str, Any]:
         return {
             "event": "chat_document_delete_failed",
-            "documentId": request.document_id,
+            "documentId": self._failure_document_id(request.document_id, error),
+            "documentIdLength": len(request.document_id),
             "statusCode": error.status_code,
             "errorCode": error.code.value,
+        }
+
+    def _failure_document_id(self, document_id: str, error: Any) -> str | None:
+        if self._is_security_failure(error):
+            return None
+        return document_id
+
+    def _is_security_failure(self, error: Any) -> bool:
+        return error.code in {
+            ChatErrorCode.CHAT_SECURITY_001,
+            ChatErrorCode.CHAT_SECURITY_002,
         }

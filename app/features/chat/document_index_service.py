@@ -15,6 +15,7 @@ from app.features.chat.embedding_client import (
 from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.qdrant_client import QdrantDocumentIndexClient
 from app.features.chat.schemas import ChatErrorCode
+from app.features.chat.security_policy import SecurityPolicy
 from app.features.chat.skip_reasons import DOCUMENT_CONTENT_EMPTY, EMBEDDING_DISABLED
 
 
@@ -46,6 +47,7 @@ class DocumentIndexService:
         embedding_client: EmbeddingClient | None = None,
         qdrant_index_client: QdrantDocumentIndexClient | None = None,
         audit_logger: ChatAuditLogger | None = None,
+        security_policy: SecurityPolicy | None = None,
     ) -> None:
         self.settings = settings
         self.index_builder = index_builder or DocumentIndexBuilder(settings)
@@ -55,6 +57,7 @@ class DocumentIndexService:
         self.embedding_client = embedding_client or EmbeddingClient(settings)
         self.qdrant_index_client = qdrant_index_client or QdrantDocumentIndexClient(settings)
         self.audit_logger = audit_logger or ChatAuditLogger()
+        self.security_policy = security_policy or SecurityPolicy()
 
     async def index_document(self, document: InternalDocumentInput) -> DocumentIndexResult:
         try:
@@ -154,13 +157,21 @@ class DocumentIndexService:
                 )
 
     def _validate_document_id(self, document_id: str) -> None:
-        if document_id.strip():
+        if not document_id.strip():
+            raise ChatServiceError(
+                status_code=400,
+                code=ChatErrorCode.CHAT_DOCUMENT_002,
+                message="문서 ID은(는) 필수입니다.",
+            )
+
+        security_result = self.security_policy.evaluate(document_id)
+        if security_result is None:
             return
 
         raise ChatServiceError(
             status_code=400,
-            code=ChatErrorCode.CHAT_DOCUMENT_002,
-            message="문서 ID은(는) 필수입니다.",
+            code=security_result.code or ChatErrorCode.CHAT_SECURITY_002,
+            message="문서 ID에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
         )
 
     def _validate_chunk_count(self, chunk_count: int) -> None:
