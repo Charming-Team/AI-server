@@ -11,6 +11,7 @@ class ReadinessComponent(BaseModel):
     name: str
     enabled: bool
     configured: bool
+    code: str | None = None
     reason: str | None = None
 
 
