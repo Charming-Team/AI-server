@@ -65,9 +65,61 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Check infra repository access
+        if: github.ref == 'refs/heads/main'
+        env:
+          INFRA_REPO_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+        run: |
+          status=$(curl -sS -o /tmp/infra-repo-response.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${INFRA_REPO_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/Charming-Team/infra)
+
+          if [ "$status" != "200" ]; then
+            cat /tmp/infra-repo-response.json
+            echo "::error::INFRA_REPO_TOKEN cannot access Charming-Team/infra. Check repository selection, organization approval, and SSO authorization. HTTP status: ${status}"
+            exit 1
+          fi
+
+      - name: Checkout infra repository
+        if: github.ref == 'refs/heads/main'
+        uses: actions/checkout@v4
+        with:
+          repository: Charming-Team/infra
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          ref: main
+          path: infra
+
+      - name: Update FastAPI image digest
+        if: github.ref == 'refs/heads/main'
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
+        run: |
+          sed -i "s|image: .*skala26a-ai3/ai-server.*|image: ${IMAGE_REF}|" infra/k8s/fastapi/deployment.yaml
+          grep "image:" infra/k8s/fastapi/deployment.yaml
+
+      - name: Create infra manifest update PR
+        if: github.ref == 'refs/heads/main'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: infra
+          branch: chore/update-fastapi-image-${{ steps.meta.outputs.tag }}
+          base: main
+          title: "chore: update FastAPI image to ${{ steps.meta.outputs.tag }}"
+          commit-message: "chore: update FastAPI image to ${{ steps.meta.outputs.tag }}"
+          body: |
+            Updates the FastAPI deployment image after a successful AI server image build.
+
+            - Image: `${{ steps.meta.outputs.image }}`
+            - Tag: `${{ steps.meta.outputs.tag }}`
+            - Digest: `${{ steps.build.outputs.digest }}`
