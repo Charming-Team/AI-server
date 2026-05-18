@@ -15,6 +15,7 @@ from app.features.chat.schemas import (
     ChatRecommendedQuestion,
 )
 from app.features.chat.security_policy import SecurityPolicy
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,9 @@ class RecommendationService:
         rule: RecommendedQuestionRule,
         role: str,
     ) -> bool:
+        if self._safe_internal_url(rule.url) is None:
+            return False
+
         if role not in rule.allowed_roles:
             return False
 
@@ -248,7 +252,8 @@ class RecommendationService:
         )
 
     def _is_operator_read_only_rule(self, rule: RecommendedQuestionRule) -> bool:
-        return "mode=read" in self._normalize(rule.url)
+        safe_url = self._safe_internal_url(rule.url)
+        return safe_url is not None and "mode=read" in self._normalize(safe_url)
 
     def _has_operator_restricted_content(
         self,
@@ -303,8 +308,11 @@ class RecommendationService:
             question=rule.question,
             intent=rule.intent,
             category=rule.category,
-            url=rule.url,
+            url=self._safe_internal_url(rule.url) or "",
         )
 
     def _normalize(self, value: str) -> str:
         return "".join(value.casefold().split())
+
+    def _safe_internal_url(self, url: str | None) -> str | None:
+        return normalize_internal_url(url)

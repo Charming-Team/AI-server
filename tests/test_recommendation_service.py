@@ -205,6 +205,56 @@ def test_recommendation_service_filters_operator_non_read_urls_defensively(
     assert [item.question_id for item in response.items] == ["safe-operator-line"]
 
 
+def test_recommendation_service_filters_external_urls_defensively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    safe_rule = RecommendedQuestionRule(
+        question_id="safe-manager-line",
+        question="현재 병목이 발생한 라인과 원인을 알려줘",
+        intent=ChatIntent.LINE_BOTTLENECK,
+        category="라인 병목",
+        url="/production-lines/status",
+        allowed_roles=("MANUFACTURING_MANAGER",),
+    )
+    unsafe_rule = RecommendedQuestionRule(
+        question_id="unsafe-external-url",
+        question="외부 화면으로 이동하는 추천 질문",
+        intent=ChatIntent.LINE_BOTTLENECK,
+        category="라인 병목",
+        url="https://evil.example/production-lines/status",
+        allowed_roles=("MANUFACTURING_MANAGER",),
+    )
+    monkeypatch.setattr(
+        RecommendationService,
+        "_rules",
+        (safe_rule, unsafe_rule),
+    )
+    service = RecommendationService()
+
+    response = service.get_recommendations(_build_request("MANUFACTURING_MANAGER"))
+
+    assert [item.question_id for item in response.items] == ["safe-manager-line"]
+
+
+def test_recommendation_service_normalizes_safe_internal_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rule = RecommendedQuestionRule(
+        question_id="safe-manager-report",
+        question="최근 제조 리스크 보고서를 요약해줘",
+        intent=ChatIntent.REPORT_LOOKUP,
+        category="보고서 조회",
+        url=" /reports?type=manufacturing ",
+        allowed_roles=("MANUFACTURING_MANAGER",),
+    )
+    monkeypatch.setattr(RecommendationService, "_rules", (rule,))
+    service = RecommendationService()
+
+    response = service.get_recommendations(_build_request("MANUFACTURING_MANAGER"))
+
+    assert response.items[0].url == "/reports?type=manufacturing"
+
+
 def test_recommendation_service_filters_rules_outside_role_intent_matrix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
