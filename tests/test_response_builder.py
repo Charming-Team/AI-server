@@ -92,6 +92,50 @@ def test_response_builder_builds_unique_urls_from_sources() -> None:
     assert urls[0].type == "REPORT"
 
 
+def test_response_builder_keeps_only_safe_internal_urls() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = _build_evidence_result(
+        [
+            EvidenceItem(
+                type="ORDER",
+                title="외부 URL 근거",
+                summary="요약",
+                url="https://evil.example/orders/1001",
+                source="customer_orders",
+            )
+        ]
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="프로토콜 상대 URL 문서",
+                summary="요약",
+                url="//evil.example/reports/20",
+            ),
+            ChatSource(
+                sourceType="MATERIAL",
+                title="안전한 내부 URL 문서",
+                summary="요약",
+                url=" /materials/11 ",
+            ),
+            ChatSource(
+                sourceType="LINE",
+                title="스크립트 URL 문서",
+                summary="요약",
+                url="javascript:alert(1)",
+            ),
+        ]
+    )
+
+    sources = builder.build_sources(evidence_result, document_result)
+    urls = builder.build_urls(sources)
+
+    assert [source.url for source in sources] == [None, None, "/materials/11", None]
+    assert [url.url for url in urls] == ["/materials/11"]
+    assert urls[0].label == "안전한 내부 URL 문서"
+
+
 def test_response_builder_truncates_long_evidence_source_summary() -> None:
     builder = ChatResponseBuilder()
     evidence_result = _build_evidence_result(

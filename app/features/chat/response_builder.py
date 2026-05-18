@@ -24,20 +24,21 @@ class ChatResponseBuilder:
             self._evidence_item_to_source(item, evidence_result.basis_time)
             for item in evidence_result.items
         ]
-        sources.extend(document_result.sources)
+        sources.extend(self._sanitize_source_url(source) for source in document_result.sources)
         return self._deduplicate_sources(sources)
 
     def build_urls(self, sources: list[ChatSource]) -> list[ChatUrl]:
         urls: list[ChatUrl] = []
         seen_urls: set[str] = set()
         for source in sources:
-            if not source.url or source.url in seen_urls:
+            url = self._safe_internal_url(source.url)
+            if not url or url in seen_urls:
                 continue
-            seen_urls.add(source.url)
+            seen_urls.add(url)
             urls.append(
                 ChatUrl(
                     label=source.title,
-                    url=source.url,
+                    url=url,
                     type=source.source_type,
                 )
             )
@@ -69,12 +70,32 @@ class ChatResponseBuilder:
             source_type=item.type,
             title=item.title,
             summary=self._truncate_source_summary(item.summary),
-            url=item.url,
+            url=self._safe_internal_url(item.url),
             reference_id=item.reference_id,
             source=item.source,
             basis_time=basis_time,
             source_origin="RDB",
         )
+
+    def _sanitize_source_url(self, source: ChatSource) -> ChatSource:
+        safe_url = self._safe_internal_url(source.url)
+        if source.url == safe_url:
+            return source
+        return source.model_copy(update={"url": safe_url})
+
+    def _safe_internal_url(self, url: str | None) -> str | None:
+        if not url:
+            return None
+
+        stripped_url = url.strip()
+        if (
+            not stripped_url.startswith("/")
+            or stripped_url.startswith("//")
+            or "\\" in stripped_url
+            or any(char.isspace() for char in stripped_url)
+        ):
+            return None
+        return stripped_url
 
     def _truncate_source_summary(self, summary: str) -> str:
         if len(summary) <= self._max_source_summary_chars:
