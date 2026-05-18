@@ -10,8 +10,11 @@ class GroundingSecurityPolicy:
 
     def allows_evidence_item(self, item: EvidenceItem) -> bool:
         return not self._contains_blocked_content(
+            item.type,
             item.title,
             item.summary,
+            item.url,
+            item.source,
             item.data,
         )
 
@@ -21,9 +24,13 @@ class GroundingSecurityPolicy:
             return False
 
         return not self._contains_blocked_content(
+            payload.get("documentType"),
+            payload.get("documentId"),
+            payload.get("chunkId"),
             payload.get("title"),
             payload.get("summary"),
             payload.get("chunkText"),
+            payload.get("url"),
         )
 
     def _contains_blocked_content(self, *values: Any) -> bool:
