@@ -1,10 +1,12 @@
 from app.core.config import Settings
 from app.features.chat.answer_output_policy import AnswerOutputPolicy
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt, GroundedPromptBuilder
 from app.features.chat.llm_client import LlmClient
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
+    ChatErrorCode,
     DocumentSearchResult,
     EvidenceResult,
 )
@@ -54,6 +56,7 @@ class AnswerGenerationService:
                 skipped_reason=LLM_DISABLED,
             )
 
+        self._validate_llm_settings()
         prompt = self.build_prompt(request, evidence_result, document_result)
         answer = await self.llm_client.generate(prompt)
         if not answer:
@@ -83,6 +86,22 @@ class AnswerGenerationService:
         return AnswerGenerationResult(
             answer=answer,
             was_generated=True,
+        )
+
+    def _validate_llm_settings(self) -> None:
+        missing_fields: list[str] = []
+        if not self.settings.llm_base_url.strip():
+            missing_fields.append("llm_base_url")
+        if not self.settings.llm_model.strip():
+            missing_fields.append("llm_model")
+
+        if not missing_fields:
+            return
+
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_LLM_001,
+            message=f"LLM 필수 설정이 누락되었습니다: {', '.join(missing_fields)}",
         )
 
     def build_prompt(
