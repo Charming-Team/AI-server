@@ -115,6 +115,7 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
                 "llm_model": ChatErrorCode.CHAT_LLM_001,
             },
         ),
+        _answer_generation_pipeline_component(settings),
     ]
 
 
@@ -132,6 +133,23 @@ def _chat_grounding_pipeline_component(settings: Settings) -> ReadinessComponent
         configured=False,
         code=ChatErrorCode.CHAT_EVIDENCE_001,
         reason="챗봇 답변에는 RDB Evidence 또는 Qdrant 검색 중 하나가 필요합니다.",
+    )
+
+
+def _answer_generation_pipeline_component(settings: Settings) -> ReadinessComponent:
+    if settings.llm_enabled:
+        return ReadinessComponent(
+            name="answerGenerationPipeline",
+            enabled=True,
+            configured=True,
+        )
+
+    return ReadinessComponent(
+        name="answerGenerationPipeline",
+        enabled=True,
+        configured=False,
+        code=ChatErrorCode.CHAT_LLM_001,
+        reason="챗봇 답변 생성에는 LLM 기능 활성화가 필요합니다.",
     )
 
 
