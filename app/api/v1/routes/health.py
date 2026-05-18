@@ -28,7 +28,7 @@ async def readiness_check(
     response: Response,
     settings: SettingsDep,
 ) -> ReadinessResponse:
-    components = _build_readiness_components(settings)
+    components = build_readiness_components(settings)
     is_ready = all(component.configured for component in components)
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -41,7 +41,7 @@ async def readiness_check(
     )
 
 
-def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
+def build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
     return [
         _required_component(
             name="chatAnswerInternalToken",
