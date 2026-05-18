@@ -54,6 +54,18 @@ def verify_chat_answer_token(
     )
 
 
+def verify_chat_recommendation_token(
+    settings: SettingsDep,
+    x_internal_token: InternalTokenHeader = None,
+) -> None:
+    _verify_internal_token(
+        expected_token=settings.chat_recommendation_internal_token,
+        provided_token=x_internal_token,
+        not_configured_message="추천 질문 내부 토큰이 설정되지 않았습니다.",
+        forbidden_message="추천 질문 권한이 없습니다.",
+    )
+
+
 def verify_document_index_token(
     settings: SettingsDep,
     x_internal_token: InternalTokenHeader = None,
@@ -127,6 +139,7 @@ async def create_chat_answer(
 @router.post(
     "/recommendations",
     response_model=ChatRecommendationResponse,
+    dependencies=[Depends(verify_chat_recommendation_token)],
     responses=chat_error_responses,
 )
 async def get_chat_recommendations(

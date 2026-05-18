@@ -25,6 +25,10 @@ from app.main import app
 client = TestClient(app)
 CHAT_ANSWER_INTERNAL_TOKEN = "chat-answer-token"
 CHAT_ANSWER_HEADERS = {"X-Internal-Token": CHAT_ANSWER_INTERNAL_TOKEN}
+CHAT_RECOMMENDATION_INTERNAL_TOKEN = "chat-recommendation-token"
+CHAT_RECOMMENDATION_HEADERS = {
+    "X-Internal-Token": CHAT_RECOMMENDATION_INTERNAL_TOKEN
+}
 _MISSING_OVERRIDE = object()
 
 
@@ -37,6 +41,28 @@ def _post_chat_answer(*, json: dict, headers: dict[str, str] | None = None):
         return client.post(
             "/api/v1/chat/answer",
             headers=headers or CHAT_ANSWER_HEADERS,
+            json=json,
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_settings, None)
+        else:
+            app.dependency_overrides[get_settings] = previous_override
+
+
+def _post_chat_recommendations(
+    *,
+    json: dict,
+    headers: dict[str, str] | None = None,
+):
+    previous_override = app.dependency_overrides.get(get_settings, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_recommendation_internal_token=CHAT_RECOMMENDATION_INTERNAL_TOKEN
+    )
+    try:
+        return client.post(
+            "/api/v1/chat/recommendations",
+            headers=headers or CHAT_RECOMMENDATION_HEADERS,
             json=json,
         )
     finally:
@@ -499,9 +525,64 @@ def test_chat_answer_returns_grounded_answer_with_sources_and_urls() -> None:
     }
 
 
+def test_chat_recommendations_requires_configured_internal_token() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_recommendation_internal_token=None
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/recommendations",
+            headers=CHAT_RECOMMENDATION_HEADERS,
+            json={
+                "user": {
+                    "userId": 1,
+                    "role": "MANUFACTURING_MANAGER",
+                    "companyName": "S-MAP",
+                    "status": "ACTIVE",
+                },
+                "keyword": "라인",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "CHAT_SECURITY_003",
+        "message": "추천 질문 내부 토큰이 설정되지 않았습니다.",
+    }
+
+
+def test_chat_recommendations_rejects_invalid_internal_token() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_recommendation_internal_token=CHAT_RECOMMENDATION_INTERNAL_TOKEN
+    )
+    try:
+        response = client.post(
+            "/api/v1/chat/recommendations",
+            headers={"X-Internal-Token": "wrong-token"},
+            json={
+                "user": {
+                    "userId": 1,
+                    "role": "MANUFACTURING_MANAGER",
+                    "companyName": "S-MAP",
+                    "status": "ACTIVE",
+                },
+                "keyword": "라인",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "CHAT_SECURITY_003",
+        "message": "추천 질문 권한이 없습니다.",
+    }
+
+
 def test_chat_recommendations_returns_role_based_questions() -> None:
-    response = client.post(
-        "/api/v1/chat/recommendations",
+    response = _post_chat_recommendations(
         json={
             "user": {
                 "userId": 1,

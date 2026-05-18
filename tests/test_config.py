@@ -30,6 +30,14 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     assert settings.prompt_max_document_sources == 20
 
 
+def test_settings_default_internal_tokens_are_optional() -> None:
+    settings = Settings()
+
+    assert settings.chat_answer_internal_token is None
+    assert settings.chat_recommendation_internal_token is None
+    assert settings.document_index_internal_token is None
+
+
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [
