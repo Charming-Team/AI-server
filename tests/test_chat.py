@@ -601,6 +601,26 @@ def test_chat_recommendations_rejects_inactive_user() -> None:
     }
 
 
+def test_chat_recommendations_rejects_admin_role() -> None:
+    response = _post_chat_recommendations(
+        json={
+            "user": {
+                "userId": 1,
+                "role": "ADMIN",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "keyword": "라인",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "CHAT_SECURITY_004",
+        "message": "현재 역할 권한으로는 추천 질문을 조회할 수 없습니다.",
+    }
+
+
 def test_chat_recommendations_returns_role_based_questions() -> None:
     response = _post_chat_recommendations(
         json={

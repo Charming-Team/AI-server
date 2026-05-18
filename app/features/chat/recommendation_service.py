@@ -22,6 +22,7 @@ class RecommendedQuestionRule:
 
 class RecommendationService:
     _max_items = 6
+    _business_roles = {"OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"}
 
     _rules: tuple[RecommendedQuestionRule, ...] = (
         RecommendedQuestionRule(
@@ -159,6 +160,7 @@ class RecommendationService:
         request: ChatRecommendationRequest,
     ) -> ChatRecommendationResponse:
         self._validate_active_user(request.user.status)
+        self._validate_business_role(request.user.role)
 
         role_rules = self._filter_by_role(request.user.role)
         keyword = self._normalize(request.keyword or "")
@@ -181,6 +183,16 @@ class RecommendationService:
             status_code=403,
             code=ChatErrorCode.CHAT_SECURITY_004,
             message="ACTIVE 상태 사용자만 추천 질문을 조회할 수 있습니다.",
+        )
+
+    def _validate_business_role(self, role: str) -> None:
+        if role.strip().upper() in self._business_roles:
+            return
+
+        raise ChatServiceError(
+            status_code=403,
+            code=ChatErrorCode.CHAT_SECURITY_004,
+            message="현재 역할 권한으로는 추천 질문을 조회할 수 없습니다.",
         )
 
     def _filter_by_role(self, role: str) -> list[RecommendedQuestionRule]:

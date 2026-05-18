@@ -77,10 +77,12 @@ def test_recommendation_service_falls_back_when_keyword_has_no_match() -> None:
 def test_recommendation_service_excludes_admin_from_business_questions() -> None:
     service = RecommendationService()
 
-    response = service.get_recommendations(_build_request("ADMIN"))
+    with pytest.raises(ChatServiceError) as exc_info:
+        service.get_recommendations(_build_request("ADMIN"))
 
-    assert response.items == []
-    assert response.fallback_used is False
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == ChatErrorCode.CHAT_SECURITY_004
+    assert exc_info.value.message == "현재 역할 권한으로는 추천 질문을 조회할 수 없습니다."
 
 
 def test_recommendation_service_normalizes_role_text() -> None:
