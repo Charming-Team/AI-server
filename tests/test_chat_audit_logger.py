@@ -40,6 +40,8 @@ def test_chat_audit_logger_builds_safe_answer_payload() -> None:
             rdbEvidenceCount=0,
             documentSourceCount=0,
             evidenceCount=0,
+            vectorSearchSkippedReason="Qdrant 검색 결과가 없습니다.",
+            llmGenerationSkippedReason="RDB Evidence와 문서 검색 근거가 없습니다.",
         ),
     )
 
@@ -59,6 +61,8 @@ def test_chat_audit_logger_builds_safe_answer_payload() -> None:
         "usedVectorSearch": False,
         "usedRdbEvidence": False,
         "usedLlmGeneration": False,
+        "vectorSearchSkippedReason": "Qdrant 검색 결과가 없습니다.",
+        "llmGenerationSkippedReason": "RDB Evidence와 문서 검색 근거가 없습니다.",
         "rdbEvidenceCount": 0,
         "documentSourceCount": 0,
         "evidenceCount": 0,

@@ -37,6 +37,12 @@ class ChatAuditLogger:
             "usedVectorSearch": response.model_result.used_vector_search,
             "usedRdbEvidence": response.model_result.used_rdb_evidence,
             "usedLlmGeneration": response.model_result.used_llm_generation,
+            "vectorSearchSkippedReason": (
+                response.model_result.vector_search_skipped_reason
+            ),
+            "llmGenerationSkippedReason": (
+                response.model_result.llm_generation_skipped_reason
+            ),
             "rdbEvidenceCount": response.model_result.rdb_evidence_count,
             "documentSourceCount": response.model_result.document_source_count,
             "evidenceCount": response.model_result.evidence_count,
