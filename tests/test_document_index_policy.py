@@ -12,6 +12,7 @@ def _build_document(
     document_type: str = "REPORT",
     title: str = "2026년 5월 생산 리스크 보고서",
     content: str = "자재 부족과 라인 병목이 주요 리스크입니다.",
+    url: str | None = "/reports/20",
     allowed_roles: list[str] | None = None,
     company_name: str | None = "S-MAP",
     intent_tags: list[str] | None = None,
@@ -22,6 +23,7 @@ def _build_document(
         documentType=document_type,
         title=title,
         content=content,
+        url=url,
         allowedRoles=(
             ["EXECUTIVE", "MANUFACTURING_MANAGER"]
             if allowed_roles is None
@@ -114,6 +116,42 @@ def test_document_index_policy_rejects_too_large_content() -> None:
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
     assert exc_info.value.message == "문서 본문은 최대 10자까지 인덱싱할 수 있습니다."
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        None,
+        "",
+        "/reports/20",
+        " /reports/20?tab=summary ",
+    ],
+)
+def test_document_index_policy_allows_safe_internal_url(url: str | None) -> None:
+    policy = DocumentIndexPolicy()
+
+    policy.validate(_build_document(url=url))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example/reports/20",
+        "//evil.example/reports/20",
+        "javascript:alert(1)",
+        "/reports/20 bad",
+        "/reports\\20",
+    ],
+)
+def test_document_index_policy_rejects_unsafe_url(url: str) -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(_build_document(url=url))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert exc_info.value.message == "문서 URL은 내부 상대 경로만 허용됩니다."
 
 
 def test_document_index_policy_rejects_empty_roles() -> None:

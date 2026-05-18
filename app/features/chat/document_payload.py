@@ -16,6 +16,13 @@ def _strip_text(value: Any) -> Any:
     return value.strip()
 
 
+def _strip_optional_text(value: Any) -> Any:
+    stripped_value = _strip_text(value)
+    if not isinstance(stripped_value, str):
+        return stripped_value
+    return stripped_value or None
+
+
 def _normalize_upper_text_list(value: Any) -> Any:
     if value is None:
         return []
@@ -57,6 +64,11 @@ class InternalDocumentInput(BaseModel):
     @classmethod
     def strip_required_text(cls, value: Any) -> Any:
         return _strip_text(value)
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def strip_optional_text(cls, value: Any) -> Any:
+        return _strip_optional_text(value)
 
     @field_validator("document_type", mode="before")
     @classmethod
@@ -111,6 +123,11 @@ class InternalDocumentPayload(BaseModel):
     @classmethod
     def strip_required_text(cls, value: Any) -> Any:
         return _strip_text(value)
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def strip_optional_text(cls, value: Any) -> Any:
+        return _strip_optional_text(value)
 
     @field_validator("document_type", mode="before")
     @classmethod

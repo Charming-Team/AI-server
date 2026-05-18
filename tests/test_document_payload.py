@@ -56,6 +56,30 @@ def test_internal_document_input_normalizes_requested_by_role() -> None:
     assert document.requested_by_role == "MANUFACTURING_MANAGER"
 
 
+def test_internal_document_input_strips_optional_url() -> None:
+    document = InternalDocumentInput(
+        documentId="report-202605",
+        documentType="REPORT",
+        title="2026년 5월 생산 리스크 보고서",
+        content="보고서 본문",
+        url=" /reports/20 ",
+    )
+
+    assert document.url == "/reports/20"
+
+
+def test_internal_document_payload_strips_optional_url() -> None:
+    payload = InternalDocumentPayload(
+        documentId="report-202605",
+        documentType="REPORT",
+        title="2026년 5월 생산 리스크 보고서",
+        chunkText="보고서 본문 청크",
+        url="   ",
+    )
+
+    assert payload.url is None
+
+
 def test_internal_document_payload_maps_to_chat_source() -> None:
     payload = InternalDocumentPayload(
         documentId="report-202605",

@@ -26,6 +26,7 @@ class DocumentIndexPolicy:
         self._validate_required_text(document.document_id, "문서 ID")
         self._validate_required_text(document.title, "문서 제목")
         self._validate_content_length(document.content)
+        self._validate_url(document.url)
 
         if document.document_type not in self.allowed_document_types:
             raise ChatServiceError(
@@ -111,4 +112,22 @@ class DocumentIndexPolicy:
             status_code=400,
             code=ChatErrorCode.CHAT_DOCUMENT_002,
             message=f"문서 본문은 최대 {self.max_content_chars}자까지 인덱싱할 수 있습니다.",
+        )
+
+    def _validate_url(self, url: str | None) -> None:
+        if not url:
+            return
+
+        if (
+            url.startswith("/")
+            and not url.startswith("//")
+            and "\\" not in url
+            and not any(char.isspace() for char in url)
+        ):
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message="문서 URL은 내부 상대 경로만 허용됩니다.",
         )
