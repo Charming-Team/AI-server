@@ -100,6 +100,30 @@ def test_check_qdrant_collection_script_prints_json(
     assert '"error": null' in stdout.getvalue()
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--api-key", "qdrant-secret-token"],
+        ["--api-key", "qdrant-secret-token", "--json"],
+    ],
+)
+def test_check_qdrant_collection_script_does_not_expose_api_key(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_collection(settings):
+        assert settings.qdrant_api_key == "qdrant-secret-token"
+        return _build_result()
+
+    monkeypatch.setattr(check_qdrant_collection, "check_collection", fake_check_collection)
+    stdout = StringIO()
+
+    exit_code = check_qdrant_collection.main(argv, stdout=stdout)
+
+    assert exit_code == 0
+    assert "qdrant-secret-token" not in stdout.getvalue()
+
+
 def test_check_qdrant_collection_script_prints_json_error_on_dimension_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
