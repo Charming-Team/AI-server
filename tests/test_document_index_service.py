@@ -34,6 +34,8 @@ class FakeQdrantIndexClient:
         return {
             "operation_id": 99,
             "status": "completed",
+            "debug": "qdrant-internal-detail",
+            "request_token": "secret-token",
         }
 
     async def upsert(self, points: list[QdrantUpsertPoint]) -> dict:
@@ -42,6 +44,8 @@ class FakeQdrantIndexClient:
         return {
             "operation_id": 100,
             "status": "completed",
+            "debug": "qdrant-internal-detail",
+            "request_token": "secret-token",
         }
 
 

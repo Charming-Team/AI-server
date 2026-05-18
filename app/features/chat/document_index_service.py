@@ -107,7 +107,7 @@ class DocumentIndexService:
                 document_id=document.document_id,
                 chunk_count=len(payloads),
                 indexed_count=len(points),
-                operation=operation,
+                operation=self._sanitize_operation(operation),
             ),
         )
 
@@ -133,7 +133,7 @@ class DocumentIndexService:
             request,
             DocumentDeleteResult(
                 document_id=request.document_id,
-                operation=operation,
+                operation=self._sanitize_operation(operation),
             ),
         )
 
@@ -208,6 +208,14 @@ class DocumentIndexService:
             indexed_count=0,
             skipped_reason=skipped_reason,
         )
+
+    def _sanitize_operation(self, operation: dict) -> dict:
+        sanitized_operation: dict = {}
+        if "operation_id" in operation:
+            sanitized_operation["operation_id"] = operation["operation_id"]
+        if "status" in operation:
+            sanitized_operation["status"] = operation["status"]
+        return sanitized_operation
 
     def _finalize_index_result(
         self,
