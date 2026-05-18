@@ -1,9 +1,13 @@
 import pytest
 
 from app.features.chat.exceptions import ChatServiceError
-from app.features.chat.recommendation_service import RecommendationService
+from app.features.chat.recommendation_service import (
+    RecommendationService,
+    RecommendedQuestionRule,
+)
 from app.features.chat.schemas import (
     ChatErrorCode,
+    ChatIntent,
     ChatRecommendationRequest,
     ChatUserContext,
 )
@@ -107,6 +111,99 @@ def test_recommendation_service_operator_gets_read_only_urls_without_money_quest
     assert "오늘 처리 수량과 불량 수량을 조회해줘" in questions
     assert "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘" not in questions
     assert all("mode=read" in item.url for item in response.items)
+
+
+def test_recommendation_service_filters_operator_restricted_rules_defensively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    safe_rule = RecommendedQuestionRule(
+        question_id="safe-operator-plan",
+        question="오늘 배정된 생산계획을 조회해줘",
+        intent=ChatIntent.PRODUCTION_PLAN,
+        category="생산 계획",
+        url="/production-plans?mode=read",
+        allowed_roles=("OPERATOR",),
+    )
+    unsafe_rule = RecommendedQuestionRule(
+        question_id="unsafe-operator-money",
+        question="계약 금액과 패널티 영향을 조회해줘",
+        intent=ChatIntent.DELIVERY_RISK,
+        category="금액 영향",
+        url="/orders/financial-impact?mode=read",
+        allowed_roles=("OPERATOR",),
+    )
+    monkeypatch.setattr(
+        RecommendationService,
+        "_rules",
+        (safe_rule, unsafe_rule),
+    )
+    service = RecommendationService()
+
+    response = service.get_recommendations(_build_request("OPERATOR"))
+
+    assert [item.question_id for item in response.items] == ["safe-operator-plan"]
+
+
+def test_recommendation_service_filters_operator_non_read_urls_defensively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    safe_rule = RecommendedQuestionRule(
+        question_id="safe-operator-line",
+        question="내 담당 라인의 현재 상태를 조회해줘",
+        intent=ChatIntent.LINE_BOTTLENECK,
+        category="라인 현황",
+        url="/production-lines/status?mode=read",
+        allowed_roles=("OPERATOR",),
+    )
+    unsafe_rule = RecommendedQuestionRule(
+        question_id="unsafe-operator-edit-url",
+        question="오늘 배정된 생산계획을 조회해줘",
+        intent=ChatIntent.PRODUCTION_PLAN,
+        category="생산 계획",
+        url="/production-plans",
+        allowed_roles=("OPERATOR",),
+    )
+    monkeypatch.setattr(
+        RecommendationService,
+        "_rules",
+        (safe_rule, unsafe_rule),
+    )
+    service = RecommendationService()
+
+    response = service.get_recommendations(_build_request("OPERATOR"))
+
+    assert [item.question_id for item in response.items] == ["safe-operator-line"]
+
+
+def test_recommendation_service_filters_rules_outside_role_intent_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    safe_rule = RecommendedQuestionRule(
+        question_id="safe-operator-material",
+        question="현재 자재 재고 현황을 조회해줘",
+        intent=ChatIntent.MATERIAL_SHORTAGE,
+        category="자재 현황",
+        url="/materials/inventories?mode=read",
+        allowed_roles=("OPERATOR",),
+    )
+    unsafe_rule = RecommendedQuestionRule(
+        question_id="unsafe-operator-report",
+        question="최근 생산 리스크 보고서를 요약해줘",
+        intent=ChatIntent.REPORT_LOOKUP,
+        category="보고서 조회",
+        url="/reports?mode=read",
+        allowed_roles=("OPERATOR",),
+    )
+    monkeypatch.setattr(
+        RecommendationService,
+        "_rules",
+        (safe_rule, unsafe_rule),
+    )
+    service = RecommendationService()
+
+    response = service.get_recommendations(_build_request("OPERATOR"))
+
+    assert [item.question_id for item in response.items] == ["safe-operator-material"]
 
 
 def test_recommendation_service_manager_gets_six_manufacturing_questions() -> None:

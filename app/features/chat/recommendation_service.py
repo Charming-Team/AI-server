@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 
-from app.features.chat.access_control import BUSINESS_ROLES
+from app.features.chat.access_control import (
+    BUSINESS_ROLES,
+    OPERATOR_RESTRICTED_TERMS,
+    OPERATOR_ROLE,
+    ROLE_INTENT_MATRIX,
+)
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import (
     ChatErrorCode,
@@ -201,8 +206,49 @@ class RecommendationService:
         return [
             rule
             for rule in self._rules
-            if normalized_role in rule.allowed_roles
+            if self._is_rule_allowed_for_role(rule, normalized_role)
         ]
+
+    def _is_rule_allowed_for_role(
+        self,
+        rule: RecommendedQuestionRule,
+        role: str,
+    ) -> bool:
+        if role not in rule.allowed_roles:
+            return False
+
+        if rule.intent not in ROLE_INTENT_MATRIX.get(role, frozenset()):
+            return False
+
+        if role != OPERATOR_ROLE:
+            return True
+
+        return (
+            self._is_operator_read_only_rule(rule)
+            and not self._has_operator_restricted_content(rule)
+        )
+
+    def _is_operator_read_only_rule(self, rule: RecommendedQuestionRule) -> bool:
+        return "mode=read" in self._normalize(rule.url)
+
+    def _has_operator_restricted_content(
+        self,
+        rule: RecommendedQuestionRule,
+    ) -> bool:
+        target = self._normalize(
+            " ".join(
+                (
+                    rule.question,
+                    rule.category,
+                    rule.intent.value,
+                    rule.url,
+                )
+            )
+        )
+        return any(
+            self._normalize(term) in target
+            for term in OPERATOR_RESTRICTED_TERMS
+        )
 
     def _matches_keyword(
         self,
