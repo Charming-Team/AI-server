@@ -100,6 +100,7 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
                 "embedding_model": ChatErrorCode.CHAT_EMBEDDING_001,
             },
         ),
+        _document_index_pipeline_component(settings),
         _rag_search_pipeline_component(settings),
         _integration_component(
             name="llm",
@@ -114,6 +115,35 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
             },
         ),
     ]
+
+
+def _document_index_pipeline_component(settings: Settings) -> ReadinessComponent:
+    if not settings.embedding_enabled:
+        return ReadinessComponent(
+            name="documentIndexPipeline",
+            enabled=False,
+            configured=True,
+            reason="임베딩 기능이 비활성화되어 문서 인덱싱 저장이 비활성화되어 있습니다.",
+        )
+
+    return _integration_component(
+        name="documentIndexPipeline",
+        enabled=True,
+        required_fields={
+            "embedding_base_url": settings.embedding_base_url,
+            "embedding_path": settings.embedding_path,
+            "embedding_model": settings.embedding_model,
+            "qdrant_url": settings.qdrant_url,
+            "qdrant_collection": settings.qdrant_collection,
+        },
+        field_error_codes={
+            "embedding_base_url": ChatErrorCode.CHAT_EMBEDDING_001,
+            "embedding_path": ChatErrorCode.CHAT_EMBEDDING_001,
+            "embedding_model": ChatErrorCode.CHAT_EMBEDDING_001,
+            "qdrant_url": ChatErrorCode.CHAT_QDRANT_001,
+            "qdrant_collection": ChatErrorCode.CHAT_QDRANT_001,
+        },
+    )
 
 
 def _rag_search_pipeline_component(settings: Settings) -> ReadinessComponent:

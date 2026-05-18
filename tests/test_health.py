@@ -44,6 +44,12 @@ def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() ->
     assert components["chatRecommendationInternalToken"]["code"] == "CHAT_SECURITY_003"
     assert components["documentIndexInternalToken"]["configured"] is False
     assert components["documentIndexInternalToken"]["code"] == "CHAT_SECURITY_003"
+    assert components["documentIndexPipeline"] == {
+        "name": "documentIndexPipeline",
+        "enabled": False,
+        "configured": True,
+        "reason": "임베딩 기능이 비활성화되어 문서 인덱싱 저장이 비활성화되어 있습니다.",
+    }
     assert components["qdrantSearch"] == {
         "name": "qdrantSearch",
         "enabled": False,
@@ -133,6 +139,42 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
     )
     assert components["llm"]["code"] == "CHAT_LLM_001"
     assert components["llm"]["reason"] == "필수 설정이 누락되었습니다: llm_model"
+
+
+def test_readiness_check_requires_qdrant_when_document_index_pipeline_is_enabled() -> None:
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token="answer-secret",
+            chat_recommendation_internal_token="recommendation-secret",
+            document_index_internal_token="document-secret",
+            qdrant_search_enabled=False,
+            qdrant_collection=" ",
+            embedding_enabled=True,
+        )
+    )
+    try:
+        response = client.get("/api/v1/health/ready")
+    finally:
+        _restore_settings(previous_override)
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "not_ready"
+    components = {component["name"]: component for component in body["components"]}
+    assert components["qdrantSearch"] == {
+        "name": "qdrantSearch",
+        "enabled": False,
+        "configured": True,
+        "reason": "비활성화되어 있습니다.",
+    }
+    assert components["embedding"]["configured"] is True
+    assert components["documentIndexPipeline"] == {
+        "name": "documentIndexPipeline",
+        "enabled": True,
+        "configured": False,
+        "code": "CHAT_QDRANT_001",
+        "reason": "필수 설정이 누락되었습니다: qdrant_collection",
+    }
 
 
 def test_readiness_check_requires_embedding_when_qdrant_search_is_enabled() -> None:
