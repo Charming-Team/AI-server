@@ -1,6 +1,7 @@
 from app.features.chat.access_control import (
     BUSINESS_ROLES,
     COMPANY_INFO_INDEXER_ROLES,
+    QDRANT_DOCUMENT_TYPES,
 )
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import InternalDocumentInput
@@ -9,7 +10,7 @@ from app.features.chat.schemas import ChatErrorCode, ChatIntent
 
 
 class DocumentIndexPolicy:
-    allowed_document_types = {"REPORT", "COMPANY_INFO"}
+    allowed_document_types = QDRANT_DOCUMENT_TYPES
     allowed_roles = BUSINESS_ROLES
     company_info_indexer_roles = COMPANY_INFO_INDEXER_ROLES
     allowed_intent_tags = {

@@ -1,6 +1,7 @@
 from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.features.chat.access_control import QDRANT_DOCUMENT_TYPES
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import QdrantSearchPoint
 from app.features.chat.embedding_service import EmbeddingService
@@ -15,6 +16,7 @@ from app.features.chat.schemas import (
     DocumentSearchResult,
 )
 from app.features.chat.skip_reasons import (
+    QDRANT_DOCUMENT_TYPE_NOT_ALLOWED,
     QDRANT_GROUNDING_SECURITY_BLOCKED,
     QDRANT_INTENT_NOT_ALLOWED,
     QDRANT_NO_RESULTS,
@@ -70,8 +72,11 @@ class DocumentSearchService:
             role_filtered_points,
             intent,
         )
+        document_type_filtered_points = self._filter_points_by_document_type(
+            intent_filtered_points
+        )
         access_filtered_points = self._filter_points_by_content_access(
-            intent_filtered_points,
+            document_type_filtered_points,
             request.user.role,
         )
         security_filtered_points = self._filter_points_by_grounding_security(
@@ -85,6 +90,7 @@ class DocumentSearchService:
                     points,
                     role_filtered_points,
                     intent_filtered_points,
+                    document_type_filtered_points,
                     access_filtered_points,
                     security_filtered_points,
                 ),
@@ -186,6 +192,24 @@ class DocumentSearchService:
             if self._is_score_above_threshold(point, threshold)
         ]
 
+    def _filter_points_by_document_type(self, points: list[dict]) -> list[dict]:
+        return [
+            point
+            for point in points
+            if self._is_document_type_allowed(point)
+        ]
+
+    def _is_document_type_allowed(self, point: dict) -> bool:
+        payload = point.get("payload")
+        if not isinstance(payload, dict):
+            return False
+
+        document_type = payload.get("documentType")
+        if not isinstance(document_type, str):
+            return False
+
+        return document_type.strip().upper() in QDRANT_DOCUMENT_TYPES
+
     def _filter_points_by_content_access(self, points: list[dict], role: str) -> list[dict]:
         return [
             point
@@ -209,6 +233,7 @@ class DocumentSearchService:
         points: list[dict],
         role_filtered_points: list[dict],
         intent_filtered_points: list[dict],
+        document_type_filtered_points: list[dict],
         access_filtered_points: list[dict],
         security_filtered_points: list[dict],
     ) -> str:
@@ -216,6 +241,8 @@ class DocumentSearchService:
             return QDRANT_ROLE_NOT_ALLOWED
         if role_filtered_points and not intent_filtered_points:
             return QDRANT_INTENT_NOT_ALLOWED
+        if intent_filtered_points and not document_type_filtered_points:
+            return QDRANT_DOCUMENT_TYPE_NOT_ALLOWED
         if intent_filtered_points and not access_filtered_points:
             return QDRANT_OPERATOR_RESTRICTED_CONTENT
         if access_filtered_points and not security_filtered_points:

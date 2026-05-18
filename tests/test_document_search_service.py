@@ -206,6 +206,65 @@ class FakeMixedIntentQdrantClient:
         ]
 
 
+class FakeMixedDocumentTypeQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "legacy-process-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "legacy-process-guide",
+                    "chunkId": "summary",
+                    "documentType": "PROCESS",
+                    "title": "이전 공정 가이드",
+                    "chunkText": "이전 버전에서 저장된 공정 가이드입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+            {
+                "id": "company-info-point",
+                "score": 0.88,
+                "payload": {
+                    "documentId": "company-priority-guide",
+                    "chunkId": "summary",
+                    "documentType": "COMPANY_INFO",
+                    "title": "회사 생산 우선순위 기준",
+                    "chunkText": "납기 위험 상황에서는 긴급 주문과 라인 병목을 함께 봅니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+        ]
+
+
+class FakeOnlyUnsupportedDocumentTypeQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "legacy-material-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "legacy-material-guide",
+                    "chunkId": "summary",
+                    "documentType": "MATERIAL",
+                    "title": "이전 자재 가이드",
+                    "chunkText": "이전 버전에서 저장된 자재 가이드입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
 class FakeWrongIntentQdrantClient:
     def __init__(self) -> None:
         self.search_payload: dict | None = None
@@ -604,6 +663,23 @@ def test_document_search_service_filters_sources_outside_intent() -> None:
     assert result.sources[0].title == "월간 생산 리스크 보고서"
 
 
+def test_document_search_service_filters_unsupported_document_types() -> None:
+    qdrant_client = FakeMixedDocumentTypeQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert qdrant_client.search_payload is not None
+    assert len(result.sources) == 1
+    assert result.sources[0].source_type == "COMPANY_INFO"
+    assert result.sources[0].title == "회사 생산 우선순위 기준"
+
+
 def test_document_search_service_marks_intent_reason_when_all_points_are_not_allowed() -> None:
     qdrant_client = FakeWrongIntentQdrantClient()
     service = DocumentSearchService(
@@ -618,6 +694,25 @@ def test_document_search_service_marks_intent_reason_when_all_points_are_not_all
     assert result.was_searched is True
     assert result.sources == []
     assert result.skipped_reason == "Qdrant 검색 결과가 질문 의도 범위를 통과하지 못했습니다."
+
+
+def test_document_search_service_marks_document_type_reason_when_all_filtered() -> None:
+    qdrant_client = FakeOnlyUnsupportedDocumentTypeQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert (
+        result.skipped_reason
+        == "Qdrant 검색 결과가 허용되지 않은 문서 유형이라 제외되었습니다."
+    )
 
 
 def test_document_search_service_marks_role_reason_when_all_points_are_not_allowed() -> None:
