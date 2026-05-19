@@ -130,6 +130,12 @@ class FakeGroundedAnswerGenerationService:
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
     ) -> AnswerGenerationResult:
+        assert [item.title for item in evidence_result.items] == [
+            "ORD-202605-001 납기 위험"
+        ]
+        assert [source.title for source in document_result.sources] == [
+            "5월 생산 리스크 보고서"
+        ]
         return AnswerGenerationResult(
             answer=(
                 "ORD-202605-001은 납기 지연 위험이 WARNING이며, "
@@ -266,6 +272,34 @@ class FakeSearchEmbeddingService:
             was_embedded=True,
             model="test-embedding-model",
         )
+
+
+class FakeDeliveryRiskQdrantClient:
+    async def search(self, payload: dict) -> list[dict]:
+        assert payload["filter"] == {
+            "must": [
+                {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
+                {"key": "intentTags", "match": {"any": ["DELIVERY_RISK"]}},
+            ]
+        }
+        return [
+            {
+                "id": "delivery-risk-report-point",
+                "score": 0.89,
+                "payload": {
+                    "documentId": "report-202605-risk",
+                    "chunkId": "chunk-0001",
+                    "documentType": "REPORT",
+                    "title": "5월 생산 리스크 보고서",
+                    "chunkText": "LINE-A01 병목과 자재 부족이 주요 원인입니다.",
+                    "url": "/reports/20",
+                    "referenceType": "REPORT",
+                    "referenceId": 20,
+                    "allowedRoles": ["EXECUTIVE", "MANUFACTURING_MANAGER"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            }
+        ]
 
 
 class FakeOperatorMixedQdrantClient:
@@ -462,7 +496,11 @@ class FakeCompanyInfoAnswerGenerationService:
 def _build_grounded_chat_service() -> ChatService:
     service = ChatService(Settings())
     service.evidence_service = FakeGroundedEvidenceService()
-    service.document_search_service = FakeGroundedDocumentSearchService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeSearchEmbeddingService(),
+        qdrant_client=FakeDeliveryRiskQdrantClient(),
+    )
     service.answer_generation_service = FakeGroundedAnswerGenerationService()
     return service
 
@@ -815,6 +853,30 @@ def test_chat_answer_evaluation_returns_grounded_answer_with_sources() -> None:
     ]
     assert body["sources"][0]["sourceOrigin"] == "RDB"
     assert body["sources"][1]["sourceOrigin"] == "QDRANT"
+    assert body["sources"] == [
+        {
+            "sourceType": "ORDER",
+            "title": "ORD-202605-001 납기 위험",
+            "summary": "납기 지연 위험 등급은 WARNING입니다.",
+            "url": "/orders/1001",
+            "referenceId": 1001,
+            "source": "ai_prediction_results",
+            "basisTime": "2026-05-12T10:30:00+09:00",
+            "sourceOrigin": "RDB",
+            "relevanceScore": None,
+        },
+        {
+            "sourceType": "REPORT",
+            "title": "5월 생산 리스크 보고서",
+            "summary": "LINE-A01 병목과 자재 부족이 주요 원인입니다.",
+            "url": "/reports/20",
+            "referenceId": 20,
+            "source": "report-202605-risk:chunk-0001",
+            "basisTime": None,
+            "sourceOrigin": "QDRANT",
+            "relevanceScore": 0.89,
+        },
+    ]
     assert body["modelResult"] == {
         "usedVectorSearch": True,
         "usedRdbEvidence": True,
