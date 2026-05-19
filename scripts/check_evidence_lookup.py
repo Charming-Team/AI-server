@@ -13,7 +13,12 @@ from app.features.chat.evidence_service import (
     validate_evidence_lookup_settings,
 )
 from app.features.chat.exceptions import ChatServiceError
-from app.features.chat.schemas import ChatAnswerRequest, ChatIntent, ChatUserContext
+from app.features.chat.schemas import (
+    ChatAnswerRequest,
+    ChatErrorCode,
+    ChatIntent,
+    ChatUserContext,
+)
 
 DEFAULT_QUESTION = "자재 부족으로 영향받는 생산계획 알려줘"
 DEFAULT_REQUESTED_AT = "2026-05-12T10:30:00+09:00"
@@ -61,6 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--validate-only",
         action="store_true",
         help="Spring 네트워크 호출 없이 설정과 요청 payload만 검증합니다.",
+    )
+    parser.add_argument(
+        "--min-items",
+        type=int,
+        default=0,
+        help="네트워크 점검에서 요구하는 최소 Evidence item 개수",
     )
     return parser
 
@@ -117,17 +128,30 @@ async def check_evidence_lookup(
     settings: Settings,
     request: ChatAnswerRequest,
     intent: ChatIntent,
+    min_items: int = 0,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     service = EvidenceService(settings, http_client=http_client)
     result = await service.get_evidence(request, intent)
+    item_count = len(result.items)
+    if item_count < min_items:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message=(
+                "Spring Evidence 응답 item 개수가 기준보다 적습니다. "
+                f"expected>={min_items}, actual={item_count}"
+            ),
+        )
+
     return {
         "checkStatus": "PASS",
         "mode": "NETWORK",
         "url": service._evidence_lookup_url,
         "intent": result.intent.value,
         "basisTime": result.basis_time.isoformat(),
-        "itemCount": len(result.items),
+        "itemCount": item_count,
+        "minItems": min_items,
         "sourceTypes": sorted({item.type for item in result.items}),
         "networkChecked": True,
     }
@@ -158,6 +182,7 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"intent={result['intent']}",
             f"basisTime={result['basisTime']}",
             f"itemCount={result['itemCount']}",
+            f"minItems={result['minItems']}",
             f"sourceTypes={','.join(result['sourceTypes'])}",
         ]
     )
@@ -184,7 +209,14 @@ def main(
         if args.validate_only:
             result = build_validate_only_result(settings, request, intent)
         else:
-            result = asyncio.run(check_evidence_lookup(settings, request, intent))
+            result = asyncio.run(
+                check_evidence_lookup(
+                    settings,
+                    request,
+                    intent,
+                    min_items=args.min_items,
+                )
+            )
     except ChatServiceError as exc:
         print(f"Spring Evidence 연결 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)

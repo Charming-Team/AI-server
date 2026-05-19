@@ -3,8 +3,10 @@ from io import StringIO
 
 import anyio
 import httpx
+import pytest
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatIntent
 from scripts import check_evidence_lookup
 
@@ -26,6 +28,7 @@ def _build_args(**overrides):
         "requested_at": "2026-05-12T10:30:00+09:00",
         "json": False,
         "validate_only": False,
+        "min_items": 0,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -132,6 +135,7 @@ def test_check_evidence_lookup_script_calls_spring_contract() -> None:
                 ),
                 check_evidence_lookup.build_request(_build_args()),
                 ChatIntent.MATERIAL_SHORTAGE,
+                min_items=1,
                 http_client=http_client,
             )
 
@@ -147,9 +151,49 @@ def test_check_evidence_lookup_script_calls_spring_contract() -> None:
         "intent": "MATERIAL_SHORTAGE",
         "basisTime": "2026-05-12T10:35:00+09:00",
         "itemCount": 1,
+        "minItems": 1,
         "sourceTypes": ["MATERIAL"],
         "networkChecked": True,
     }
+
+
+def test_check_evidence_lookup_script_fails_when_item_count_is_below_minimum() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "code": "COMMON200",
+                "message": "요청 성공",
+                "data": {
+                    "intent": "MATERIAL_SHORTAGE",
+                    "basisTime": "2026-05-12T10:35:00+09:00",
+                    "items": [],
+                },
+            },
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_evidence_lookup.check_evidence_lookup(
+                Settings(
+                    evidence_lookup_enabled=True,
+                    evidence_lookup_base_url="http://spring.local",
+                    evidence_lookup_internal_token="internal-token",
+                ),
+                check_evidence_lookup.build_request(_build_args()),
+                ChatIntent.MATERIAL_SHORTAGE,
+                min_items=1,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "expected>=1, actual=0" in exc_info.value.message
 
 
 def test_check_evidence_lookup_script_main_validate_only_does_not_expose_secret() -> None:
