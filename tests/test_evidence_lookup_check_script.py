@@ -101,17 +101,22 @@ def test_check_evidence_lookup_script_calls_spring_contract() -> None:
         return httpx.Response(
             200,
             json={
-                "intent": "MATERIAL_SHORTAGE",
-                "basisTime": "2026-05-12T10:35:00+09:00",
-                "items": [
-                    {
-                        "type": "MATERIAL",
-                        "title": "MAT-001 재고 부족",
-                        "summary": "가용 재고가 안전 재고보다 낮습니다.",
-                        "source": "material_inventories",
-                        "referenceId": 11,
-                    }
-                ],
+                "success": True,
+                "code": "COMMON200",
+                "message": "요청 성공",
+                "data": {
+                    "intent": "MATERIAL_SHORTAGE",
+                    "basisTime": "2026-05-12T10:35:00+09:00",
+                    "items": [
+                        {
+                            "type": "MATERIAL",
+                            "title": "MAT-001 재고 부족",
+                            "summary": "가용 재고가 안전 재고보다 낮습니다.",
+                            "source": "material_inventories",
+                            "referenceId": 11,
+                        }
+                    ],
+                },
             },
             request=request,
         )

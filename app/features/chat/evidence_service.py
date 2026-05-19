@@ -1,3 +1,5 @@
+from typing import Any
+
 import httpx
 from pydantic import ValidationError
 
@@ -141,7 +143,9 @@ class EvidenceService:
     ) -> EvidenceResult:
         try:
             response.raise_for_status()
-            result = EvidenceResult.model_validate(response.json())
+            result = EvidenceResult.model_validate(
+                self._extract_evidence_payload(response.json())
+            )
         except httpx.HTTPStatusError as exc:
             raise ChatExternalServiceError(
                 status_code=503,
@@ -162,3 +166,15 @@ class EvidenceService:
                 message="RDB Evidence 응답 의도가 요청 의도와 일치하지 않습니다.",
             )
         return result
+
+    def _extract_evidence_payload(self, payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+
+        if "success" not in payload and "data" not in payload:
+            return payload
+
+        if payload.get("success") is not True or payload.get("data") is None:
+            raise ValueError("Spring BaseResponse data is missing.")
+
+        return payload["data"]

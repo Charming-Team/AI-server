@@ -78,17 +78,22 @@ def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:
         return httpx.Response(
             200,
             json={
-                "intent": "MATERIAL_SHORTAGE",
-                "basisTime": "2026-05-12T10:35:00+09:00",
-                "items": [
-                    {
-                        "type": "MATERIAL",
-                        "title": "MAT-001 재고 부족",
-                        "summary": "가용 재고가 안전 재고보다 낮습니다.",
-                        "source": "material_inventories",
-                        "referenceId": 11,
-                    }
-                ],
+                "success": True,
+                "code": "COMMON200",
+                "message": "요청 성공",
+                "data": {
+                    "intent": "MATERIAL_SHORTAGE",
+                    "basisTime": "2026-05-12T10:35:00+09:00",
+                    "items": [
+                        {
+                            "type": "MATERIAL",
+                            "title": "MAT-001 재고 부족",
+                            "summary": "가용 재고가 안전 재고보다 낮습니다.",
+                            "source": "material_inventories",
+                            "referenceId": 11,
+                        }
+                    ],
+                },
             },
         )
 
@@ -117,6 +122,41 @@ def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:
     assert result.intent == ChatIntent.MATERIAL_SHORTAGE
     assert result.has_evidence is True
     assert result.items[0].title == "MAT-001 재고 부족"
+
+
+def test_evidence_service_parses_legacy_raw_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "intent": "MATERIAL_SHORTAGE",
+                "basisTime": "2026-05-12T10:35:00+09:00",
+                "items": [],
+            },
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def run() -> EvidenceResult:
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            service = EvidenceService(
+                Settings(
+                    evidence_lookup_enabled=True,
+                    evidence_lookup_base_url="http://spring.local",
+                    evidence_lookup_internal_token="internal-token",
+                ),
+                http_client=http_client,
+            )
+            return await service.get_evidence(
+                _build_request(),
+                ChatIntent.MATERIAL_SHORTAGE,
+            )
+
+    result = anyio.run(run)
+
+    assert result.intent == ChatIntent.MATERIAL_SHORTAGE
+    assert result.items == []
 
 
 def test_evidence_service_normalizes_lookup_path() -> None:
@@ -246,6 +286,41 @@ def test_evidence_service_raises_custom_error_on_invalid_response() -> None:
         return httpx.Response(
             200,
             json={"result": "invalid"},
+            request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            service = EvidenceService(
+                Settings(
+                    evidence_lookup_enabled=True,
+                    evidence_lookup_base_url="http://spring.local",
+                    evidence_lookup_internal_token="internal-token",
+                ),
+                http_client=http_client,
+            )
+            await service.get_evidence(_build_request(), ChatIntent.MATERIAL_SHORTAGE)
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_EVIDENCE_003
+    assert exc_info.value.message == "RDB Evidence 응답 형식이 올바르지 않습니다."
+
+
+def test_evidence_service_raises_custom_error_on_failed_base_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "success": False,
+                "code": "400-001",
+                "message": "요청 값 검증에 실패했습니다.",
+                "data": None,
+            },
             request=request,
         )
 
