@@ -87,10 +87,33 @@ def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:
                     "items": [
                         {
                             "type": "MATERIAL",
-                            "title": "MAT-001 재고 부족",
-                            "summary": "가용 재고가 안전 재고보다 낮습니다.",
-                            "source": "material_inventories",
-                            "referenceId": 11,
+                            "title": "RM-AL-001 알루미늄 원자재 재고 부족",
+                            "summary": (
+                                "생산계획 1001에서 RM-AL-001 알루미늄 원자재 "
+                                "부족 상태입니다."
+                            ),
+                            "url": "/materials/inventory/11?mode=read",
+                            "source": "production_plan_materials",
+                            "referenceId": 7001,
+                            "data": {
+                                "planMaterialId": 7001,
+                                "planId": 1001,
+                                "materialId": 11,
+                                "materialCode": "RM-AL-001",
+                                "requiredQuantity": 150.0,
+                                "reservedQuantity": 90.0,
+                                "shortageQuantity": 60.0,
+                                "inventoryRegistered": True,
+                                "currentInventoryQuantity": 120.0,
+                                "availableInventoryQuantity": 30.0,
+                                "safetyStockQuantity": 50.0,
+                                "inventoryStatus": "LOW",
+                            },
+                            "allowedRoles": [
+                                "operator",
+                                "executive",
+                                "manufacturing_manager",
+                            ],
                         }
                     ],
                 },
@@ -121,7 +144,19 @@ def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:
     assert '"intent":"MATERIAL_SHORTAGE"' in captured_request["body"]
     assert result.intent == ChatIntent.MATERIAL_SHORTAGE
     assert result.has_evidence is True
-    assert result.items[0].title == "MAT-001 재고 부족"
+    assert result.items[0].title == "RM-AL-001 알루미늄 원자재 재고 부족"
+    assert result.items[0].source == "production_plan_materials"
+    assert result.items[0].reference_id == 7001
+    assert result.items[0].url == "/materials/inventory/11?mode=read"
+    assert result.items[0].data["planMaterialId"] == 7001
+    assert result.items[0].data["availableInventoryQuantity"] == 30.0
+    assert result.items[0].data["safetyStockQuantity"] == 50.0
+    assert result.items[0].data["inventoryStatus"] == "LOW"
+    assert result.items[0].allowed_roles == [
+        "OPERATOR",
+        "EXECUTIVE",
+        "MANUFACTURING_MANAGER",
+    ]
 
 
 def test_evidence_service_parses_legacy_raw_response() -> None:

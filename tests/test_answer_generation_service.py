@@ -178,6 +178,49 @@ def test_answer_generation_service_builds_grounded_prompt() -> None:
     assert "월간 생산 리스크" in prompt.user_prompt
 
 
+def test_answer_generation_prompt_includes_rdb_evidence_source_data() -> None:
+    service = AnswerGenerationService(Settings())
+    request = _build_request(role="MANUFACTURING_MANAGER")
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.MATERIAL_SHORTAGE,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="MATERIAL",
+                title="RM-AL-001 알루미늄 원자재 재고 부족",
+                summary=(
+                    "생산계획 1001에서 RM-AL-001 알루미늄 원자재 부족 상태입니다."
+                ),
+                url="/materials/inventory/11?mode=read",
+                source="production_plan_materials",
+                referenceId=7001,
+                data={
+                    "planMaterialId": 7001,
+                    "planId": 1001,
+                    "materialCode": "RM-AL-001",
+                    "requiredQuantity": 150.0,
+                    "reservedQuantity": 90.0,
+                    "shortageQuantity": 60.0,
+                    "inventoryRegistered": True,
+                    "currentInventoryQuantity": 120.0,
+                    "availableInventoryQuantity": 30.0,
+                    "safetyStockQuantity": 50.0,
+                    "inventoryStatus": "LOW",
+                },
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(sources=[])
+
+    prompt = service.build_prompt(request, evidence_result, document_result)
+
+    assert "원천 데이터" in prompt.user_prompt
+    assert '"planMaterialId": 7001' in prompt.user_prompt
+    assert '"availableInventoryQuantity": 30.0' in prompt.user_prompt
+    assert '"safetyStockQuantity": 50.0' in prompt.user_prompt
+    assert '"inventoryStatus": "LOW"' in prompt.user_prompt
+
+
 def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     llm_client = FakeLlmClient(
         "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."

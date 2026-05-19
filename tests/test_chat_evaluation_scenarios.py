@@ -101,15 +101,27 @@ class FakeMaterialShortageEvidenceService:
                 EvidenceItem(
                     type="MATERIAL",
                     title="RM-AL-001 알루미늄 원자재 재고 부족",
-                    summary="가용 재고 120KG, 안전 재고 300KG로 부족 상태입니다.",
+                    summary=(
+                        "생산계획 1001에서 RM-AL-001 알루미늄 원자재 부족 상태입니다. "
+                        "필요 수량 150KG, 예약 수량 90KG, 부족 수량 60KG입니다. "
+                        "현재 가용 재고는 30KG, 안전 재고는 50KG, 재고 상태는 LOW입니다."
+                    ),
                     url="/materials/inventory/11?mode=read",
-                    source="material_inventories",
-                    referenceId=11,
+                    source="production_plan_materials",
+                    referenceId=7001,
                     data={
+                        "planMaterialId": 7001,
+                        "planId": 1001,
+                        "materialId": 11,
                         "materialCode": "RM-AL-001",
-                        "availableQuantity": 120,
-                        "safetyStockQuantity": 300,
-                        "inventoryStatus": "SHORTAGE",
+                        "requiredQuantity": 150,
+                        "reservedQuantity": 90,
+                        "shortageQuantity": 60,
+                        "inventoryRegistered": True,
+                        "currentInventoryQuantity": 120,
+                        "availableInventoryQuantity": 30,
+                        "safetyStockQuantity": 50,
+                        "inventoryStatus": "LOW",
                     },
                 )
             ],
@@ -277,11 +289,17 @@ class FakeMaterialShortageAnswerGenerationService:
         assert [item.title for item in evidence_result.items] == [
             "RM-AL-001 알루미늄 원자재 재고 부족"
         ]
+        evidence_data = evidence_result.items[0].data
+        assert evidence_data["planMaterialId"] == 7001
+        assert evidence_data["availableInventoryQuantity"] == 30
+        assert evidence_data["safetyStockQuantity"] == 50
+        assert evidence_data["inventoryStatus"] == "LOW"
         assert document_result.sources == []
         return AnswerGenerationResult(
             answer=(
-                "RM-AL-001 알루미늄 원자재는 가용 재고 120KG, "
-                "안전 재고 300KG로 부족 상태입니다."
+                "RM-AL-001 알루미늄 원자재는 생산계획 1001 기준 "
+                "부족 수량 60KG이며, 가용 재고 30KG와 안전 재고 50KG를 "
+                "확인했습니다."
             ),
             was_generated=True,
         )
@@ -1143,8 +1161,9 @@ def test_chat_answer_evaluation_returns_material_shortage_answer_from_rdb() -> N
     assert body["intent"] == "MATERIAL_SHORTAGE"
     assert body["securityResult"]["status"] == "PASSED"
     assert body["answer"] == (
-        "RM-AL-001 알루미늄 원자재는 가용 재고 120KG, "
-        "안전 재고 300KG로 부족 상태입니다."
+        "RM-AL-001 알루미늄 원자재는 생산계획 1001 기준 "
+        "부족 수량 60KG이며, 가용 재고 30KG와 안전 재고 50KG를 "
+        "확인했습니다."
     )
     assert body["basisTime"] == "2026-05-12T10:30:00+09:00"
     assert body["urls"] == [
@@ -1158,10 +1177,14 @@ def test_chat_answer_evaluation_returns_material_shortage_answer_from_rdb() -> N
         {
             "sourceType": "MATERIAL",
             "title": "RM-AL-001 알루미늄 원자재 재고 부족",
-            "summary": "가용 재고 120KG, 안전 재고 300KG로 부족 상태입니다.",
+            "summary": (
+                "생산계획 1001에서 RM-AL-001 알루미늄 원자재 부족 상태입니다. "
+                "필요 수량 150KG, 예약 수량 90KG, 부족 수량 60KG입니다. "
+                "현재 가용 재고는 30KG, 안전 재고는 50KG, 재고 상태는 LOW입니다."
+            ),
             "url": "/materials/inventory/11?mode=read",
-            "referenceId": 11,
-            "source": "material_inventories",
+            "referenceId": 7001,
+            "source": "production_plan_materials",
             "basisTime": "2026-05-12T10:30:00+09:00",
             "sourceOrigin": "RDB",
             "relevanceScore": None,
