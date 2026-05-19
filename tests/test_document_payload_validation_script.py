@@ -250,6 +250,71 @@ def test_validate_document_payload_script_reports_multiple_input_errors(
     assert "code=CHAT_DOCUMENT_001" in stdout.getvalue()
 
 
+def test_validate_document_payload_script_rejects_duplicate_document_ids(
+    tmp_path,
+) -> None:
+    first_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-duplicate"),
+        "report-a.json",
+    )
+    second_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-duplicate"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(first_input),
+            "--input",
+            str(second_input),
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 1
+    assert "status=INVALID" in stdout.getvalue()
+    assert "validCount=0" in stdout.getvalue()
+    assert "invalidCount=2" in stdout.getvalue()
+    assert "code=CHAT_DOCUMENT_002" in stdout.getvalue()
+    assert "documentId가 중복되었습니다" in stdout.getvalue()
+
+
+def test_validate_document_payload_script_rejects_duplicate_document_ids_in_json(
+    tmp_path,
+) -> None:
+    first_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-duplicate"),
+        "report-a.json",
+    )
+    second_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-duplicate"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(first_input),
+            "--input",
+            str(second_input),
+            "--json",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 1
+    assert '"invalidCount": 2' in stdout.getvalue()
+    assert '"code": "CHAT_DOCUMENT_002"' in stdout.getvalue()
+    assert "documentId가 중복되었습니다" in stdout.getvalue()
+
+
 def test_validate_document_payload_script_prints_json_batch_without_content(
     tmp_path,
 ) -> None:
@@ -565,6 +630,34 @@ def test_validate_document_payload_resolves_exit_code_from_warning_policy() -> N
     assert validate_document_payload.resolve_exit_code(result, fail_on_warning=False) == 0
     assert validate_document_payload.resolve_exit_code(result, fail_on_warning=True) == 2
     assert validate_document_payload.resolve_exit_code({"warnings": []}, True) == 0
+
+
+def test_validate_document_payload_marks_duplicate_document_ids_invalid() -> None:
+    results = [
+        {
+            "status": "VALID",
+            "documentId": "report-202605-duplicate",
+            "warnings": ["warning"],
+        },
+        {
+            "status": "VALID",
+            "documentId": "report-202605-duplicate",
+            "warnings": [],
+        },
+        {
+            "status": "VALID",
+            "documentId": "report-202605-unique",
+            "warnings": [],
+        },
+    ]
+
+    validate_document_payload.apply_duplicate_document_id_errors(results)
+
+    assert results[0]["status"] == "INVALID"
+    assert results[1]["status"] == "INVALID"
+    assert results[2]["status"] == "VALID"
+    assert results[0]["warnings"] == []
+    assert results[0]["error"]["code"] == "CHAT_DOCUMENT_002"
 
 
 def test_validate_document_payload_script_rejects_operator_financial_content(

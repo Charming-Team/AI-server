@@ -18,6 +18,7 @@ WARNING_CONTENT_NEAR_LIMIT = "문서 본문 길이가 설정 한도에 근접했
 WARNING_CHUNK_NEAR_LIMIT = "문서 청크 수가 설정 한도에 근접했습니다."
 WARNING_DUPLICATE_CHUNKS = "중복 청크가 있어 임베딩 요청 입력은 중복 제거 후 계산됩니다."
 WARNING_EMBEDDING_DISABLED = "임베딩 기능이 비활성화되어 실제 문서 저장은 생략됩니다."
+DUPLICATE_DOCUMENT_ID_MESSAGE = "문서 payload 파일 간 documentId가 중복되었습니다."
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -261,6 +262,7 @@ def validate_document_payload_files(
                 }
             )
 
+    apply_duplicate_document_id_errors(results)
     invalid_count = sum(1 for result in results if result["status"] == "INVALID")
     warning_count = sum(len(result["warnings"]) for result in results)
     return {
@@ -272,6 +274,36 @@ def validate_document_payload_files(
         "networkChecked": False,
         "results": results,
     }
+
+
+def apply_duplicate_document_id_errors(results: list[dict[str, Any]]) -> None:
+    document_id_counts: dict[str, int] = {}
+    for result in results:
+        if result["status"] != "VALID":
+            continue
+        document_id = result["documentId"]
+        document_id_counts[document_id] = document_id_counts.get(document_id, 0) + 1
+
+    duplicated_document_ids = {
+        document_id
+        for document_id, count in document_id_counts.items()
+        if count > 1
+    }
+    if not duplicated_document_ids:
+        return
+
+    for result in results:
+        if result.get("documentId") not in duplicated_document_ids:
+            continue
+        result["status"] = "INVALID"
+        result["error"] = ErrorResponse(
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message=(
+                f"{DUPLICATE_DOCUMENT_ID_MESSAGE}: "
+                f"{result['documentId']}"
+            ),
+        ).model_dump(mode="json")
+        result["warnings"] = []
 
 
 def build_warnings(
