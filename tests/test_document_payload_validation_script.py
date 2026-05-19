@@ -112,6 +112,111 @@ def test_validate_document_payload_script_validates_multiple_inputs(tmp_path) ->
     assert "documentId=report-202605-b" in stdout.getvalue()
 
 
+def test_validate_document_payload_script_validates_input_directory(tmp_path) -> None:
+    input_dir = tmp_path / "payloads"
+    input_dir.mkdir()
+    _write_payload(
+        input_dir,
+        _build_payload(documentId="report-202605-a"),
+        "report-a.json",
+    )
+    _write_payload(
+        input_dir,
+        _build_payload(documentId="report-202605-b"),
+        "report-b.json",
+    )
+    (input_dir / "README.txt").write_text("not a payload", encoding="utf-8")
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input-dir", str(input_dir)],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "inputCount=2" in stdout.getvalue()
+    assert "validCount=2" in stdout.getvalue()
+    assert "documentId=report-202605-a" in stdout.getvalue()
+    assert "documentId=report-202605-b" in stdout.getvalue()
+    assert "README.txt" not in stdout.getvalue()
+
+
+def test_validate_document_payload_script_combines_input_and_input_directory(
+    tmp_path,
+) -> None:
+    direct_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-a"),
+        "report-a.json",
+    )
+    input_dir = tmp_path / "payloads"
+    input_dir.mkdir()
+    _write_payload(
+        input_dir,
+        _build_payload(documentId="report-202605-b"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(direct_input),
+            "--input-dir",
+            str(input_dir),
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "inputCount=2" in stdout.getvalue()
+    assert "documentId=report-202605-a" in stdout.getvalue()
+    assert "documentId=report-202605-b" in stdout.getvalue()
+
+
+def test_validate_document_payload_script_rejects_missing_input_directory(
+    tmp_path,
+) -> None:
+    stderr = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input-dir", str(tmp_path / "missing")],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert "문서 payload 디렉터리를 찾을 수 없습니다." in stderr.getvalue()
+    assert "CHAT_DOCUMENT_002" in stderr.getvalue()
+
+
+def test_validate_document_payload_script_rejects_empty_input_directory(
+    tmp_path,
+) -> None:
+    input_dir = tmp_path / "payloads"
+    input_dir.mkdir()
+    (input_dir / "README.txt").write_text("not a payload", encoding="utf-8")
+    stderr = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input-dir", str(input_dir)],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert "문서 payload 디렉터리에 JSON 파일이 없습니다." in stderr.getvalue()
+    assert "CHAT_DOCUMENT_002" in stderr.getvalue()
+
+
+def test_validate_document_payload_script_requires_input_or_input_directory() -> None:
+    stderr = StringIO()
+
+    exit_code = validate_document_payload.main([], stderr=stderr)
+
+    assert exit_code == 1
+    assert "검증할 문서 payload 파일 또는 디렉터리가 필요합니다." in stderr.getvalue()
+    assert "CHAT_DOCUMENT_002" in stderr.getvalue()
+
+
 def test_validate_document_payload_script_reports_multiple_input_errors(
     tmp_path,
 ) -> None:

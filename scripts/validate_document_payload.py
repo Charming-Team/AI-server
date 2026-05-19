@@ -27,8 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input",
         action="append",
-        required=True,
         help="검증할 문서 payload JSON 파일 경로. 여러 파일은 옵션을 반복해서 지정합니다.",
+    )
+    parser.add_argument(
+        "--input-dir",
+        action="append",
+        help="검증할 문서 payload JSON 파일이 들어 있는 디렉터리 경로",
     )
     parser.add_argument(
         "--env-file",
@@ -60,10 +64,53 @@ def build_settings(args: argparse.Namespace) -> Settings:
 
 
 def normalize_input_paths(args: argparse.Namespace) -> list[str]:
-    input_paths = args.input
-    if isinstance(input_paths, list):
+    input_paths: list[str] = []
+    raw_input_paths = getattr(args, "input", None)
+    if isinstance(raw_input_paths, list):
+        input_paths.extend(raw_input_paths)
+    elif raw_input_paths:
+        input_paths.append(raw_input_paths)
+
+    raw_input_dirs = getattr(args, "input_dir", None)
+    if isinstance(raw_input_dirs, list):
+        for input_dir in raw_input_dirs:
+            input_paths.extend(expand_input_dir(input_dir))
+    elif raw_input_dirs:
+        input_paths.extend(expand_input_dir(raw_input_dirs))
+
+    deduplicated_paths = list(dict.fromkeys(input_paths))
+    if deduplicated_paths:
+        return deduplicated_paths
+
+    raise ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_DOCUMENT_002,
+        message="검증할 문서 payload 파일 또는 디렉터리가 필요합니다.",
+    )
+
+
+def expand_input_dir(input_dir: str) -> list[str]:
+    directory = Path(input_dir)
+    if not directory.is_dir():
+        raise ChatServiceError(
+            status_code=400,
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message="문서 payload 디렉터리를 찾을 수 없습니다.",
+        )
+
+    input_paths = [
+        str(path)
+        for path in sorted(directory.iterdir())
+        if path.is_file() and path.suffix.lower() == ".json"
+    ]
+    if input_paths:
         return input_paths
-    return [input_paths]
+
+    raise ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_DOCUMENT_002,
+        message="문서 payload 디렉터리에 JSON 파일이 없습니다.",
+    )
 
 
 def load_payload(input_path: str) -> dict[str, Any]:
