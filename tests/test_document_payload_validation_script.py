@@ -73,6 +73,11 @@ def test_validate_document_payload_script_validates_payload_without_network(tmp_
     assert "documentType=REPORT" in stdout.getvalue()
     assert "chunkCount=1" in stdout.getvalue()
     assert "networkChecked=False" in stdout.getvalue()
+    assert "estimatedEmbeddingRequestCount=0" in stdout.getvalue()
+    assert "estimatedQdrantUpsertPointCount=0" in stdout.getvalue()
+    assert "warning=임베딩 기능이 비활성화되어 실제 문서 저장은 생략됩니다." in (
+        stdout.getvalue()
+    )
 
 
 def test_validate_document_payload_script_prints_json_without_document_content(
@@ -159,6 +164,72 @@ def test_validate_document_payload_result_omits_chunks_by_default() -> None:
     )
 
     assert "chunks" not in result
+
+
+def test_validate_document_payload_result_estimates_embedding_and_qdrant_work() -> None:
+    result = validate_document_payload.validate_document_payload(
+        _build_payload(content="A" * 30 + "\n" + "B" * 30),
+        Settings(
+            embedding_enabled=True,
+            document_chunk_size=35,
+            document_chunk_overlap=5,
+        ),
+    )
+
+    assert result["chunkCount"] == 2
+    assert result["contentCharCount"] == 61
+    assert result["embeddingEnabled"] is True
+    assert result["embeddingInputCount"] == 2
+    assert result["uniqueEmbeddingInputCount"] == 2
+    assert result["estimatedEmbeddingRequestCount"] == 1
+    assert result["estimatedQdrantUpsertPointCount"] == 2
+    assert result["warnings"] == []
+
+
+def test_validate_document_payload_result_warns_for_duplicate_chunks() -> None:
+    result = validate_document_payload.validate_document_payload(
+        _build_payload(content="A" * 30 + "\n" + "A" * 30),
+        Settings(
+            embedding_enabled=True,
+            document_chunk_size=35,
+            document_chunk_overlap=5,
+        ),
+    )
+
+    assert result["embeddingInputCount"] == 2
+    assert result["uniqueEmbeddingInputCount"] == 1
+    assert "중복 청크가 있어 임베딩 요청 입력은 중복 제거 후 계산됩니다." in (
+        result["warnings"]
+    )
+
+
+def test_validate_document_payload_result_warns_when_content_is_near_limit() -> None:
+    result = validate_document_payload.validate_document_payload(
+        _build_payload(content="A" * 800),
+        Settings(
+            embedding_enabled=True,
+            document_content_max_chars=1000,
+            document_chunk_size=1000,
+            document_max_chunks=10,
+        ),
+    )
+
+    assert "문서 본문 길이가 설정 한도에 근접했습니다." in result["warnings"]
+
+
+def test_validate_document_payload_result_warns_when_chunk_count_is_near_limit() -> None:
+    result = validate_document_payload.validate_document_payload(
+        _build_payload(content="A\nB\nC\nD"),
+        Settings(
+            embedding_enabled=True,
+            document_chunk_size=1,
+            document_chunk_overlap=0,
+            document_max_chunks=5,
+        ),
+    )
+
+    assert result["chunkCount"] == 4
+    assert "문서 청크 수가 설정 한도에 근접했습니다." in result["warnings"]
 
 
 def test_validate_document_payload_script_rejects_operator_financial_content(

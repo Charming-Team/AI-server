@@ -14,6 +14,11 @@ from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ErrorResponse
 from app.features.chat.skip_reasons import DOCUMENT_CONTENT_EMPTY
 
+WARNING_CONTENT_NEAR_LIMIT = "문서 본문 길이가 설정 한도에 근접했습니다."
+WARNING_CHUNK_NEAR_LIMIT = "문서 청크 수가 설정 한도에 근접했습니다."
+WARNING_DUPLICATE_CHUNKS = "중복 청크가 있어 임베딩 요청 입력은 중복 제거 후 계산됩니다."
+WARNING_EMBEDDING_DISABLED = "임베딩 기능이 비활성화되어 실제 문서 저장은 생략됩니다."
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -106,6 +111,7 @@ def validate_document_payload(
                 "인덱싱할 수 있습니다."
             ),
         )
+    unique_embedding_input_count = len({chunk.chunk_text for chunk in chunk_payloads})
 
     result = {
         "status": "VALID",
@@ -120,6 +126,22 @@ def validate_document_payload(
         "urlConfigured": bool(document.url),
         "networkChecked": False,
         "skippedReason": DOCUMENT_CONTENT_EMPTY if chunk_count == 0 else None,
+        "contentCharCount": len(document.content),
+        "embeddingEnabled": settings.embedding_enabled,
+        "embeddingInputCount": chunk_count,
+        "uniqueEmbeddingInputCount": unique_embedding_input_count,
+        "estimatedEmbeddingRequestCount": (
+            1 if settings.embedding_enabled and unique_embedding_input_count > 0 else 0
+        ),
+        "estimatedQdrantUpsertPointCount": (
+            chunk_count if settings.embedding_enabled and chunk_count > 0 else 0
+        ),
+        "warnings": build_warnings(
+            document=document,
+            settings=settings,
+            chunk_count=chunk_count,
+            unique_embedding_input_count=unique_embedding_input_count,
+        ),
     }
     if include_chunks:
         result["chunks"] = [
@@ -134,6 +156,30 @@ def validate_document_payload(
     return result
 
 
+def build_warnings(
+    document: InternalDocumentInput,
+    settings: Settings,
+    chunk_count: int,
+    unique_embedding_input_count: int,
+) -> list[str]:
+    warnings: list[str] = []
+    if not settings.embedding_enabled:
+        warnings.append(WARNING_EMBEDDING_DISABLED)
+    if _is_near_limit(len(document.content), settings.document_content_max_chars):
+        warnings.append(WARNING_CONTENT_NEAR_LIMIT)
+    if _is_near_limit(chunk_count, settings.document_max_chunks):
+        warnings.append(WARNING_CHUNK_NEAR_LIMIT)
+    if unique_embedding_input_count < chunk_count:
+        warnings.append(WARNING_DUPLICATE_CHUNKS)
+    return warnings
+
+
+def _is_near_limit(value: int, limit: int) -> bool:
+    if limit <= 0 or value <= 0:
+        return False
+    return value / limit >= 0.8
+
+
 def format_text_result(result: dict[str, Any]) -> str:
     lines = [
         f"status={result['status']}",
@@ -146,6 +192,12 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"companyNameConfigured={result['companyNameConfigured']}",
         f"urlConfigured={result['urlConfigured']}",
         f"networkChecked={result['networkChecked']}",
+        f"contentCharCount={result['contentCharCount']}",
+        f"embeddingEnabled={result['embeddingEnabled']}",
+        f"embeddingInputCount={result['embeddingInputCount']}",
+        f"uniqueEmbeddingInputCount={result['uniqueEmbeddingInputCount']}",
+        f"estimatedEmbeddingRequestCount={result['estimatedEmbeddingRequestCount']}",
+        f"estimatedQdrantUpsertPointCount={result['estimatedQdrantUpsertPointCount']}",
     ]
     if result["requestedByRole"]:
         lines.append(f"requestedByRole={result['requestedByRole']}")
@@ -159,6 +211,8 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"summaryConfigured={chunk['summaryConfigured']} "
             f"urlConfigured={chunk['urlConfigured']}"
         )
+    for warning in result["warnings"]:
+        lines.append(f"warning={warning}")
     return "\n".join(lines)
 
 
