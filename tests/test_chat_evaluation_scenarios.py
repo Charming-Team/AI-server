@@ -322,6 +322,37 @@ class FakeOperatorRestrictedOnlyQdrantClient:
         ]
 
 
+class FakeReportLookupQdrantClient:
+    async def search(self, payload: dict) -> list[dict]:
+        assert payload["filter"] == {
+            "must": [
+                {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
+                {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
+            ]
+        }
+        return [
+            {
+                "id": "monthly-report-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "report-202605-monthly",
+                    "chunkId": "chunk-0001",
+                    "documentType": "REPORT",
+                    "title": "2026년 5월 월간 생산 리스크 보고서",
+                    "chunkText": (
+                        "5월 월간 리포트는 LINE-A01 병목과 자재 부족을 "
+                        "주요 리스크로 요약합니다."
+                    ),
+                    "url": "/reports/202605-monthly",
+                    "referenceType": "REPORT",
+                    "referenceId": 202605,
+                    "allowedRoles": ["EXECUTIVE", "MANUFACTURING_MANAGER"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
 class FakeOperatorSafeAnswerGenerationService:
     async def generate_answer(
         self,
@@ -350,6 +381,26 @@ class FakeOperatorQdrantSafeAnswerGenerationService:
         ]
         return AnswerGenerationResult(
             answer="LINE-A01은 대기시간 증가 시 현장 상태와 작업 순서를 확인해야 합니다.",
+            was_generated=True,
+        )
+
+
+class FakeReportLookupAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.items == []
+        assert [source.title for source in document_result.sources] == [
+            "2026년 5월 월간 생산 리스크 보고서"
+        ]
+        return AnswerGenerationResult(
+            answer=(
+                "2026년 5월 월간 생산 리스크 보고서는 "
+                "LINE-A01 병목과 자재 부족을 주요 리스크로 제시합니다."
+            ),
             was_generated=True,
         )
 
@@ -406,6 +457,18 @@ def _build_operator_restricted_only_qdrant_chat_service() -> ChatService:
         embedding_service=FakeSearchEmbeddingService(),
         qdrant_client=FakeOperatorRestrictedOnlyQdrantClient(),
     )
+    return service
+
+
+def _build_report_lookup_qdrant_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEmptyEvidenceService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeSearchEmbeddingService(),
+        qdrant_client=FakeReportLookupQdrantClient(),
+    )
+    service.answer_generation_service = FakeReportLookupAnswerGenerationService()
     return service
 
 
@@ -895,6 +958,65 @@ def test_chat_answer_evaluation_filters_operator_financial_qdrant_document() -> 
             "basisTime": None,
             "sourceOrigin": "QDRANT",
             "relevanceScore": 0.88,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": False,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 0,
+        "documentSourceCount": 1,
+        "evidenceCount": 1,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_uses_report_lookup_qdrant_source() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_report_lookup_qdrant_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "EXECUTIVE",
+                "이번 달 월간 리포트 요약해줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "REPORT_LOOKUP"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["answer"] == (
+        "2026년 5월 월간 생산 리스크 보고서는 "
+        "LINE-A01 병목과 자재 부족을 주요 리스크로 제시합니다."
+    )
+    assert body["urls"] == [
+        {
+            "label": "2026년 5월 월간 생산 리스크 보고서",
+            "url": "/reports/202605-monthly",
+            "type": "REPORT",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "REPORT",
+            "title": "2026년 5월 월간 생산 리스크 보고서",
+            "summary": (
+                "5월 월간 리포트는 LINE-A01 병목과 자재 부족을 "
+                "주요 리스크로 요약합니다."
+            ),
+            "url": "/reports/202605-monthly",
+            "referenceId": 202605,
+            "source": "report-202605-monthly:chunk-0001",
+            "basisTime": None,
+            "sourceOrigin": "QDRANT",
+            "relevanceScore": 0.91,
         }
     ]
     assert body["modelResult"] == {
