@@ -147,6 +147,68 @@ class FakeProductionPlanEvidenceService:
         )
 
 
+class FakeUrgentOrderImpactEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="ORDER",
+                    title="ORD-202605-099 긴급 주문 생산계획 영향",
+                    summary=(
+                        "긴급 주문 투입 시 LINE-A01 생산계획 종료가 "
+                        "4시간 지연될 수 있습니다."
+                    ),
+                    url="/orders/9099",
+                    source="schedule_simulation_results",
+                    referenceId=9099,
+                    data={
+                        "orderNo": "ORD-202605-099",
+                        "lineCode": "LINE-A01",
+                        "delayIncreaseHr": 4,
+                        "simulationType": "DUE_DATE_PRIORITY",
+                    },
+                )
+            ],
+        )
+
+
+class FakeWorkPriorityEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="PLAN",
+                    title="PLAN-202605-011 우선 처리 작업",
+                    summary=(
+                        "납기 위험 WARNING인 ORD-202605-011 계획을 "
+                        "1순위로 처리해야 합니다."
+                    ),
+                    url="/production-plans/3011",
+                    source="production_plans",
+                    referenceId=3011,
+                    data={
+                        "planId": 3011,
+                        "orderNo": "ORD-202605-011",
+                        "priorityRank": 1,
+                        "riskLevel": "WARNING",
+                    },
+                )
+            ],
+        )
+
+
 class FakeGroundedDocumentSearchService:
     async def search(
         self,
@@ -241,6 +303,48 @@ class FakeProductionPlanAnswerGenerationService:
             answer=(
                 "LINE-A01 생산계획은 2026-05-13 09:00부터 "
                 "18:00까지로 변경 예정이며 계획 수량은 1200개입니다."
+            ),
+            was_generated=True,
+        )
+
+
+class FakeUrgentOrderImpactAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.intent == ChatIntent.URGENT_ORDER_IMPACT
+        assert [item.title for item in evidence_result.items] == [
+            "ORD-202605-099 긴급 주문 생산계획 영향"
+        ]
+        assert document_result.sources == []
+        return AnswerGenerationResult(
+            answer=(
+                "ORD-202605-099 긴급 주문 투입 시 LINE-A01 생산계획 종료가 "
+                "4시간 지연될 수 있습니다."
+            ),
+            was_generated=True,
+        )
+
+
+class FakeWorkPriorityAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.intent == ChatIntent.WORK_PRIORITY
+        assert [item.title for item in evidence_result.items] == [
+            "PLAN-202605-011 우선 처리 작업"
+        ]
+        assert document_result.sources == []
+        return AnswerGenerationResult(
+            answer=(
+                "ORD-202605-011 관련 PLAN-202605-011을 1순위로 "
+                "먼저 처리해야 합니다."
             ),
             was_generated=True,
         )
@@ -617,6 +721,20 @@ def _build_production_plan_rdb_chat_service() -> ChatService:
     service = ChatService(Settings())
     service.evidence_service = FakeProductionPlanEvidenceService()
     service.answer_generation_service = FakeProductionPlanAnswerGenerationService()
+    return service
+
+
+def _build_urgent_order_impact_rdb_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeUrgentOrderImpactEvidenceService()
+    service.answer_generation_service = FakeUrgentOrderImpactAnswerGenerationService()
+    return service
+
+
+def _build_work_priority_rdb_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeWorkPriorityEvidenceService()
+    service.answer_generation_service = FakeWorkPriorityAnswerGenerationService()
     return service
 
 
@@ -1103,6 +1221,126 @@ def test_chat_answer_evaluation_returns_production_plan_answer_from_rdb() -> Non
             ),
             "url": "/production-plans/3001",
             "referenceId": 3001,
+            "source": "production_plans",
+            "basisTime": "2026-05-12T10:30:00+09:00",
+            "sourceOrigin": "RDB",
+            "relevanceScore": None,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": False,
+        "usedRdbEvidence": True,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 0,
+        "evidenceCount": 1,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_returns_urgent_order_impact_answer_from_rdb() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[
+        get_chat_service
+    ] = _build_urgent_order_impact_rdb_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "EXECUTIVE",
+                "긴급 주문이 전체 생산계획에 미치는 영향을 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "URGENT_ORDER_IMPACT"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["answer"] == (
+        "ORD-202605-099 긴급 주문 투입 시 LINE-A01 생산계획 종료가 "
+        "4시간 지연될 수 있습니다."
+    )
+    assert body["urls"] == [
+        {
+            "label": "ORD-202605-099 긴급 주문 생산계획 영향",
+            "url": "/orders/9099",
+            "type": "ORDER",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "ORDER",
+            "title": "ORD-202605-099 긴급 주문 생산계획 영향",
+            "summary": (
+                "긴급 주문 투입 시 LINE-A01 생산계획 종료가 "
+                "4시간 지연될 수 있습니다."
+            ),
+            "url": "/orders/9099",
+            "referenceId": 9099,
+            "source": "schedule_simulation_results",
+            "basisTime": "2026-05-12T10:30:00+09:00",
+            "sourceOrigin": "RDB",
+            "relevanceScore": None,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": False,
+        "usedRdbEvidence": True,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 0,
+        "evidenceCount": 1,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_returns_work_priority_answer_from_rdb() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_work_priority_rdb_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "MANUFACTURING_MANAGER",
+                "오늘 먼저 처리해야 할 작업 우선순위 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "WORK_PRIORITY"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["answer"] == (
+        "ORD-202605-011 관련 PLAN-202605-011을 1순위로 "
+        "먼저 처리해야 합니다."
+    )
+    assert body["urls"] == [
+        {
+            "label": "PLAN-202605-011 우선 처리 작업",
+            "url": "/production-plans/3011",
+            "type": "PLAN",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "PLAN",
+            "title": "PLAN-202605-011 우선 처리 작업",
+            "summary": (
+                "납기 위험 WARNING인 ORD-202605-011 계획을 "
+                "1순위로 처리해야 합니다."
+            ),
+            "url": "/production-plans/3011",
+            "referenceId": 3011,
             "source": "production_plans",
             "basisTime": "2026-05-12T10:30:00+09:00",
             "sourceOrigin": "RDB",
