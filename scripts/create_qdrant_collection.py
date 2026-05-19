@@ -11,6 +11,7 @@ from app.features.chat.qdrant_client import (
     QdrantCollectionCheckResult,
     QdrantDocumentIndexClient,
     QdrantDocumentSearchClient,
+    validate_qdrant_settings,
 )
 from app.features.chat.schemas import ChatErrorCode, ErrorResponse
 
@@ -51,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print result as JSON",
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Qdrant 네트워크 호출 없이 로컬 설정만 검증합니다.",
+    )
     return parser
 
 
@@ -80,6 +86,28 @@ async def check_collection(settings: Settings) -> QdrantCollectionCheckResult:
 async def create_collection(settings: Settings, distance: str) -> dict:
     client = QdrantDocumentIndexClient(settings)
     return await client.create_collection(distance=distance)
+
+
+def build_validate_only_result(settings: Settings, distance: str) -> dict[str, Any]:
+    validate_qdrant_settings(settings)
+    return {
+        "action": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "operation": None,
+        "collection": {
+            "collection_name": settings.qdrant_collection,
+            "status": None,
+            "expected_dimension": settings.embedding_dimension,
+            "actual_dimension": None,
+            "is_dimension_matched": None,
+            "points_count": None,
+        },
+        "distance": distance,
+        "qdrantUrlConfigured": bool(settings.qdrant_url.strip()),
+        "apiKeyConfigured": bool(settings.qdrant_api_key),
+        "networkChecked": False,
+        "error": None,
+    }
 
 
 def build_dimension_mismatch_error(
@@ -127,15 +155,26 @@ def format_text_result(result: dict[str, Any]) -> str:
     points_count = (
         collection["points_count"] if collection["points_count"] is not None else "unknown"
     )
+    dimension_matched = (
+        collection["is_dimension_matched"]
+        if collection["is_dimension_matched"] is not None
+        else "unknown"
+    )
     lines = [
         f"action={result['action']}",
         f"collection={collection['collection_name']}",
         f"qdrantStatus={collection['status'] or 'unknown'}",
         f"expectedDimension={collection['expected_dimension']}",
         f"actualDimension={collection['actual_dimension'] or 'unknown'}",
-        f"dimensionMatched={collection['is_dimension_matched']}",
+        f"dimensionMatched={dimension_matched}",
         f"pointsCount={points_count}",
     ]
+    if "distance" in result:
+        lines.append(f"distance={result['distance']}")
+    if "networkChecked" in result:
+        lines.append(f"networkChecked={result['networkChecked']}")
+    if "apiKeyConfigured" in result:
+        lines.append(f"apiKeyConfigured={result['apiKeyConfigured']}")
     error = result.get("error")
     if isinstance(error, dict):
         lines.extend(
@@ -162,7 +201,10 @@ def main(
     settings = build_settings(args)
 
     try:
-        result = asyncio.run(ensure_collection(settings, args.distance))
+        if args.validate_only:
+            result = build_validate_only_result(settings, args.distance)
+        else:
+            result = asyncio.run(ensure_collection(settings, args.distance))
     except ChatServiceError as exc:
         print(f"Qdrant 컬렉션 생성/점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)

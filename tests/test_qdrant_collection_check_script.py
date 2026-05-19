@@ -3,6 +3,7 @@ from io import StringIO
 
 import pytest
 
+from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.qdrant_client import QdrantCollectionCheckResult
 from app.features.chat.schemas import ChatErrorCode
@@ -183,6 +184,63 @@ def test_check_qdrant_collection_script_prints_json(
     assert '"status": "green"' in stdout.getvalue()
     assert '"collection_name": "smap_internal_documents"' in stdout.getvalue()
     assert '"error": null' in stdout.getvalue()
+
+
+def test_check_qdrant_collection_script_validate_only_skips_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_check_collection(settings):
+        raise AssertionError("validate-only는 Qdrant 네트워크 조회를 하면 안 됩니다.")
+
+    monkeypatch.setattr(check_qdrant_collection, "check_collection", fail_check_collection)
+    stdout = StringIO()
+
+    exit_code = check_qdrant_collection.main(
+        [
+            "--validate-only",
+            "--qdrant-url",
+            "http://localhost:6333",
+            "--collection",
+            "documents",
+            "--embedding-dimension",
+            "1024",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "status=VALIDATED" in stdout.getvalue()
+    assert "mode=validateOnly" in stdout.getvalue()
+    assert "collection=documents" in stdout.getvalue()
+    assert "networkChecked=False" in stdout.getvalue()
+
+
+def test_check_qdrant_collection_script_validate_only_prints_json_without_secret() -> None:
+    stdout = StringIO()
+
+    exit_code = check_qdrant_collection.main(
+        [
+            "--validate-only",
+            "--api-key",
+            "qdrant-secret-token",
+            "--json",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert '"checkStatus": "VALIDATED"' in stdout.getvalue()
+    assert '"apiKeyConfigured": true' in stdout.getvalue()
+    assert "qdrant-secret-token" not in stdout.getvalue()
+
+
+def test_check_qdrant_collection_script_validate_only_requires_qdrant_settings() -> None:
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        check_qdrant_collection.build_validate_only_result(
+            Settings(qdrant_url=" ", qdrant_collection="documents")
+        )
+
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_001
 
 
 @pytest.mark.parametrize(

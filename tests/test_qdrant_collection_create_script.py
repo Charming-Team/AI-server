@@ -3,6 +3,7 @@ from io import StringIO
 
 import pytest
 
+from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.qdrant_client import QdrantCollectionCheckResult
 from app.features.chat.schemas import ChatErrorCode
@@ -217,6 +218,67 @@ def test_create_qdrant_collection_script_prints_json(
     assert '"action": "EXISTS"' in stdout.getvalue()
     assert '"collection_name": "smap_internal_documents"' in stdout.getvalue()
     assert '"error": null' in stdout.getvalue()
+
+
+def test_create_qdrant_collection_script_validate_only_skips_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_ensure_collection(settings, distance):
+        raise AssertionError("validate-only는 Qdrant 네트워크 생성/점검을 하면 안 됩니다.")
+
+    monkeypatch.setattr(create_qdrant_collection, "ensure_collection", fail_ensure_collection)
+    stdout = StringIO()
+
+    exit_code = create_qdrant_collection.main(
+        [
+            "--validate-only",
+            "--qdrant-url",
+            "http://localhost:6333",
+            "--collection",
+            "documents",
+            "--embedding-dimension",
+            "1024",
+            "--distance",
+            "Cosine",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "action=VALIDATED" in stdout.getvalue()
+    assert "collection=documents" in stdout.getvalue()
+    assert "dimensionMatched=unknown" in stdout.getvalue()
+    assert "distance=Cosine" in stdout.getvalue()
+    assert "networkChecked=False" in stdout.getvalue()
+
+
+def test_create_qdrant_collection_script_validate_only_prints_json_without_secret() -> None:
+    stdout = StringIO()
+
+    exit_code = create_qdrant_collection.main(
+        [
+            "--validate-only",
+            "--api-key",
+            "qdrant-secret-token",
+            "--json",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert '"action": "VALIDATED"' in stdout.getvalue()
+    assert '"apiKeyConfigured": true' in stdout.getvalue()
+    assert "qdrant-secret-token" not in stdout.getvalue()
+
+
+def test_create_qdrant_collection_script_validate_only_requires_qdrant_settings() -> None:
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        create_qdrant_collection.build_validate_only_result(
+            Settings(qdrant_url=" ", qdrant_collection="documents"),
+            distance="Cosine",
+        )
+
+    assert exc_info.value.code == ChatErrorCode.CHAT_QDRANT_001
 
 
 @pytest.mark.parametrize(

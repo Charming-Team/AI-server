@@ -10,6 +10,7 @@ from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.qdrant_client import (
     QdrantCollectionCheckResult,
     QdrantDocumentSearchClient,
+    validate_qdrant_settings,
 )
 from app.features.chat.schemas import ChatErrorCode, ErrorResponse
 
@@ -44,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print result as JSON",
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Qdrant 네트워크 호출 없이 로컬 설정만 검증합니다.",
+    )
     return parser
 
 
@@ -68,6 +74,19 @@ def build_settings(args: argparse.Namespace) -> Settings:
 async def check_collection(settings: Settings) -> QdrantCollectionCheckResult:
     client = QdrantDocumentSearchClient(settings)
     return await client.check_collection()
+
+
+def build_validate_only_result(settings: Settings) -> dict[str, Any]:
+    validate_qdrant_settings(settings)
+    return {
+        "checkStatus": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "collectionName": settings.qdrant_collection,
+        "expectedDimension": settings.embedding_dimension,
+        "qdrantUrlConfigured": bool(settings.qdrant_url.strip()),
+        "apiKeyConfigured": bool(settings.qdrant_api_key),
+        "networkChecked": False,
+    }
 
 
 def build_dimension_mismatch_error(
@@ -120,6 +139,24 @@ def format_json_result(result: QdrantCollectionCheckResult) -> str:
     )
 
 
+def format_validate_only_text_result(result: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "status=VALIDATED",
+            "mode=validateOnly",
+            f"collection={result['collectionName']}",
+            f"expectedDimension={result['expectedDimension']}",
+            f"qdrantUrlConfigured={result['qdrantUrlConfigured']}",
+            f"apiKeyConfigured={result['apiKeyConfigured']}",
+            f"networkChecked={result['networkChecked']}",
+        ]
+    )
+
+
+def format_validate_only_json_result(result: dict[str, Any]) -> str:
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
 def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
@@ -131,6 +168,14 @@ def main(
     settings = build_settings(args)
 
     try:
+        if args.validate_only:
+            validate_only_result = build_validate_only_result(settings)
+            if args.json:
+                print(format_validate_only_json_result(validate_only_result), file=output)
+            else:
+                print(format_validate_only_text_result(validate_only_result), file=output)
+            return 0
+
         result = asyncio.run(check_collection(settings))
     except ChatServiceError as exc:
         print(f"Qdrant 컬렉션 점검 실패: {exc.message}", file=error_output)
