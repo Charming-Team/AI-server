@@ -1,0 +1,166 @@
+import json
+from argparse import Namespace
+from io import StringIO
+
+import pytest
+
+from app.core.config import Settings
+from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatErrorCode
+from scripts import validate_document_payload
+
+
+def _build_payload(**overrides):
+    payload = {
+        "documentId": "report-202605",
+        "documentType": "REPORT",
+        "title": "2026년 5월 생산 리스크 보고서",
+        "content": "자재 부족과 라인 병목이 주요 리스크입니다.",
+        "url": "/reports/20",
+        "allowedRoles": ["EXECUTIVE", "MANUFACTURING_MANAGER"],
+        "companyName": "S-MAP",
+        "intentTags": ["REPORT_LOOKUP"],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _write_payload(tmp_path, payload):
+    input_path = tmp_path / "document-payload.json"
+    input_path.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return input_path
+
+
+def test_validate_document_payload_script_builds_settings_from_env_file(tmp_path) -> None:
+    env_file = tmp_path / ".env.document"
+    env_file.write_text(
+        "\n".join(
+            [
+                "DOCUMENT_CONTENT_MAX_CHARS=2000",
+                "DOCUMENT_MAX_CHUNKS=3",
+                "DOCUMENT_CHUNK_SIZE=50",
+                "DOCUMENT_CHUNK_OVERLAP=5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = validate_document_payload.build_settings(
+        Namespace(env_file=str(env_file), json=False, input="document-payload.json")
+    )
+
+    assert settings.document_content_max_chars == 2000
+    assert settings.document_max_chunks == 3
+    assert settings.document_chunk_size == 50
+    assert settings.document_chunk_overlap == 5
+
+
+def test_validate_document_payload_script_validates_payload_without_network(tmp_path) -> None:
+    input_path = _write_payload(tmp_path, _build_payload())
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input", str(input_path)],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "status=VALID" in stdout.getvalue()
+    assert "documentId=report-202605" in stdout.getvalue()
+    assert "documentType=REPORT" in stdout.getvalue()
+    assert "chunkCount=1" in stdout.getvalue()
+    assert "networkChecked=False" in stdout.getvalue()
+
+
+def test_validate_document_payload_script_prints_json_without_document_content(
+    tmp_path,
+) -> None:
+    secret_content = "라인 병목 리포트 본문 원문입니다."
+    input_path = _write_payload(tmp_path, _build_payload(content=secret_content))
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input", str(input_path), "--json"],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert '"status": "VALID"' in stdout.getvalue()
+    assert '"documentId": "report-202605"' in stdout.getvalue()
+    assert secret_content not in stdout.getvalue()
+
+
+def test_validate_document_payload_script_rejects_operator_financial_content(
+    tmp_path,
+) -> None:
+    input_path = _write_payload(
+        tmp_path,
+        _build_payload(
+            content="계약 금액과 패널티 정보가 포함된 보고서입니다.",
+            allowedRoles=["OPERATOR", "EXECUTIVE"],
+            intentTags=["DELIVERY_RISK"],
+        ),
+    )
+    stderr = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input", str(input_path)],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert "문서 payload 검증 실패" in stderr.getvalue()
+    assert "CHAT_DOCUMENT_002" in stderr.getvalue()
+
+
+def test_validate_document_payload_script_rejects_unauthorized_company_info_indexer(
+    tmp_path,
+) -> None:
+    input_path = _write_payload(
+        tmp_path,
+        _build_payload(
+            documentType="COMPANY_INFO",
+            requestedByRole="OPERATOR",
+            intentTags=["PRODUCTION_PLAN"],
+        ),
+    )
+    stderr = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input", str(input_path), "--json"],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert '"code": "CHAT_SECURITY_004"' in stderr.getvalue()
+    assert "회사정보 문서 인덱싱은 ADMIN 또는 MANUFACTURING_MANAGER만" in stderr.getvalue()
+
+
+def test_validate_document_payload_script_rejects_invalid_json(tmp_path) -> None:
+    input_path = tmp_path / "document-payload.json"
+    input_path.write_text("{", encoding="utf-8")
+    stderr = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input", str(input_path)],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert "문서 payload JSON 형식이 올바르지 않습니다." in stderr.getvalue()
+    assert "CHAT_DOCUMENT_002" in stderr.getvalue()
+
+
+def test_validate_document_payload_raises_when_chunk_count_exceeds_limit() -> None:
+    payload = _build_payload(content="A\nB\nC")
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        validate_document_payload.validate_document_payload(
+            payload,
+            Settings(document_chunk_size=1, document_chunk_overlap=0, document_max_chunks=1),
+        )
+
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
