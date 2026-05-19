@@ -26,8 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--input",
+        action="append",
         required=True,
-        help="검증할 문서 payload JSON 파일 경로",
+        help="검증할 문서 payload JSON 파일 경로. 여러 파일은 옵션을 반복해서 지정합니다.",
     )
     parser.add_argument(
         "--env-file",
@@ -56,6 +57,13 @@ def build_settings(args: argparse.Namespace) -> Settings:
     if env_file:
         return Settings(_env_file=env_file)
     return Settings()
+
+
+def normalize_input_paths(args: argparse.Namespace) -> list[str]:
+    input_paths = args.input
+    if isinstance(input_paths, list):
+        return input_paths
+    return [input_paths]
 
 
 def load_payload(input_path: str) -> dict[str, Any]:
@@ -161,6 +169,64 @@ def validate_document_payload(
     return result
 
 
+def validate_document_payload_file(
+    input_path: str,
+    settings: Settings,
+    include_chunks: bool = False,
+) -> dict[str, Any]:
+    payload = load_payload(input_path)
+    result = validate_document_payload(
+        payload,
+        settings,
+        include_chunks=include_chunks,
+    )
+    return {
+        "inputPath": input_path,
+        **result,
+    }
+
+
+def validate_document_payload_files(
+    input_paths: list[str],
+    settings: Settings,
+    include_chunks: bool = False,
+) -> dict[str, Any]:
+    results = []
+    for input_path in input_paths:
+        try:
+            results.append(
+                validate_document_payload_file(
+                    input_path,
+                    settings,
+                    include_chunks=include_chunks,
+                )
+            )
+        except ChatServiceError as exc:
+            results.append(
+                {
+                    "inputPath": input_path,
+                    "status": "INVALID",
+                    "error": ErrorResponse(
+                        code=exc.code,
+                        message=exc.message,
+                    ).model_dump(mode="json"),
+                    "warnings": [],
+                }
+            )
+
+    invalid_count = sum(1 for result in results if result["status"] == "INVALID")
+    warning_count = sum(len(result["warnings"]) for result in results)
+    return {
+        "status": "INVALID" if invalid_count else "VALID",
+        "inputCount": len(input_paths),
+        "validCount": len(input_paths) - invalid_count,
+        "invalidCount": invalid_count,
+        "warningCount": warning_count,
+        "networkChecked": False,
+        "results": results,
+    }
+
+
 def build_warnings(
     document: InternalDocumentInput,
     settings: Settings,
@@ -225,6 +291,36 @@ def format_json_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
+def format_batch_text_result(result: dict[str, Any]) -> str:
+    lines = [
+        f"status={result['status']}",
+        f"inputCount={result['inputCount']}",
+        f"validCount={result['validCount']}",
+        f"invalidCount={result['invalidCount']}",
+        f"warningCount={result['warningCount']}",
+        f"networkChecked={result['networkChecked']}",
+    ]
+    for item in result["results"]:
+        if item["status"] == "INVALID":
+            error = item["error"]
+            lines.append(
+                f"input={item['inputPath']} "
+                f"status=INVALID "
+                f"code={error['code']} "
+                f"message={error['message']}"
+            )
+            continue
+
+        lines.append(
+            f"input={item['inputPath']} "
+            f"status=VALID "
+            f"documentId={item['documentId']} "
+            f"chunkCount={item['chunkCount']} "
+            f"warnings={len(item['warnings'])}"
+        )
+    return "\n".join(lines)
+
+
 def format_error(error: ChatServiceError, as_json: bool) -> str:
     if as_json:
         return json.dumps(
@@ -244,6 +340,14 @@ def resolve_exit_code(result: dict[str, Any], fail_on_warning: bool) -> int:
     return 0
 
 
+def resolve_batch_exit_code(result: dict[str, Any], fail_on_warning: bool) -> int:
+    if result["invalidCount"]:
+        return 1
+    if fail_on_warning and result["warningCount"]:
+        return 2
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
@@ -255,9 +359,21 @@ def main(
 
     try:
         settings = build_settings(args)
-        payload = load_payload(args.input)
-        result = validate_document_payload(
-            payload,
+        input_paths = normalize_input_paths(args)
+        if len(input_paths) > 1:
+            result = validate_document_payload_files(
+                input_paths,
+                settings,
+                include_chunks=args.include_chunks,
+            )
+            if args.json:
+                print(format_json_result(result), file=output)
+            else:
+                print(format_batch_text_result(result), file=output)
+            return resolve_batch_exit_code(result, args.fail_on_warning)
+
+        result = validate_document_payload_file(
+            input_paths[0],
             settings,
             include_chunks=args.include_chunks,
         )

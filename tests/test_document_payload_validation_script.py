@@ -25,8 +25,8 @@ def _build_payload(**overrides):
     return payload
 
 
-def _write_payload(tmp_path, payload):
-    input_path = tmp_path / "document-payload.json"
+def _write_payload(tmp_path, payload, file_name: str = "document-payload.json"):
+    input_path = tmp_path / file_name
     input_path.write_text(
         json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",
@@ -78,6 +78,165 @@ def test_validate_document_payload_script_validates_payload_without_network(tmp_
     assert "warning=임베딩 기능이 비활성화되어 실제 문서 저장은 생략됩니다." in (
         stdout.getvalue()
     )
+
+
+def test_validate_document_payload_script_validates_multiple_inputs(tmp_path) -> None:
+    first_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-a"),
+        "report-a.json",
+    )
+    second_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-b"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(first_input),
+            "--input",
+            str(second_input),
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "status=VALID" in stdout.getvalue()
+    assert "inputCount=2" in stdout.getvalue()
+    assert "validCount=2" in stdout.getvalue()
+    assert "invalidCount=0" in stdout.getvalue()
+    assert "documentId=report-202605-a" in stdout.getvalue()
+    assert "documentId=report-202605-b" in stdout.getvalue()
+
+
+def test_validate_document_payload_script_reports_multiple_input_errors(
+    tmp_path,
+) -> None:
+    valid_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-a"),
+        "report-a.json",
+    )
+    invalid_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-b", documentType="PROCESS"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(valid_input),
+            "--input",
+            str(invalid_input),
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 1
+    assert "status=INVALID" in stdout.getvalue()
+    assert "inputCount=2" in stdout.getvalue()
+    assert "validCount=1" in stdout.getvalue()
+    assert "invalidCount=1" in stdout.getvalue()
+    assert "code=CHAT_DOCUMENT_001" in stdout.getvalue()
+
+
+def test_validate_document_payload_script_prints_json_batch_without_content(
+    tmp_path,
+) -> None:
+    content = "라인 병목 상세 본문입니다."
+    first_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-a", content=content),
+        "report-a.json",
+    )
+    second_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-b"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(first_input),
+            "--input",
+            str(second_input),
+            "--json",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert '"inputCount": 2' in stdout.getvalue()
+    assert '"validCount": 2' in stdout.getvalue()
+    assert '"results": [' in stdout.getvalue()
+    assert content not in stdout.getvalue()
+
+
+def test_validate_document_payload_script_returns_two_for_batch_warning_strict(
+    tmp_path,
+) -> None:
+    first_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-a"),
+        "report-a.json",
+    )
+    second_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-b"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(first_input),
+            "--input",
+            str(second_input),
+            "--fail-on-warning",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 2
+    assert "warningCount=2" in stdout.getvalue()
+
+
+def test_validate_document_payload_script_batch_invalid_precedes_warning_strict(
+    tmp_path,
+) -> None:
+    valid_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-a"),
+        "report-a.json",
+    )
+    invalid_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-b", documentType="PROCESS"),
+        "report-b.json",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(valid_input),
+            "--input",
+            str(invalid_input),
+            "--fail-on-warning",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 1
+    assert "invalidCount=1" in stdout.getvalue()
 
 
 def test_validate_document_payload_script_returns_two_when_warning_is_strict(
