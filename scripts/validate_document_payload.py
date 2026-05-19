@@ -263,6 +263,7 @@ def validate_document_payload_files(
             )
 
     apply_duplicate_document_id_errors(results)
+    totals = build_batch_totals(results)
     invalid_count = sum(1 for result in results if result["status"] == "INVALID")
     warning_count = sum(len(result["warnings"]) for result in results)
     return {
@@ -272,7 +273,30 @@ def validate_document_payload_files(
         "invalidCount": invalid_count,
         "warningCount": warning_count,
         "networkChecked": False,
+        **totals,
         "results": results,
+    }
+
+
+def build_batch_totals(results: list[dict[str, Any]]) -> dict[str, int]:
+    valid_results = [result for result in results if result["status"] == "VALID"]
+    return {
+        "totalChunkCount": sum(result["chunkCount"] for result in valid_results),
+        "totalContentCharCount": sum(
+            result["contentCharCount"] for result in valid_results
+        ),
+        "totalEmbeddingInputCount": sum(
+            result["embeddingInputCount"] for result in valid_results
+        ),
+        "totalUniqueEmbeddingInputCount": sum(
+            result["uniqueEmbeddingInputCount"] for result in valid_results
+        ),
+        "totalEstimatedEmbeddingRequestCount": sum(
+            result["estimatedEmbeddingRequestCount"] for result in valid_results
+        ),
+        "totalEstimatedQdrantUpsertPointCount": sum(
+            result["estimatedQdrantUpsertPointCount"] for result in valid_results
+        ),
     }
 
 
@@ -378,6 +402,12 @@ def format_batch_text_result(result: dict[str, Any]) -> str:
         f"invalidCount={result['invalidCount']}",
         f"warningCount={result['warningCount']}",
         f"networkChecked={result['networkChecked']}",
+        f"totalChunkCount={result['totalChunkCount']}",
+        f"totalContentCharCount={result['totalContentCharCount']}",
+        f"totalEmbeddingInputCount={result['totalEmbeddingInputCount']}",
+        f"totalUniqueEmbeddingInputCount={result['totalUniqueEmbeddingInputCount']}",
+        f"totalEstimatedEmbeddingRequestCount={result['totalEstimatedEmbeddingRequestCount']}",
+        f"totalEstimatedQdrantUpsertPointCount={result['totalEstimatedQdrantUpsertPointCount']}",
     ]
     for item in result["results"]:
         if item["status"] == "INVALID":

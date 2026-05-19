@@ -108,6 +108,9 @@ def test_validate_document_payload_script_validates_multiple_inputs(tmp_path) ->
     assert "inputCount=2" in stdout.getvalue()
     assert "validCount=2" in stdout.getvalue()
     assert "invalidCount=0" in stdout.getvalue()
+    assert "totalChunkCount=2" in stdout.getvalue()
+    assert "totalEstimatedEmbeddingRequestCount=0" in stdout.getvalue()
+    assert "totalEstimatedQdrantUpsertPointCount=0" in stdout.getvalue()
     assert "documentId=report-202605-a" in stdout.getvalue()
     assert "documentId=report-202605-b" in stdout.getvalue()
 
@@ -247,6 +250,7 @@ def test_validate_document_payload_script_reports_multiple_input_errors(
     assert "inputCount=2" in stdout.getvalue()
     assert "validCount=1" in stdout.getvalue()
     assert "invalidCount=1" in stdout.getvalue()
+    assert "totalChunkCount=1" in stdout.getvalue()
     assert "code=CHAT_DOCUMENT_001" in stdout.getvalue()
 
 
@@ -279,6 +283,7 @@ def test_validate_document_payload_script_rejects_duplicate_document_ids(
     assert "status=INVALID" in stdout.getvalue()
     assert "validCount=0" in stdout.getvalue()
     assert "invalidCount=2" in stdout.getvalue()
+    assert "totalChunkCount=0" in stdout.getvalue()
     assert "code=CHAT_DOCUMENT_002" in stdout.getvalue()
     assert "documentId가 중복되었습니다" in stdout.getvalue()
 
@@ -345,8 +350,57 @@ def test_validate_document_payload_script_prints_json_batch_without_content(
     assert exit_code == 0
     assert '"inputCount": 2' in stdout.getvalue()
     assert '"validCount": 2' in stdout.getvalue()
+    assert '"totalChunkCount": 2' in stdout.getvalue()
+    assert '"totalEstimatedEmbeddingRequestCount": 0' in stdout.getvalue()
+    assert '"totalEstimatedQdrantUpsertPointCount": 0' in stdout.getvalue()
     assert '"results": [' in stdout.getvalue()
     assert content not in stdout.getvalue()
+
+
+def test_validate_document_payload_script_sums_batch_work_estimates(
+    tmp_path,
+) -> None:
+    first_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-a", content="A" * 30 + "\n" + "B" * 30),
+        "report-a.json",
+    )
+    second_input = _write_payload(
+        tmp_path,
+        _build_payload(documentId="report-202605-b", content="C" * 30),
+        "report-b.json",
+    )
+    env_file = tmp_path / ".env.document"
+    env_file.write_text(
+        "\n".join(
+            [
+                "EMBEDDING_ENABLED=true",
+                "DOCUMENT_CHUNK_SIZE=35",
+                "DOCUMENT_CHUNK_OVERLAP=5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(first_input),
+            "--input",
+            str(second_input),
+            "--env-file",
+            str(env_file),
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "totalChunkCount=3" in stdout.getvalue()
+    assert "totalEmbeddingInputCount=3" in stdout.getvalue()
+    assert "totalUniqueEmbeddingInputCount=3" in stdout.getvalue()
+    assert "totalEstimatedEmbeddingRequestCount=2" in stdout.getvalue()
+    assert "totalEstimatedQdrantUpsertPointCount=3" in stdout.getvalue()
 
 
 def test_validate_document_payload_script_returns_two_for_batch_warning_strict(
@@ -630,6 +684,40 @@ def test_validate_document_payload_resolves_exit_code_from_warning_policy() -> N
     assert validate_document_payload.resolve_exit_code(result, fail_on_warning=False) == 0
     assert validate_document_payload.resolve_exit_code(result, fail_on_warning=True) == 2
     assert validate_document_payload.resolve_exit_code({"warnings": []}, True) == 0
+
+
+def test_validate_document_payload_builds_batch_totals_for_valid_results_only() -> None:
+    totals = validate_document_payload.build_batch_totals(
+        [
+            {
+                "status": "VALID",
+                "chunkCount": 2,
+                "contentCharCount": 20,
+                "embeddingInputCount": 2,
+                "uniqueEmbeddingInputCount": 2,
+                "estimatedEmbeddingRequestCount": 1,
+                "estimatedQdrantUpsertPointCount": 2,
+            },
+            {
+                "status": "INVALID",
+                "chunkCount": 100,
+                "contentCharCount": 1000,
+                "embeddingInputCount": 100,
+                "uniqueEmbeddingInputCount": 100,
+                "estimatedEmbeddingRequestCount": 1,
+                "estimatedQdrantUpsertPointCount": 100,
+            },
+        ]
+    )
+
+    assert totals == {
+        "totalChunkCount": 2,
+        "totalContentCharCount": 20,
+        "totalEmbeddingInputCount": 2,
+        "totalUniqueEmbeddingInputCount": 2,
+        "totalEstimatedEmbeddingRequestCount": 1,
+        "totalEstimatedQdrantUpsertPointCount": 2,
+    }
 
 
 def test_validate_document_payload_marks_duplicate_document_ids_invalid() -> None:
