@@ -353,6 +353,40 @@ class FakeReportLookupQdrantClient:
         ]
 
 
+class FakeCompanyInfoQdrantClient:
+    async def search(self, payload: dict) -> list[dict]:
+        assert payload["filter"] == {
+            "must": [
+                {
+                    "key": "allowedRoles",
+                    "match": {"any": ["MANUFACTURING_MANAGER"]},
+                },
+                {"key": "intentTags", "match": {"any": ["LINE_BOTTLENECK"]}},
+            ]
+        }
+        return [
+            {
+                "id": "company-info-line-bottleneck-point",
+                "score": 0.9,
+                "payload": {
+                    "documentId": "company-info-line-bottleneck",
+                    "chunkId": "chunk-0001",
+                    "documentType": "COMPANY_INFO",
+                    "title": "LINE-A01 병목 대응 기준",
+                    "chunkText": (
+                        "LINE-A01 대기시간이 증가하면 작업 순서와 "
+                        "설비 상태를 함께 확인합니다."
+                    ),
+                    "url": "/company-info/line-bottleneck",
+                    "referenceType": "LINE",
+                    "referenceId": 101,
+                    "allowedRoles": ["MANUFACTURING_MANAGER", "EXECUTIVE"],
+                    "intentTags": ["LINE_BOTTLENECK"],
+                },
+            }
+        ]
+
+
 class FakeOperatorSafeAnswerGenerationService:
     async def generate_answer(
         self,
@@ -400,6 +434,26 @@ class FakeReportLookupAnswerGenerationService:
             answer=(
                 "2026년 5월 월간 생산 리스크 보고서는 "
                 "LINE-A01 병목과 자재 부족을 주요 리스크로 제시합니다."
+            ),
+            was_generated=True,
+        )
+
+
+class FakeCompanyInfoAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.items == []
+        assert [source.title for source in document_result.sources] == [
+            "LINE-A01 병목 대응 기준"
+        ]
+        return AnswerGenerationResult(
+            answer=(
+                "LINE-A01 병목은 대기시간 증가 시 작업 순서와 "
+                "설비 상태를 함께 확인해야 합니다."
             ),
             was_generated=True,
         )
@@ -469,6 +523,18 @@ def _build_report_lookup_qdrant_chat_service() -> ChatService:
         qdrant_client=FakeReportLookupQdrantClient(),
     )
     service.answer_generation_service = FakeReportLookupAnswerGenerationService()
+    return service
+
+
+def _build_company_info_qdrant_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEmptyEvidenceService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeSearchEmbeddingService(),
+        qdrant_client=FakeCompanyInfoQdrantClient(),
+    )
+    service.answer_generation_service = FakeCompanyInfoAnswerGenerationService()
     return service
 
 
@@ -1017,6 +1083,65 @@ def test_chat_answer_evaluation_uses_report_lookup_qdrant_source() -> None:
             "basisTime": None,
             "sourceOrigin": "QDRANT",
             "relevanceScore": 0.91,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": False,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 0,
+        "documentSourceCount": 1,
+        "evidenceCount": 1,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_uses_company_info_qdrant_source() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_company_info_qdrant_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "MANUFACTURING_MANAGER",
+                "라인 병목이 발생한 공정 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "LINE_BOTTLENECK"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["answer"] == (
+        "LINE-A01 병목은 대기시간 증가 시 작업 순서와 "
+        "설비 상태를 함께 확인해야 합니다."
+    )
+    assert body["urls"] == [
+        {
+            "label": "LINE-A01 병목 대응 기준",
+            "url": "/company-info/line-bottleneck",
+            "type": "COMPANY_INFO",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "COMPANY_INFO",
+            "title": "LINE-A01 병목 대응 기준",
+            "summary": (
+                "LINE-A01 대기시간이 증가하면 작업 순서와 "
+                "설비 상태를 함께 확인합니다."
+            ),
+            "url": "/company-info/line-bottleneck",
+            "referenceId": 101,
+            "source": "company-info-line-bottleneck:chunk-0001",
+            "basisTime": None,
+            "sourceOrigin": "QDRANT",
+            "relevanceScore": 0.9,
         }
     ]
     assert body["modelResult"] == {
