@@ -1,0 +1,241 @@
+from argparse import Namespace
+from io import StringIO
+
+import anyio
+import httpx
+import pytest
+
+from app.core.config import Settings
+from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatIntent
+from scripts import check_chat_answer
+
+
+def _build_args(**overrides):
+    values = {
+        "base_url": "http://fastapi.local",
+        "path": "/api/v1/chat/answer",
+        "token": "answer-token",
+        "env_file": None,
+        "timeout_seconds": 10.0,
+        "question": "자재 부족 현황 알려줘",
+        "role": "MANUFACTURING_MANAGER",
+        "user_id": 1,
+        "company_name": "S-MAP",
+        "session_id": 10,
+        "message_id": 24,
+        "requested_at": "2026-05-12T10:30:00+09:00",
+        "min_evidence_count": 0,
+        "json": False,
+    }
+    values.update(overrides)
+    return Namespace(**values)
+
+
+def _answer_response(evidence_count: int = 1) -> dict:
+    sources = []
+    urls = []
+    if evidence_count > 0:
+        urls.append(
+            {
+                "label": "RM-AL-001 알루미늄 원자재 재고 부족",
+                "url": "/materials/inventory/1?mode=read",
+                "type": "MATERIAL",
+            }
+        )
+        sources.append(
+            {
+                "sourceType": "MATERIAL",
+                "title": "RM-AL-001 알루미늄 원자재 재고 부족",
+                "summary": "생산계획 1001에서 부족 상태입니다.",
+                "url": "/materials/inventory/1?mode=read",
+                "referenceId": 1,
+                "source": "production_plan_materials",
+                "basisTime": "2026-05-12T10:35:00+09:00",
+                "sourceOrigin": "RDB",
+            }
+        )
+
+    return {
+        "sessionId": 10,
+        "messageId": 24,
+        "intent": "MATERIAL_SHORTAGE",
+        "answer": "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
+        "basisTime": "2026-05-12T10:35:00+09:00",
+        "urls": urls,
+        "sources": sources,
+        "securityResult": {
+            "status": "PASSED",
+            "code": None,
+            "reason": "보안 필터를 통과했고 내부 근거가 확인되었습니다.",
+        },
+        "modelResult": {
+            "usedVectorSearch": False,
+            "usedRdbEvidence": evidence_count > 0,
+            "usedLlmGeneration": False,
+            "rdbEvidenceCount": evidence_count,
+            "documentSourceCount": 0,
+            "evidenceCount": evidence_count,
+            "vectorSearchSkippedReason": None,
+            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+        },
+    }
+
+
+def test_check_chat_answer_script_builds_request() -> None:
+    request = check_chat_answer.build_request(
+        _build_args(role=" executive ", user_id=7)
+    )
+
+    assert request.session_id == 10
+    assert request.message_id == 24
+    assert request.user.user_id == 7
+    assert request.user.role == "EXECUTIVE"
+    assert request.question == "자재 부족 현황 알려줘"
+
+
+def test_check_chat_answer_script_resolves_path_and_token() -> None:
+    settings = Settings(
+        api_v1_prefix="/ai/api/v1",
+        chat_answer_internal_token="env-answer-token",
+    )
+
+    assert (
+        check_chat_answer.resolve_answer_path(_build_args(path=None), settings)
+        == "/ai/api/v1/chat/answer"
+    )
+    assert (
+        check_chat_answer.resolve_answer_token(_build_args(token=None), settings)
+        == "env-answer-token"
+    )
+    assert (
+        check_chat_answer.build_answer_url(
+            "http://fastapi.local/",
+            "/api/v1/chat/answer",
+        )
+        == "http://fastapi.local/api/v1/chat/answer"
+    )
+
+
+def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
+    captured_request: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_request["url"] = str(request.url)
+        captured_request["token"] = request.headers.get("X-Internal-Token")
+        captured_request["body"] = request.read().decode()
+        return httpx.Response(200, json=_answer_response(), request=request)
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                min_evidence_count=1,
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert captured_request["url"] == "http://fastapi.local/api/v1/chat/answer"
+    assert captured_request["token"] == "answer-token"
+    assert '"question":"자재 부족 현황 알려줘"' in captured_request["body"]
+    assert result == {
+        "checkStatus": "PASS",
+        "url": "http://fastapi.local/api/v1/chat/answer",
+        "intent": ChatIntent.MATERIAL_SHORTAGE.value,
+        "securityStatus": "PASSED",
+        "securityCode": None,
+        "evidenceCount": 1,
+        "minEvidenceCount": 1,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 0,
+        "usedRdbEvidence": True,
+        "usedVectorSearch": False,
+        "usedLlmGeneration": False,
+        "sourceCount": 1,
+        "urlCount": 1,
+    }
+
+
+def test_check_chat_answer_script_fails_when_evidence_count_is_below_minimum() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_answer_response(evidence_count=0), request=request)
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                min_evidence_count=1,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "expected>=1, actual=0" in exc_info.value.message
+
+
+def test_check_chat_answer_script_main_does_not_expose_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_chat_answer(**kwargs) -> dict:
+        return {
+            "checkStatus": "PASS",
+            "url": "http://fastapi.local/api/v1/chat/answer",
+            "intent": "MATERIAL_SHORTAGE",
+            "securityStatus": "PASSED",
+            "securityCode": None,
+            "evidenceCount": 1,
+            "minEvidenceCount": 1,
+            "rdbEvidenceCount": 1,
+            "documentSourceCount": 0,
+            "usedRdbEvidence": True,
+            "usedVectorSearch": False,
+            "usedLlmGeneration": False,
+            "sourceCount": 1,
+            "urlCount": 1,
+        }
+
+    monkeypatch.setattr(check_chat_answer, "check_chat_answer", fake_check_chat_answer)
+    stdout = StringIO()
+
+    exit_code = check_chat_answer.main(
+        [
+            "--base-url",
+            "http://fastapi.local",
+            "--token",
+            "secret-answer-token",
+            "--min-evidence-count",
+            "1",
+        ],
+        stdout=stdout,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "status=PASS" in output
+    assert "secret-answer-token" not in output
+
+
+def test_check_chat_answer_script_main_returns_one_without_token() -> None:
+    stderr = StringIO()
+
+    exit_code = check_chat_answer.main(
+        ["--base-url", "http://fastapi.local"],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert "FastAPI 챗봇 답변 점검 실패" in stderr.getvalue()
+    assert "code=CHAT_SECURITY_003" in stderr.getvalue()
