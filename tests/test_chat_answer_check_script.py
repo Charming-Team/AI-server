@@ -26,13 +26,27 @@ def _build_args(**overrides):
         "message_id": 24,
         "requested_at": "2026-05-12T10:30:00+09:00",
         "min_evidence_count": 0,
+        "require_rdb_evidence": False,
         "json": False,
     }
     values.update(overrides)
     return Namespace(**values)
 
 
-def _answer_response(evidence_count: int = 1) -> dict:
+def _answer_response(
+    evidence_count: int = 1,
+    rdb_evidence_count: int | None = None,
+    document_source_count: int = 0,
+    used_rdb_evidence: bool | None = None,
+) -> dict:
+    resolved_rdb_evidence_count = (
+        evidence_count if rdb_evidence_count is None else rdb_evidence_count
+    )
+    resolved_used_rdb_evidence = (
+        resolved_rdb_evidence_count > 0
+        if used_rdb_evidence is None
+        else used_rdb_evidence
+    )
     sources = []
     urls = []
     if evidence_count > 0:
@@ -71,10 +85,10 @@ def _answer_response(evidence_count: int = 1) -> dict:
         },
         "modelResult": {
             "usedVectorSearch": False,
-            "usedRdbEvidence": evidence_count > 0,
+            "usedRdbEvidence": resolved_used_rdb_evidence,
             "usedLlmGeneration": False,
-            "rdbEvidenceCount": evidence_count,
-            "documentSourceCount": 0,
+            "rdbEvidenceCount": resolved_rdb_evidence_count,
+            "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
             "vectorSearchSkippedReason": None,
             "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
@@ -136,6 +150,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
                 min_evidence_count=1,
+                require_rdb_evidence=True,
                 http_client=http_client,
             )
 
@@ -152,6 +167,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "securityCode": None,
         "evidenceCount": 1,
         "minEvidenceCount": 1,
+        "requireRdbEvidence": True,
         "rdbEvidenceCount": 1,
         "documentSourceCount": 0,
         "usedRdbEvidence": True,
@@ -186,6 +202,39 @@ def test_check_chat_answer_script_fails_when_evidence_count_is_below_minimum() -
     assert "expected>=1, actual=0" in exc_info.value.message
 
 
+def test_check_chat_answer_script_fails_when_rdb_evidence_is_required() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=1,
+                rdb_evidence_count=0,
+                document_source_count=1,
+                used_rdb_evidence=False,
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                require_rdb_evidence=True,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "RDB Evidence가 사용되지 않았습니다" in exc_info.value.message
+
+
 def test_check_chat_answer_script_main_does_not_expose_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -198,6 +247,7 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "securityCode": None,
             "evidenceCount": 1,
             "minEvidenceCount": 1,
+            "requireRdbEvidence": True,
             "rdbEvidenceCount": 1,
             "documentSourceCount": 0,
             "usedRdbEvidence": True,
@@ -218,6 +268,7 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "secret-answer-token",
             "--min-evidence-count",
             "1",
+            "--require-rdb-evidence",
         ],
         stdout=stdout,
     )

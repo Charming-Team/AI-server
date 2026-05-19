@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="요구하는 최소 전체 Evidence 개수",
     )
+    parser.add_argument(
+        "--require-rdb-evidence",
+        action="store_true",
+        help="RDB Evidence가 실제로 사용됐는지 검증합니다.",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -106,6 +111,7 @@ async def check_chat_answer(
     request: ChatAnswerRequest,
     timeout_seconds: float,
     min_evidence_count: int = 0,
+    require_rdb_evidence: bool = False,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     url = build_answer_url(base_url, path)
@@ -128,6 +134,13 @@ async def check_chat_answer(
             ),
         )
 
+    if require_rdb_evidence and not answer.model_result.used_rdb_evidence:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message="FastAPI 챗봇 응답에 RDB Evidence가 사용되지 않았습니다.",
+        )
+
     return {
         "checkStatus": "PASS",
         "url": url,
@@ -138,6 +151,7 @@ async def check_chat_answer(
         ),
         "evidenceCount": evidence_count,
         "minEvidenceCount": min_evidence_count,
+        "requireRdbEvidence": require_rdb_evidence,
         "rdbEvidenceCount": answer.model_result.rdb_evidence_count,
         "documentSourceCount": answer.model_result.document_source_count,
         "usedRdbEvidence": answer.model_result.used_rdb_evidence,
@@ -196,6 +210,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"securityCode={result['securityCode']}",
         f"evidenceCount={result['evidenceCount']}",
         f"minEvidenceCount={result['minEvidenceCount']}",
+        f"requireRdbEvidence={result['requireRdbEvidence']}",
         f"rdbEvidenceCount={result['rdbEvidenceCount']}",
         f"documentSourceCount={result['documentSourceCount']}",
         f"usedRdbEvidence={result['usedRdbEvidence']}",
@@ -233,6 +248,7 @@ def main(
                 request=request,
                 timeout_seconds=args.timeout_seconds,
                 min_evidence_count=args.min_evidence_count,
+                require_rdb_evidence=args.require_rdb_evidence,
             )
         )
     except ChatServiceError as exc:
