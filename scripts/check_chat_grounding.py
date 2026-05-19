@@ -8,8 +8,8 @@ import httpx
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
-from app.features.chat.schemas import ChatIntent
-from scripts import check_chat_answer, check_evidence_lookup
+from app.features.chat.schemas import ChatErrorCode, ChatIntent
+from scripts import chat_check_common, check_chat_answer, check_evidence_lookup
 
 DEFAULT_FASTAPI_BASE_URL = "http://localhost:8000"
 
@@ -42,20 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=ChatIntent.MATERIAL_SHORTAGE.value,
         help="점검에 사용할 질문 의도",
     )
-    parser.add_argument(
-        "--question",
-        default=check_chat_answer.DEFAULT_QUESTION,
-        help="점검 질문",
-    )
-    parser.add_argument("--role", default="MANUFACTURING_MANAGER", help="사용자 Role")
-    parser.add_argument("--user-id", type=int, default=1, help="사용자 ID")
-    parser.add_argument("--company-name", default="S-MAP", help="회사명 메타데이터")
-    parser.add_argument("--session-id", type=int, default=1, help="세션 ID")
-    parser.add_argument("--message-id", type=int, default=1, help="메시지 ID")
-    parser.add_argument(
-        "--requested-at",
-        default=check_chat_answer.DEFAULT_REQUESTED_AT,
-        help="요청 기준 시각. ISO datetime 형식",
+    chat_check_common.add_chat_request_arguments(
+        parser,
+        check_chat_answer.DEFAULT_QUESTION,
     )
     parser.add_argument(
         "--min-evidence-count",
@@ -98,7 +87,7 @@ def resolve_fastapi_token(args: argparse.Namespace, settings: Settings) -> str:
     if not token:
         raise ChatServiceError(
             status_code=503,
-            code=check_chat_answer.ChatErrorCode.CHAT_SECURITY_003,
+            code=ChatErrorCode.CHAT_SECURITY_003,
             message="FastAPI chat answer internal token이 설정되지 않았습니다.",
         )
     return token
@@ -111,7 +100,7 @@ async def check_chat_grounding(
 ) -> dict[str, Any]:
     settings = build_settings(args)
     evidence_settings = build_evidence_settings(args)
-    request = check_chat_answer.build_request(args)
+    request = chat_check_common.build_chat_answer_request(args)
     intent = ChatIntent(args.intent)
     fastapi_token = resolve_fastapi_token(args, settings)
     fastapi_path = args.fastapi_path or f"{settings.api_v1_prefix}/chat/answer"
