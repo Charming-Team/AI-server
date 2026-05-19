@@ -9,6 +9,17 @@ from app.features.chat.schemas import ChatErrorCode
 from scripts import create_qdrant_collection
 
 
+def _clear_qdrant_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "QDRANT_URL",
+        "QDRANT_COLLECTION",
+        "QDRANT_API_KEY",
+        "EMBEDDING_DIMENSION",
+        "QDRANT_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _build_check_result(
     is_dimension_matched: bool = True,
     actual_dimension: int = 1024,
@@ -39,6 +50,84 @@ def test_create_qdrant_collection_script_builds_settings_from_args() -> None:
     assert settings.qdrant_url == "http://localhost:6333"
     assert settings.qdrant_collection == "smap_internal_documents"
     assert settings.qdrant_api_key == "qdrant-token"
+    assert settings.embedding_dimension == 1024
+    assert settings.qdrant_timeout_seconds == 3.5
+
+
+def test_create_qdrant_collection_script_builds_settings_from_env_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_qdrant_settings_env(monkeypatch)
+    env_file = tmp_path / ".env.qdrant"
+    env_file.write_text(
+        "\n".join(
+            [
+                "QDRANT_URL=http://qdrant.qdrant.svc.cluster.local:6333",
+                "QDRANT_COLLECTION=env_documents",
+                "QDRANT_API_KEY=env-qdrant-token",
+                "EMBEDDING_DIMENSION=1024",
+                "QDRANT_TIMEOUT_SECONDS=4.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = create_qdrant_collection.build_settings(
+        Namespace(
+            qdrant_url=None,
+            collection=None,
+            api_key=None,
+            embedding_dimension=None,
+            timeout_seconds=None,
+            distance="Cosine",
+            json=False,
+            env_file=str(env_file),
+        )
+    )
+
+    assert settings.qdrant_url == "http://qdrant.qdrant.svc.cluster.local:6333"
+    assert settings.qdrant_collection == "env_documents"
+    assert settings.qdrant_api_key == "env-qdrant-token"
+    assert settings.embedding_dimension == 1024
+    assert settings.qdrant_timeout_seconds == 4.5
+
+
+def test_create_qdrant_collection_script_cli_args_override_env_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_qdrant_settings_env(monkeypatch)
+    env_file = tmp_path / ".env.qdrant"
+    env_file.write_text(
+        "\n".join(
+            [
+                "QDRANT_URL=http://env-qdrant:6333",
+                "QDRANT_COLLECTION=env_documents",
+                "QDRANT_API_KEY=env-qdrant-token",
+                "EMBEDDING_DIMENSION=384",
+                "QDRANT_TIMEOUT_SECONDS=9.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = create_qdrant_collection.build_settings(
+        Namespace(
+            qdrant_url="http://cli-qdrant:6333",
+            collection="cli_documents",
+            api_key="cli-qdrant-token",
+            embedding_dimension=1024,
+            timeout_seconds=3.5,
+            distance="Cosine",
+            json=False,
+            env_file=str(env_file),
+        )
+    )
+
+    assert settings.qdrant_url == "http://cli-qdrant:6333"
+    assert settings.qdrant_collection == "cli_documents"
+    assert settings.qdrant_api_key == "cli-qdrant-token"
     assert settings.embedding_dimension == 1024
     assert settings.qdrant_timeout_seconds == 3.5
 

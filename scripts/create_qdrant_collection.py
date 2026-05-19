@@ -27,6 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--collection", help="Qdrant collection name")
     parser.add_argument("--api-key", help="Qdrant API key")
     parser.add_argument(
+        "--env-file",
+        help="Settings를 로드할 env 파일 경로. CLI 인자가 있으면 해당 값이 우선합니다.",
+    )
+    parser.add_argument(
         "--embedding-dimension",
         type=int,
         help="Expected embedding vector dimension",
@@ -62,6 +66,9 @@ def build_settings(args: argparse.Namespace) -> Settings:
         values["embedding_dimension"] = args.embedding_dimension
     if args.timeout_seconds is not None:
         values["qdrant_timeout_seconds"] = args.timeout_seconds
+    env_file = getattr(args, "env_file", None)
+    if env_file:
+        return Settings(_env_file=env_file, **values)
     return Settings(**values)
 
 
