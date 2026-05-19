@@ -33,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print result as JSON",
     )
+    parser.add_argument(
+        "--include-chunks",
+        action="store_true",
+        help="본문 원문 없이 청크 ID와 글자 수 등 안전한 청크 메타데이터를 출력합니다.",
+    )
     return parser
 
 
@@ -83,13 +88,15 @@ def build_document(payload: dict[str, Any]) -> InternalDocumentInput:
 def validate_document_payload(
     payload: dict[str, Any],
     settings: Settings,
+    include_chunks: bool = False,
 ) -> dict[str, Any]:
     document = build_document(payload)
     policy = DocumentIndexPolicy(max_content_chars=settings.document_content_max_chars)
     builder = DocumentIndexBuilder(settings)
 
     policy.validate(document)
-    chunk_count = len(builder.build_payloads(document))
+    chunk_payloads = builder.build_payloads(document)
+    chunk_count = len(chunk_payloads)
     if chunk_count > settings.document_max_chunks:
         raise ChatServiceError(
             status_code=400,
@@ -100,7 +107,7 @@ def validate_document_payload(
             ),
         )
 
-    return {
+    result = {
         "status": "VALID",
         "documentId": document.document_id,
         "documentType": document.document_type,
@@ -114,6 +121,17 @@ def validate_document_payload(
         "networkChecked": False,
         "skippedReason": DOCUMENT_CONTENT_EMPTY if chunk_count == 0 else None,
     }
+    if include_chunks:
+        result["chunks"] = [
+            {
+                "chunkId": chunk.chunk_id,
+                "charCount": len(chunk.chunk_text),
+                "summaryConfigured": bool(chunk.summary),
+                "urlConfigured": bool(chunk.url),
+            }
+            for chunk in chunk_payloads
+        ]
+    return result
 
 
 def format_text_result(result: dict[str, Any]) -> str:
@@ -133,6 +151,14 @@ def format_text_result(result: dict[str, Any]) -> str:
         lines.append(f"requestedByRole={result['requestedByRole']}")
     if result["skippedReason"]:
         lines.append(f"skippedReason={result['skippedReason']}")
+    for chunk in result.get("chunks", []):
+        lines.append(
+            "chunk="
+            f"{chunk['chunkId']} "
+            f"charCount={chunk['charCount']} "
+            f"summaryConfigured={chunk['summaryConfigured']} "
+            f"urlConfigured={chunk['urlConfigured']}"
+        )
     return "\n".join(lines)
 
 
@@ -165,7 +191,11 @@ def main(
     try:
         settings = build_settings(args)
         payload = load_payload(args.input)
-        result = validate_document_payload(payload, settings)
+        result = validate_document_payload(
+            payload,
+            settings,
+            include_chunks=args.include_chunks,
+        )
     except ChatServiceError as exc:
         print(format_error(exc, args.json), file=error_output)
         return 1

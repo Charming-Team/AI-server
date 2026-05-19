@@ -93,6 +93,74 @@ def test_validate_document_payload_script_prints_json_without_document_content(
     assert secret_content not in stdout.getvalue()
 
 
+def test_validate_document_payload_script_prints_safe_chunk_metadata(
+    tmp_path,
+) -> None:
+    content = "A" * 30 + "\n" + "B" * 30
+    input_path = _write_payload(tmp_path, _build_payload(content=content))
+    env_file = tmp_path / ".env.document"
+    env_file.write_text(
+        "\n".join(
+            [
+                "DOCUMENT_CHUNK_SIZE=35",
+                "DOCUMENT_CHUNK_OVERLAP=5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(input_path),
+            "--env-file",
+            str(env_file),
+            "--include-chunks",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "chunk=chunk-0001 charCount=30" in stdout.getvalue()
+    assert "chunk=chunk-0002 charCount=30" in stdout.getvalue()
+    assert "A" * 30 not in stdout.getvalue()
+    assert "B" * 30 not in stdout.getvalue()
+
+
+def test_validate_document_payload_script_prints_json_chunk_metadata_without_content(
+    tmp_path,
+) -> None:
+    content = "라인 병목 상세 본문입니다."
+    input_path = _write_payload(tmp_path, _build_payload(content=content))
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(input_path),
+            "--include-chunks",
+            "--json",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert '"chunks": [' in stdout.getvalue()
+    assert '"chunkId": "chunk-0001"' in stdout.getvalue()
+    assert '"charCount":' in stdout.getvalue()
+    assert content not in stdout.getvalue()
+
+
+def test_validate_document_payload_result_omits_chunks_by_default() -> None:
+    result = validate_document_payload.validate_document_payload(
+        _build_payload(),
+        Settings(),
+    )
+
+    assert "chunks" not in result
+
+
 def test_validate_document_payload_script_rejects_operator_financial_content(
     tmp_path,
 ) -> None:
