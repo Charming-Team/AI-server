@@ -88,6 +88,34 @@ class FakeGroundedEvidenceService:
         )
 
 
+class FakeMaterialShortageEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="MATERIAL",
+                    title="RM-AL-001 알루미늄 원자재 재고 부족",
+                    summary="가용 재고 120KG, 안전 재고 300KG로 부족 상태입니다.",
+                    url="/materials/inventory/11?mode=read",
+                    source="material_inventories",
+                    referenceId=11,
+                    data={
+                        "materialCode": "RM-AL-001",
+                        "availableQuantity": 120,
+                        "safetyStockQuantity": 300,
+                        "inventoryStatus": "SHORTAGE",
+                    },
+                )
+            ],
+        )
+
+
 class FakeGroundedDocumentSearchService:
     async def search(
         self,
@@ -140,6 +168,27 @@ class FakeGroundedAnswerGenerationService:
             answer=(
                 "ORD-202605-001은 납기 지연 위험이 WARNING이며, "
                 "근거는 예측 결과와 5월 생산 리스크 보고서입니다."
+            ),
+            was_generated=True,
+        )
+
+
+class FakeMaterialShortageAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.intent == ChatIntent.MATERIAL_SHORTAGE
+        assert [item.title for item in evidence_result.items] == [
+            "RM-AL-001 알루미늄 원자재 재고 부족"
+        ]
+        assert document_result.sources == []
+        return AnswerGenerationResult(
+            answer=(
+                "RM-AL-001 알루미늄 원자재는 가용 재고 120KG, "
+                "안전 재고 300KG로 부족 상태입니다."
             ),
             was_generated=True,
         )
@@ -502,6 +551,13 @@ def _build_grounded_chat_service() -> ChatService:
         qdrant_client=FakeDeliveryRiskQdrantClient(),
     )
     service.answer_generation_service = FakeGroundedAnswerGenerationService()
+    return service
+
+
+def _build_material_shortage_rdb_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeMaterialShortageEvidenceService()
+    service.answer_generation_service = FakeMaterialShortageAnswerGenerationService()
     return service
 
 
@@ -884,6 +940,63 @@ def test_chat_answer_evaluation_returns_grounded_answer_with_sources() -> None:
         "rdbEvidenceCount": 1,
         "documentSourceCount": 1,
         "evidenceCount": 2,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_returns_material_shortage_answer_from_rdb() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_material_shortage_rdb_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "OPERATOR",
+                "자재 재고 부족한 항목 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "MATERIAL_SHORTAGE"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["answer"] == (
+        "RM-AL-001 알루미늄 원자재는 가용 재고 120KG, "
+        "안전 재고 300KG로 부족 상태입니다."
+    )
+    assert body["basisTime"] == "2026-05-12T10:30:00+09:00"
+    assert body["urls"] == [
+        {
+            "label": "RM-AL-001 알루미늄 원자재 재고 부족",
+            "url": "/materials/inventory/11?mode=read",
+            "type": "MATERIAL",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "MATERIAL",
+            "title": "RM-AL-001 알루미늄 원자재 재고 부족",
+            "summary": "가용 재고 120KG, 안전 재고 300KG로 부족 상태입니다.",
+            "url": "/materials/inventory/11?mode=read",
+            "referenceId": 11,
+            "source": "material_inventories",
+            "basisTime": "2026-05-12T10:30:00+09:00",
+            "sourceOrigin": "RDB",
+            "relevanceScore": None,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": False,
+        "usedRdbEvidence": True,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 0,
+        "evidenceCount": 1,
         "vectorSearchSkippedReason": None,
         "llmGenerationSkippedReason": None,
     }
