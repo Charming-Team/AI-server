@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="본문 원문 없이 청크 ID와 글자 수 등 안전한 청크 메타데이터를 출력합니다.",
     )
+    parser.add_argument(
+        "--fail-on-warning",
+        action="store_true",
+        help="검증 경고가 있으면 exit code 2로 종료합니다.",
+    )
     return parser
 
 
@@ -233,6 +238,12 @@ def format_error(error: ChatServiceError, as_json: bool) -> str:
     return f"문서 payload 검증 실패: {error.message}\ncode={error.code.value}"
 
 
+def resolve_exit_code(result: dict[str, Any], fail_on_warning: bool) -> int:
+    if fail_on_warning and result["warnings"]:
+        return 2
+    return 0
+
+
 def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
@@ -258,7 +269,7 @@ def main(
         print(format_json_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
-    return 0
+    return resolve_exit_code(result, args.fail_on_warning)
 
 
 if __name__ == "__main__":

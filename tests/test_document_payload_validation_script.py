@@ -80,6 +80,69 @@ def test_validate_document_payload_script_validates_payload_without_network(tmp_
     )
 
 
+def test_validate_document_payload_script_returns_two_when_warning_is_strict(
+    tmp_path,
+) -> None:
+    input_path = _write_payload(tmp_path, _build_payload())
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        ["--input", str(input_path), "--fail-on-warning"],
+        stdout=stdout,
+    )
+
+    assert exit_code == 2
+    assert "status=VALID" in stdout.getvalue()
+    assert "warning=임베딩 기능이 비활성화되어 실제 문서 저장은 생략됩니다." in (
+        stdout.getvalue()
+    )
+
+
+def test_validate_document_payload_script_returns_zero_when_strict_without_warning(
+    tmp_path,
+) -> None:
+    input_path = _write_payload(tmp_path, _build_payload())
+    env_file = tmp_path / ".env.document"
+    env_file.write_text("EMBEDDING_ENABLED=true", encoding="utf-8")
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(input_path),
+            "--env-file",
+            str(env_file),
+            "--fail-on-warning",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert "status=VALID" in stdout.getvalue()
+    assert "warning=" not in stdout.getvalue()
+
+
+def test_validate_document_payload_script_returns_two_for_json_warning(
+    tmp_path,
+) -> None:
+    input_path = _write_payload(tmp_path, _build_payload())
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--input",
+            str(input_path),
+            "--json",
+            "--fail-on-warning",
+        ],
+        stdout=stdout,
+    )
+
+    assert exit_code == 2
+    assert '"status": "VALID"' in stdout.getvalue()
+    assert '"warnings": [' in stdout.getvalue()
+
+
 def test_validate_document_payload_script_prints_json_without_document_content(
     tmp_path,
 ) -> None:
@@ -230,6 +293,14 @@ def test_validate_document_payload_result_warns_when_chunk_count_is_near_limit()
 
     assert result["chunkCount"] == 4
     assert "문서 청크 수가 설정 한도에 근접했습니다." in result["warnings"]
+
+
+def test_validate_document_payload_resolves_exit_code_from_warning_policy() -> None:
+    result = {"warnings": ["warning"]}
+
+    assert validate_document_payload.resolve_exit_code(result, fail_on_warning=False) == 0
+    assert validate_document_payload.resolve_exit_code(result, fail_on_warning=True) == 2
+    assert validate_document_payload.resolve_exit_code({"warnings": []}, True) == 0
 
 
 def test_validate_document_payload_script_rejects_operator_financial_content(
