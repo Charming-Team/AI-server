@@ -116,6 +116,37 @@ class FakeMaterialShortageEvidenceService:
         )
 
 
+class FakeProductionPlanEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="PLAN",
+                    title="PLAN-202605-010 LINE-A01 생산계획 변경",
+                    summary=(
+                        "LINE-A01 계획은 2026-05-13 09:00부터 "
+                        "2026-05-13 18:00까지로 변경 예정입니다."
+                    ),
+                    url="/production-plans/3001",
+                    source="production_plans",
+                    referenceId=3001,
+                    data={
+                        "planId": 3001,
+                        "lineCode": "LINE-A01",
+                        "planStatus": "SCHEDULED",
+                        "plannedQuantity": 1200,
+                    },
+                )
+            ],
+        )
+
+
 class FakeGroundedDocumentSearchService:
     async def search(
         self,
@@ -189,6 +220,27 @@ class FakeMaterialShortageAnswerGenerationService:
             answer=(
                 "RM-AL-001 알루미늄 원자재는 가용 재고 120KG, "
                 "안전 재고 300KG로 부족 상태입니다."
+            ),
+            was_generated=True,
+        )
+
+
+class FakeProductionPlanAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        assert evidence_result.intent == ChatIntent.PRODUCTION_PLAN
+        assert [item.title for item in evidence_result.items] == [
+            "PLAN-202605-010 LINE-A01 생산계획 변경"
+        ]
+        assert document_result.sources == []
+        return AnswerGenerationResult(
+            answer=(
+                "LINE-A01 생산계획은 2026-05-13 09:00부터 "
+                "18:00까지로 변경 예정이며 계획 수량은 1200개입니다."
             ),
             was_generated=True,
         )
@@ -558,6 +610,13 @@ def _build_material_shortage_rdb_chat_service() -> ChatService:
     service = ChatService(Settings())
     service.evidence_service = FakeMaterialShortageEvidenceService()
     service.answer_generation_service = FakeMaterialShortageAnswerGenerationService()
+    return service
+
+
+def _build_production_plan_rdb_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeProductionPlanEvidenceService()
+    service.answer_generation_service = FakeProductionPlanAnswerGenerationService()
     return service
 
 
@@ -985,6 +1044,66 @@ def test_chat_answer_evaluation_returns_material_shortage_answer_from_rdb() -> N
             "url": "/materials/inventory/11?mode=read",
             "referenceId": 11,
             "source": "material_inventories",
+            "basisTime": "2026-05-12T10:30:00+09:00",
+            "sourceOrigin": "RDB",
+            "relevanceScore": None,
+        }
+    ]
+    assert body["modelResult"] == {
+        "usedVectorSearch": False,
+        "usedRdbEvidence": True,
+        "usedLlmGeneration": True,
+        "rdbEvidenceCount": 1,
+        "documentSourceCount": 0,
+        "evidenceCount": 1,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": None,
+    }
+
+
+def test_chat_answer_evaluation_returns_production_plan_answer_from_rdb() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_production_plan_rdb_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "MANUFACTURING_MANAGER",
+                "다음 주 생산계획 변경 일정 보여줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "PRODUCTION_PLAN"
+    assert body["securityResult"]["status"] == "PASSED"
+    assert body["answer"] == (
+        "LINE-A01 생산계획은 2026-05-13 09:00부터 "
+        "18:00까지로 변경 예정이며 계획 수량은 1200개입니다."
+    )
+    assert body["basisTime"] == "2026-05-12T10:30:00+09:00"
+    assert body["urls"] == [
+        {
+            "label": "PLAN-202605-010 LINE-A01 생산계획 변경",
+            "url": "/production-plans/3001",
+            "type": "PLAN",
+        }
+    ]
+    assert body["sources"] == [
+        {
+            "sourceType": "PLAN",
+            "title": "PLAN-202605-010 LINE-A01 생산계획 변경",
+            "summary": (
+                "LINE-A01 계획은 2026-05-13 09:00부터 "
+                "2026-05-13 18:00까지로 변경 예정입니다."
+            ),
+            "url": "/production-plans/3001",
+            "referenceId": 3001,
+            "source": "production_plans",
             "basisTime": "2026-05-12T10:30:00+09:00",
             "sourceOrigin": "RDB",
             "relevanceScore": None,
