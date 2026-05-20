@@ -37,6 +37,7 @@ class RdbEvidenceViewDefinition:
     target_code_columns: tuple[str, ...] = ()
     restricted_columns: tuple[str, ...] = ()
     default_order_columns: tuple[str, ...] = ()
+    schema_name: str = "chat_evidence"
 
 
 RDB_EVIDENCE_VIEW_DEFINITIONS = (

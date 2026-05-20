@@ -17,7 +17,7 @@ def test_build_rdb_evidence_select_sql_uses_catalog_view_and_columns() -> None:
         5,
     )
 
-    assert 'from "chat_material_shortage_evidence_view"' in sql
+    assert 'from "chat_evidence"."chat_material_shortage_evidence_view"' in sql
     assert '"plan_material_id"' in sql
     assert '"material_code"' in sql
     assert '"shortage_quantity"' in sql
@@ -38,7 +38,7 @@ def test_build_rdb_evidence_select_sql_skips_target_filter_without_target_code()
         3,
     )
 
-    assert 'from "chat_line_bottleneck_evidence_view"' in sql
+    assert 'from "chat_evidence"."chat_line_bottleneck_evidence_view"' in sql
     assert "where (" not in sql
     assert "order by" in sql
     assert "limit $1" in sql

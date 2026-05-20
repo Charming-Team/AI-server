@@ -31,6 +31,7 @@ def test_rdb_evidence_view_catalog_covers_business_intents() -> None:
 
 def test_rdb_evidence_view_definitions_use_chat_read_only_views() -> None:
     for definition in RDB_EVIDENCE_VIEW_DEFINITIONS:
+        assert definition.schema_name == "chat_evidence"
         assert definition.view_name.startswith("chat_")
         assert definition.view_name.endswith("_view")
         assert definition.source == definition.view_name

@@ -68,7 +68,10 @@ def build_rdb_evidence_select_sql(
     quoted_columns = ", ".join(_quote_identifier(column) for column in columns)
     sql_parts = [
         f"select {quoted_columns}",
-        f"from {_quote_identifier(definition.view_name)}",
+        (
+            f"from {_quote_identifier(definition.schema_name)}."
+            f"{_quote_identifier(definition.view_name)}"
+        ),
     ]
     params: list[Any] = []
 
