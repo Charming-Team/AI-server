@@ -42,6 +42,13 @@ def test_chat_evidence_views_do_not_use_select_star() -> None:
     assert "select *" not in sql
 
 
+def test_chat_evidence_views_keep_prediction_cause_column_compatible() -> None:
+    sql = _read_sql(CREATE_VIEWS_SQL)
+
+    assert "apr.main_cause_type" not in sql
+    assert "null::text as main_cause_type" in sql
+
+
 def test_readonly_role_script_grants_only_view_read_privileges() -> None:
     sql = _read_sql(GRANT_READONLY_SQL)
 

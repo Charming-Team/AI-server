@@ -62,7 +62,7 @@ select
     apr.delay_probability,
     apr.risk_level,
     apr.predicted_delay_days,
-    apr.main_cause_type,
+    null::text as main_cause_type,
     apr.cause_detail,
     apr.analysis_summary,
     apr.recommended_action,
@@ -255,7 +255,7 @@ select
     apr.prediction_id,
     apr.risk_level,
     apr.delay_probability,
-    apr.main_cause_type,
+    null::text as main_cause_type,
     coalesce(ms.shortage_count, 0) as shortage_count,
     lls.waiting_time_hr as line_waiting_time_hr,
     apr.recommended_action
