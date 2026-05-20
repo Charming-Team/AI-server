@@ -4,6 +4,9 @@ from typing import Protocol
 
 from app.core.config import Settings
 from app.features.chat.query_filter_extractor import QueryFilterExtractor
+from app.features.chat.rdb_evidence_providers import (
+    build_default_rdb_evidence_providers,
+)
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatIntent,
@@ -35,7 +38,11 @@ class RdbEvidenceService:
         self.settings = settings
         self.providers = {
             provider.intent: provider
-            for provider in providers or []
+            for provider in (
+                providers
+                if providers is not None
+                else build_default_rdb_evidence_providers(settings)
+            )
         }
         self.query_filter_extractor = query_filter_extractor or QueryFilterExtractor()
         self.clock = clock or self._default_clock
