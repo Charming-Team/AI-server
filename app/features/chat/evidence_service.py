@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.query_filter_extractor import QueryFilterExtractor
+from app.features.chat.rdb_evidence_service import RdbEvidenceService
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
@@ -50,16 +51,24 @@ class EvidenceService:
         settings: Settings,
         http_client: httpx.AsyncClient | None = None,
         query_filter_extractor: QueryFilterExtractor | None = None,
+        rdb_evidence_service: RdbEvidenceService | None = None,
     ) -> None:
         self.settings = settings
         self.http_client = http_client
         self.query_filter_extractor = query_filter_extractor or QueryFilterExtractor()
+        self.rdb_evidence_service = rdb_evidence_service or RdbEvidenceService(
+            settings,
+            query_filter_extractor=self.query_filter_extractor,
+        )
 
     async def get_evidence(
         self,
         request: ChatAnswerRequest,
         intent: ChatIntent,
     ) -> EvidenceResult:
+        if self.settings.rdb_evidence_enabled:
+            return await self.rdb_evidence_service.get_evidence(request, intent)
+
         if not self.settings.evidence_lookup_enabled:
             return self._empty_result(request, intent)
 

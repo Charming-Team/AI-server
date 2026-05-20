@@ -16,6 +16,33 @@ from app.features.chat.schemas import (
 )
 
 
+class FakeRdbEvidenceService:
+    def __init__(self) -> None:
+        self.request: ChatAnswerRequest | None = None
+        self.intent: ChatIntent | None = None
+
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        self.request = request
+        self.intent = intent
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                {
+                    "type": "MATERIAL",
+                    "title": "RM-AL-001 알루미늄 원자재 재고 부족",
+                    "summary": "read-only View에서 조회한 자재 부족 Evidence입니다.",
+                    "source": "chat_material_shortage_evidence_view",
+                    "referenceId": 7001,
+                }
+            ],
+        )
+
+
 def _build_request() -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -40,6 +67,25 @@ def test_evidence_service_returns_empty_result_when_lookup_is_disabled() -> None
     assert result.intent == ChatIntent.MATERIAL_SHORTAGE
     assert result.items == []
     assert result.has_evidence is False
+
+
+def test_evidence_service_uses_rdb_evidence_service_when_rdb_view_mode_is_enabled() -> None:
+    rdb_evidence_service = FakeRdbEvidenceService()
+    request = _build_request()
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.MATERIAL_SHORTAGE)
+
+    assert rdb_evidence_service.request == request
+    assert rdb_evidence_service.intent == ChatIntent.MATERIAL_SHORTAGE
+    assert result.intent == ChatIntent.MATERIAL_SHORTAGE
+    assert result.items[0].source == "chat_material_shortage_evidence_view"
 
 
 def test_evidence_service_builds_internal_request_payload() -> None:

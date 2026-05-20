@@ -28,6 +28,7 @@ def test_env_example_loads_as_valid_settings() -> None:
         "http://127.0.0.1:3000",
     ]
     assert settings.evidence_lookup_enabled is False
+    assert settings.rdb_evidence_enabled is False
     assert settings.qdrant_search_enabled is False
     assert settings.embedding_enabled is False
     assert settings.llm_enabled is False
@@ -37,6 +38,7 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.embedding_dimension == 1024
     assert settings.llm_max_tokens == 1024
     assert settings.answer_max_chars == 2000
+    assert settings.rdb_evidence_max_limit == 20
 
 
 def test_settings_accepts_chat_cost_guardrail_limits() -> None:
@@ -51,6 +53,7 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
         answer_max_chars=5000,
         prompt_max_evidence_items=20,
         prompt_max_document_sources=20,
+        rdb_evidence_max_limit=100,
     )
 
     assert settings.qdrant_top_k == 20
@@ -63,6 +66,7 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     assert settings.answer_max_chars == 5000
     assert settings.prompt_max_evidence_items == 20
     assert settings.prompt_max_document_sources == 20
+    assert settings.rdb_evidence_max_limit == 100
 
 
 def test_settings_default_internal_tokens_are_optional() -> None:
@@ -96,6 +100,8 @@ def test_settings_default_internal_tokens_are_optional() -> None:
         ("prompt_max_evidence_items", 21),
         ("prompt_max_document_sources", -1),
         ("prompt_max_document_sources", 21),
+        ("rdb_evidence_max_limit", 0),
+        ("rdb_evidence_max_limit", 101),
     ],
 )
 def test_settings_rejects_chat_cost_guardrail_violations(

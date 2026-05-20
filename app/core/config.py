@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     evidence_lookup_path: str = "/internal/chat/evidence"
     evidence_lookup_internal_token: str | None = None
     evidence_lookup_timeout_seconds: float = 10.0
+    rdb_evidence_enabled: bool = False
+    rdb_evidence_dsn: str | None = None
+    rdb_evidence_timeout_seconds: float = 5.0
+    rdb_evidence_max_limit: int = Field(default=20, ge=1, le=100)
     qdrant_search_enabled: bool = False
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
