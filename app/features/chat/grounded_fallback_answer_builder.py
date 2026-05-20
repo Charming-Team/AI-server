@@ -1,0 +1,55 @@
+from app.features.chat.schemas import DocumentSearchResult, EvidenceResult
+
+
+class GroundedFallbackAnswerBuilder:
+    _max_items = 3
+    _max_summary_chars = 180
+
+    def build(
+        self,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> str:
+        sections = ["확인된 내부 근거 기준으로 요약합니다."]
+
+        if evidence_result.items:
+            sections.append(
+                self._build_section(
+                    "RDB 근거",
+                    [
+                        (item.title, item.summary)
+                        for item in evidence_result.items[: self._max_items]
+                    ],
+                )
+            )
+
+        if document_result.sources:
+            sections.append(
+                self._build_section(
+                    "문서 검색 근거",
+                    [
+                        (source.title, source.summary)
+                        for source in document_result.sources[: self._max_items]
+                    ],
+                )
+            )
+
+        sections.append("확인 필요: 위 근거에 없는 내용은 추가 확인이 필요합니다.")
+        return "\n\n".join(sections)
+
+    def _build_section(
+        self,
+        title: str,
+        items: list[tuple[str, str]],
+    ) -> str:
+        lines = [f"{title}:"]
+        lines.extend(
+            f"{index}. {item_title}: {self._truncate(item_summary)}"
+            for index, (item_title, item_summary) in enumerate(items, start=1)
+        )
+        return "\n".join(lines)
+
+    def _truncate(self, text: str) -> str:
+        if len(text) <= self._max_summary_chars:
+            return text
+        return f"{text[: self._max_summary_chars - 3]}..."

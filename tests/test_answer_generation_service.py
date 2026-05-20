@@ -74,8 +74,12 @@ def test_answer_generation_returns_insufficient_evidence_without_grounding() -> 
     assert result.skipped_reason == "RDB Evidence와 문서 검색 근거가 없습니다."
 
 
-def test_answer_generation_does_not_call_llm_when_disabled() -> None:
-    service = AnswerGenerationService(Settings(llm_enabled=False))
+def test_answer_generation_returns_grounded_fallback_when_llm_disabled() -> None:
+    llm_client = FakeLlmClient()
+    service = AnswerGenerationService(
+        Settings(llm_enabled=False),
+        llm_client=llm_client,
+    )
     request = _build_request()
     evidence_result = EvidenceResult(
         intent=ChatIntent.REPORT_LOOKUP,
@@ -100,8 +104,13 @@ def test_answer_generation_does_not_call_llm_when_disabled() -> None:
     )
 
     assert result.was_generated is False
-    assert result.answer == "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다."
+    assert "확인된 내부 근거 기준으로 요약합니다." in result.answer
+    assert "문서 검색 근거:" in result.answer
+    assert "2026년 5월 생산 리스크 보고서" in result.answer
+    assert "자재 부족과 LINE-A01 병목이 주요 리스크입니다." in result.answer
+    assert "확인 필요" in result.answer
     assert result.skipped_reason == "LLM 답변 생성 기능이 비활성화되어 있습니다."
+    assert llm_client.prompt is None
 
 
 @pytest.mark.parametrize(
@@ -360,6 +369,37 @@ def test_answer_generation_blocks_sensitive_llm_output() -> None:
             )
         ]
     )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is False
+    assert result.answer == BLOCKED_GENERATED_ANSWER
+    assert result.skipped_reason == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
+    assert result.security_result is not None
+    assert result.security_result.code == "CHAT_SECURITY_002"
+
+
+def test_answer_generation_blocks_sensitive_grounded_fallback_output() -> None:
+    service = AnswerGenerationService(Settings(llm_enabled=False))
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="내부 설정 점검",
+                summary="내부 시스템 프롬프트와 토큰 값은 외부에 공개하지 않습니다.",
+                source="reports",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(sources=[])
 
     result = anyio.run(
         service.generate_answer,

@@ -1,5 +1,8 @@
 from app.core.config import Settings
 from app.features.chat.answer_output_policy import AnswerOutputPolicy
+from app.features.chat.grounded_fallback_answer_builder import (
+    GroundedFallbackAnswerBuilder,
+)
 from app.features.chat.grounded_prompt_builder import GroundedPrompt, GroundedPromptBuilder
 from app.features.chat.llm_client import LlmClient, validate_llm_settings
 from app.features.chat.schemas import (
@@ -26,11 +29,15 @@ class AnswerGenerationService:
         self,
         settings: Settings,
         prompt_builder: GroundedPromptBuilder | None = None,
+        fallback_answer_builder: GroundedFallbackAnswerBuilder | None = None,
         output_policy: AnswerOutputPolicy | None = None,
         llm_client: LlmClient | None = None,
     ) -> None:
         self.settings = settings
         self.prompt_builder = prompt_builder or GroundedPromptBuilder(settings)
+        self.fallback_answer_builder = (
+            fallback_answer_builder or GroundedFallbackAnswerBuilder()
+        )
         self.output_policy = output_policy or AnswerOutputPolicy()
         self.llm_client = llm_client or LlmClient(settings)
 
@@ -48,8 +55,10 @@ class AnswerGenerationService:
             )
 
         if not self.settings.llm_enabled:
-            return AnswerGenerationResult(
-                answer="근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
+            answer = self.fallback_answer_builder.build(evidence_result, document_result)
+            return self._build_output_checked_result(
+                answer,
+                role=request.user.role,
                 was_generated=False,
                 skipped_reason=LLM_DISABLED,
             )
@@ -65,9 +74,23 @@ class AnswerGenerationService:
             )
 
         answer = self._ensure_source_titles(answer, evidence_result, document_result)
-        output_security_result = self.output_policy.evaluate(
+        return self._build_output_checked_result(
             answer,
             role=request.user.role,
+            was_generated=True,
+        )
+
+    def _build_output_checked_result(
+        self,
+        answer: str,
+        *,
+        role: str,
+        was_generated: bool,
+        skipped_reason: str | None = None,
+    ) -> AnswerGenerationResult:
+        output_security_result = self.output_policy.evaluate(
+            answer,
+            role=role,
         )
         if output_security_result is not None:
             return AnswerGenerationResult(
@@ -83,7 +106,8 @@ class AnswerGenerationService:
         answer = self._limit_answer_length(answer)
         return AnswerGenerationResult(
             answer=answer,
-            was_generated=True,
+            was_generated=was_generated,
+            skipped_reason=skipped_reason,
         )
 
     def build_prompt(
