@@ -22,6 +22,9 @@ def _build_args(**overrides: Any) -> Namespace:
         "include_answer_api_smoke": False,
         "include_recommendation_api_smoke": False,
         "include_answer_output_policy_smoke": False,
+        "include_rdb_chat_scenarios": False,
+        "rdb_chat_scenario_group": None,
+        "rdb_chat_scenario": None,
         "answer_api_base_url": "http://fastapi.local",
         "answer_api_question": "자재 부족 현황 알려줘",
         "answer_api_role": "MANUFACTURING_MANAGER",
@@ -88,6 +91,7 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.include_document_api_smoke is True
     assert args.include_vector_smoke is True
     assert args.include_answer_output_policy_smoke is True
+    assert args.include_rdb_chat_scenarios is True
     assert args.answer_api_min_evidence_count == 1
     assert args.answer_api_min_document_source_count == 1
 
@@ -264,12 +268,15 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
         "readiness",
         "answerOutputPolicySmoke",
         "rdbEvidenceViews",
+        "rdbChatScenarios",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
     assert result["steps"][1]["result"]["checkStatus"] == "PASS"
-    assert result["steps"][3]["result"]["minEvidenceCount"] == 1
-    assert result["steps"][3]["result"]["requireRdbEvidence"] is True
+    assert result["steps"][3]["result"]["scenarioGroups"] == ["core", "access"]
+    assert result["steps"][3]["result"]["scenarioCount"] == 9
+    assert result["steps"][4]["result"]["minEvidenceCount"] == 1
+    assert result["steps"][4]["result"]["requireRdbEvidence"] is True
 
 
 def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
@@ -290,6 +297,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "readiness",
         "answerOutputPolicySmoke",
         "rdbEvidenceViews",
+        "rdbChatScenarios",
         "qdrantCollection",
         "qdrantDocumentPayloads",
         "qdrantVectorSmoke",
@@ -304,8 +312,8 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "documentIndexPipeline",
     ]
     assert result["summary"] == {
-        "totalStepCount": 9,
-        "passedStepCount": 9,
+        "totalStepCount": 10,
+        "passedStepCount": 10,
         "failedStepCount": 0,
         "failedSteps": [],
         "nextActions": [],
@@ -330,6 +338,116 @@ def test_check_chat_runtime_validate_only_checks_answer_output_policy_smoke() ->
     ]
     assert result["steps"][1]["result"]["checkStatus"] == "PASS"
     assert result["steps"][1]["result"]["caseCount"] == 4
+
+
+def test_check_chat_runtime_validate_only_checks_rdb_chat_scenarios() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(
+        include_rdb_chat_scenarios=True,
+        rdb_chat_scenario_group=["access"],
+        rdb_chat_scenario=["operator-financial-blocked"],
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "rdbEvidenceViews",
+        "rdbChatScenarios",
+    ]
+    assert result["steps"][2]["result"] == {
+        "checkStatus": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "networkChecked": False,
+        "baseUrl": "http://fastapi.local",
+        "path": "/api/v1/chat/answer",
+        "tokenConfigured": True,
+        "scenarioGroups": ["access"],
+        "scenarioCount": 1,
+        "scenarioIds": ["operator-financial-blocked"],
+    }
+
+
+def test_check_chat_runtime_rdb_chat_scenarios_require_token() -> None:
+    settings = Settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(include_rdb_chat_scenarios=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "rdbChatScenarios"
+    assert result["steps"][-1]["status"] == "FAIL"
+    assert result["steps"][-1]["error"]["code"] == "CHAT_SECURITY_003"
+    assert "Role 기반 접근 제어" in result["summary"]["nextActions"][-1]
+
+
+def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(
+        network=True,
+        include_rdb_chat_scenarios=True,
+        rdb_chat_scenario_group=["access"],
+        rdb_chat_scenario=["operator-financial-blocked"],
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_rdb_chat_scenarios(scenario_args):
+        captured["base_url"] = scenario_args.base_url
+        captured["path"] = scenario_args.path
+        captured["token"] = scenario_args.token
+        captured["scenario_group"] = scenario_args.scenario_group
+        captured["scenario"] = scenario_args.scenario
+        return {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "operator-financial-blocked",
+                    "securityStatus": "BLOCKED_UNAUTHORIZED",
+                    "securityCode": "CHAT_SECURITY_004",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_rdb_chat_scenarios,
+        "check_rdb_chat_scenarios",
+        fake_rdb_chat_scenarios,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "NETWORK"
+    assert result["steps"][-1]["name"] == "rdbChatScenarios"
+    assert captured == {
+        "base_url": "http://fastapi.local",
+        "path": "/api/v1/chat/answer",
+        "token": "answer-token",
+        "scenario_group": ["access"],
+        "scenario": ["operator-financial-blocked"],
+    }
 
 
 def test_check_chat_runtime_fails_when_answer_output_policy_smoke_fails(

@@ -19,6 +19,7 @@ from scripts import (
     check_qdrant_collection,
     check_qdrant_document_payloads,
     check_qdrant_vector_search,
+    check_rdb_chat_scenarios,
     check_rdb_evidence_views,
 )
 
@@ -36,6 +37,10 @@ STEP_ACTION_GUIDE = {
     "rdbEvidenceViews": (
         "RDB DSN, chat_evidence view 생성 여부, smap_chat_reader read-only 권한을 "
         "확인하세요."
+    ),
+    "rdbChatScenarios": (
+        "챗봇 답변 API, RDB Evidence, Role 기반 접근 제어 시나리오의 intent, "
+        "securityStatus, securityCode 결과를 확인하세요."
     ),
     "qdrantCollection": (
         "Qdrant URL, collection 이름, embedding dimension 설정이 일치하는지 "
@@ -137,6 +142,32 @@ def build_parser() -> argparse.ArgumentParser:
             "LLM 출력 보안 정책의 핵심 차단 케이스를 로컬에서 점검합니다. "
             "네트워크 연결은 수행하지 않습니다."
         ),
+    )
+    parser.add_argument(
+        "--include-rdb-chat-scenarios",
+        action="store_true",
+        help=(
+            "RDB Evidence 기반 챗봇 질문 시나리오를 실행합니다. "
+            "기본으로 core/access 시나리오 그룹을 점검합니다."
+        ),
+    )
+    parser.add_argument(
+        "--rdb-chat-scenario-group",
+        action="append",
+        choices=sorted(check_rdb_chat_scenarios.RDB_CHAT_SCENARIO_GROUPS),
+        help=(
+            "RDB 챗봇 시나리오 그룹입니다. core, access, filtered 중 선택하며 "
+            "여러 번 지정할 수 있습니다. 생략하면 core/access를 실행합니다."
+        ),
+    )
+    parser.add_argument(
+        "--rdb-chat-scenario",
+        action="append",
+        choices=[
+            scenario.scenario_id
+            for scenario in check_rdb_chat_scenarios.ALL_RDB_CHAT_SCENARIOS
+        ],
+        help="실행할 RDB 챗봇 시나리오 ID입니다. 여러 번 지정할 수 있습니다.",
     )
     parser.add_argument(
         "--recommendation-api-base-url",
@@ -272,6 +303,8 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
     args.include_answer_api_smoke = True
     args.include_recommendation_api_smoke = True
     args.include_answer_output_policy_smoke = True
+    if preset in {"rdb", "full"}:
+        args.include_rdb_chat_scenarios = True
     args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
     return args
 
@@ -313,6 +346,14 @@ async def check_chat_runtime(
             await run_step(
                 "rdbEvidenceViews",
                 lambda: run_rdb_evidence_view_check(settings, args),
+            )
+        )
+
+    if args.include_rdb_chat_scenarios:
+        steps.append(
+            await run_step(
+                "rdbChatScenarios",
+                lambda: run_rdb_chat_scenarios(settings, args),
             )
         )
 
@@ -497,6 +538,54 @@ async def run_rdb_evidence_view_check(
         settings,
         check_privileges=not args.skip_rdb_privilege_check,
     )
+
+
+async def run_rdb_chat_scenarios(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    token = check_chat_answer.resolve_answer_token(
+        argparse.Namespace(token=None),
+        settings,
+    )
+    path = f"{settings.api_v1_prefix}/chat/answer"
+    scenario_groups = args.rdb_chat_scenario_group or ["core", "access"]
+    scenarios = check_rdb_chat_scenarios.select_scenarios(
+        args.rdb_chat_scenario,
+        scenario_groups,
+    )
+
+    if not args.network:
+        return {
+            "checkStatus": "VALIDATED",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "baseUrl": args.answer_api_base_url,
+            "path": path,
+            "tokenConfigured": bool(token),
+            "scenarioGroups": scenario_groups,
+            "scenarioCount": len(scenarios),
+            "scenarioIds": [scenario.scenario_id for scenario in scenarios],
+        }
+
+    scenario_args = argparse.Namespace(
+        base_url=args.answer_api_base_url,
+        path=path,
+        token=token,
+        env_file=None,
+        timeout_seconds=args.answer_api_timeout_seconds,
+        role=args.answer_api_role,
+        user_id=args.answer_api_user_id,
+        company_name="S-MAP",
+        session_id=1,
+        message_id=1,
+        requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
+        scenario=args.rdb_chat_scenario,
+        scenario_group=scenario_groups,
+        min_evidence_count=None,
+        json=False,
+    )
+    return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(scenario_args)
 
 
 async def run_qdrant_collection_check(
