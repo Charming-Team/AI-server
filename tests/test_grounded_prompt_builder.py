@@ -181,6 +181,57 @@ def test_grounded_prompt_builder_sanitizes_data_urls_before_prompt() -> None:
     assert '"relatedUrls": ["/materials/11?mode=read", null]' in prompt.user_prompt
 
 
+def test_grounded_prompt_builder_redacts_sensitive_data_before_prompt() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="민감 패턴은 프롬프트 원천 데이터에서 마스킹됩니다.",
+                source="reports",
+                data={
+                    "riskLevel": "WARNING",
+                    "apiKey": "sk-abcdefghijklmnopqrstuvwxyz123456",
+                    "accessToken": "short-token-value",
+                    "notes": [
+                        "운영 확인 필요",
+                        (
+                            "Authorization: Bearer "
+                            "abcDEF1234567890abcDEF1234567890abcDEF1234567890"
+                        ),
+                    ],
+                    "nested": {
+                        "password": "short-password",
+                        "lineCode": "LINE-A01",
+                    },
+                },
+            )
+        ],
+    )
+
+    prompt = builder.build(
+        request,
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+    )
+
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in prompt.user_prompt
+    assert "short-token-value" not in prompt.user_prompt
+    assert "Bearer abcDEF" not in prompt.user_prompt
+    assert "short-password" not in prompt.user_prompt
+    assert '"apiKey": "[보안 제한]"' in prompt.user_prompt
+    assert '"accessToken": "[보안 제한]"' in prompt.user_prompt
+    assert '"notes": ["운영 확인 필요", "[보안 제한]"]' in prompt.user_prompt
+    assert '"nested": {"lineCode": "LINE-A01", "password": "[보안 제한]"}' in (
+        prompt.user_prompt
+    )
+    assert '"riskLevel": "WARNING"' in prompt.user_prompt
+
+
 def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
     builder = GroundedPromptBuilder(
         Settings(

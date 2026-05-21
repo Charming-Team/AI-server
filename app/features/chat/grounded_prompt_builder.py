@@ -9,6 +9,7 @@ from app.features.chat.schemas import (
     EvidenceItem,
     EvidenceResult,
 )
+from app.features.chat.sensitive_pattern_policy import SensitivePatternPolicy
 from app.features.chat.source_url_policy import normalize_internal_url
 
 
@@ -19,6 +20,18 @@ class GroundedPrompt:
 
 
 class GroundedPromptBuilder:
+    _redacted_value = "[보안 제한]"
+    _sensitive_data_key_terms = (
+        "apikey",
+        "authorization",
+        "bearertoken",
+        "password",
+        "passwd",
+        "pwd",
+        "refreshtoken",
+        "secret",
+        "token",
+    )
     _system_prompt = """너는 사내 생산관리 챗봇 Agent다.
 반드시 제공된 내부 근거만 사용해서 답변한다.
 웹 검색, 일반 상식, 모델의 사전 지식으로 사실을 보완하지 않는다.
@@ -31,6 +44,7 @@ class GroundedPromptBuilder:
         self.max_document_sources = max(0, settings.prompt_max_document_sources) if settings else 5
         self.max_summary_chars = max(0, settings.prompt_max_summary_chars) if settings else 700
         self.max_data_chars = max(0, settings.prompt_max_data_chars) if settings else 1000
+        self.sensitive_pattern_policy = SensitivePatternPolicy()
 
     def build(
         self,
@@ -149,6 +163,8 @@ class GroundedPromptBuilder:
         return normalize_internal_url(url)
 
     def _sanitize_data_for_prompt(self, value: object, key: str | None = None) -> object:
+        if self._is_sensitive_key(key):
+            return self._redacted_value
         if isinstance(value, dict):
             return {
                 item_key: self._sanitize_data_for_prompt(item_value, str(item_key))
@@ -158,10 +174,20 @@ class GroundedPromptBuilder:
             return [self._sanitize_data_for_prompt(item, key) for item in value]
         if isinstance(value, str) and self._is_url_key(key):
             return self._safe_internal_url(value)
+        if isinstance(value, str) and self.sensitive_pattern_policy.contains_sensitive_pattern(
+            value
+        ):
+            return self._redacted_value
         return value
 
     def _is_url_key(self, key: str | None) -> bool:
         return key is not None and "url" in key.casefold()
+
+    def _is_sensitive_key(self, key: str | None) -> bool:
+        if key is None:
+            return False
+        normalized_key = self._compact(key.casefold())
+        return any(term in normalized_key for term in self._sensitive_data_key_terms)
 
     def _truncate(self, text: str, max_chars: int) -> str:
         if max_chars <= 0:
@@ -171,3 +197,6 @@ class GroundedPromptBuilder:
         if max_chars <= 3:
             return "." * max_chars
         return f"{text[: max_chars - 3]}..."
+
+    def _compact(self, text: str) -> str:
+        return "".join(text.split()).replace("_", "").replace("-", "")
