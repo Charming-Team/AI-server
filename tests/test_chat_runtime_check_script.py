@@ -11,6 +11,7 @@ from scripts import check_chat_runtime
 
 def _build_args(**overrides: Any) -> Namespace:
     values = {
+        "preset": "none",
         "env_file": None,
         "network": False,
         "require_rdb_evidence": False,
@@ -68,6 +69,23 @@ def test_check_chat_runtime_builds_required_components() -> None:
         "ragSearchPipeline",
         "documentIndexPipeline",
     ]
+
+
+def test_check_chat_runtime_builds_required_components_from_full_preset() -> None:
+    args = _build_args(preset="full")
+
+    assert check_chat_runtime.build_required_components(args) == [
+        "rdbEvidence",
+        "qdrantSearch",
+        "ragSearchPipeline",
+        "documentIndexPipeline",
+    ]
+    assert args.include_answer_api_smoke is True
+    assert args.include_recommendation_api_smoke is True
+    assert args.include_document_api_smoke is True
+    assert args.include_vector_smoke is True
+    assert args.answer_api_min_evidence_count == 1
+    assert args.answer_api_min_document_source_count == 1
 
 
 def test_check_chat_runtime_validate_only_passes_with_rdb_evidence() -> None:
@@ -178,7 +196,7 @@ def test_check_chat_runtime_network_runs_vector_smoke(
     async def fake_qdrant_payload_check(settings_arg, args_arg):
         return {"checkStatus": "PASS"}
 
-    async def fake_vector_smoke(settings_arg):
+    async def fake_vector_smoke(settings_arg, args_arg):
         calls.append(settings_arg.qdrant_collection)
         return {"checkStatus": "PASS", "matchedSourceCount": 1}
 
@@ -199,6 +217,81 @@ def test_check_chat_runtime_network_runs_vector_smoke(
     assert result["checkStatus"] == "PASS"
     assert result["steps"][-1]["name"] == "qdrantVectorSmoke"
     assert calls == ["smap_internal_documents"]
+
+
+def test_check_chat_runtime_validate_only_checks_vector_smoke_metadata() -> None:
+    settings = _base_ready_settings(
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(include_vector_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert result["steps"][-1]["name"] == "qdrantVectorSmoke"
+    assert result["steps"][-1]["result"] == {
+        "checkStatus": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "networkChecked": False,
+        "collectionName": "smap_internal_documents",
+        "documentId": "smoke-company-line-bottleneck",
+        "embeddingDimension": 1024,
+    }
+
+
+def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(preset="rdb")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "rdbEvidenceViews",
+        "answerApiSmoke",
+        "recommendationApiSmoke",
+    ]
+    assert result["steps"][2]["result"]["minEvidenceCount"] == 1
+    assert result["steps"][2]["result"]["requireRdbEvidence"] is True
+
+
+def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(preset="full")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "rdbEvidenceViews",
+        "qdrantCollection",
+        "qdrantDocumentPayloads",
+        "qdrantVectorSmoke",
+        "documentApiSmoke",
+        "answerApiSmoke",
+        "recommendationApiSmoke",
+    ]
+    assert result["requiredComponents"] == [
+        "rdbEvidence",
+        "qdrantSearch",
+        "ragSearchPipeline",
+        "documentIndexPipeline",
+    ]
 
 
 def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:

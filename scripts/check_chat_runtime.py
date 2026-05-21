@@ -29,6 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="챗봇 RDB/Qdrant/Vector 런타임 준비 상태를 한 번에 점검합니다."
     )
     parser.add_argument(
+        "--preset",
+        choices=("none", "rdb", "rag", "full"),
+        default="none",
+        help=(
+            "자주 쓰는 점검 옵션 묶음. rdb는 RDB Evidence와 답변/추천 API, "
+            "rag는 Qdrant/문서/답변/추천 API, full은 전체 경로를 점검합니다."
+        ),
+    )
+    parser.add_argument(
         "--env-file",
         help="Settings를 로드할 env 파일 경로. 생략하면 기본 .env 설정을 사용합니다.",
     )
@@ -194,7 +203,32 @@ def build_settings(args: argparse.Namespace) -> Settings:
     return Settings()
 
 
+def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
+    preset = getattr(args, "preset", "none")
+    if preset == "none":
+        return args
+
+    if preset in {"rdb", "full"}:
+        args.require_rdb_evidence = True
+
+    if preset in {"rag", "full"}:
+        args.require_vector_search = True
+        args.require_document_index = True
+        args.include_vector_smoke = True
+        args.include_document_api_smoke = True
+        args.answer_api_min_document_source_count = max(
+            args.answer_api_min_document_source_count,
+            1,
+        )
+
+    args.include_answer_api_smoke = True
+    args.include_recommendation_api_smoke = True
+    args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
+    return args
+
+
 def build_required_components(args: argparse.Namespace) -> list[str]:
+    args = apply_runtime_preset(args)
     return check_chat_readiness.build_required_components(args)
 
 
@@ -202,6 +236,7 @@ async def check_chat_runtime(
     settings: Settings,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
+    args = apply_runtime_preset(args)
     required_components = build_required_components(args)
     readiness_result = check_chat_readiness.build_readiness_result(
         settings,
@@ -241,7 +276,7 @@ async def check_chat_runtime(
         steps.append(
             await run_step(
                 "qdrantVectorSmoke",
-                lambda: run_qdrant_vector_smoke(settings),
+                lambda: run_qdrant_vector_smoke(settings, args),
             )
         )
 
@@ -374,9 +409,22 @@ async def run_qdrant_payload_check(
     )
 
 
-async def run_qdrant_vector_smoke(settings: Settings) -> dict[str, Any]:
+async def run_qdrant_vector_smoke(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
     if not settings.embedding_dimension:
         raise ValueError("embedding_dimension is required")
+    if not args.network:
+        return {
+            "checkStatus": "VALIDATED",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "collectionName": settings.qdrant_collection,
+            "documentId": check_qdrant_vector_search.DEFAULT_DOCUMENT_ID,
+            "embeddingDimension": settings.embedding_dimension,
+        }
+
     smoke_args = argparse.Namespace(
         document_id=check_qdrant_vector_search.DEFAULT_DOCUMENT_ID,
         title=check_qdrant_vector_search.DEFAULT_TITLE,
