@@ -17,6 +17,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "require_rdb_evidence": False,
         "require_vector_search": False,
         "require_document_index": False,
+        "require_llm_generation": False,
         "include_vector_smoke": False,
         "include_document_api_smoke": False,
         "include_answer_api_smoke": False,
@@ -71,6 +72,7 @@ def test_check_chat_runtime_builds_required_components() -> None:
         require_rdb_evidence=True,
         require_vector_search=True,
         require_document_index=True,
+        require_llm_generation=True,
     )
 
     assert check_chat_runtime.build_required_components(args) == [
@@ -78,6 +80,7 @@ def test_check_chat_runtime_builds_required_components() -> None:
         "qdrantSearch",
         "ragSearchPipeline",
         "documentIndexPipeline",
+        "llm",
     ]
 
 
@@ -89,6 +92,7 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
         "qdrantSearch",
         "ragSearchPipeline",
         "documentIndexPipeline",
+        "llm",
     ]
     assert args.include_answer_api_smoke is True
     assert args.include_recommendation_api_smoke is True
@@ -98,6 +102,7 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.include_rdb_chat_scenarios is True
     assert args.include_rag_chat_scenarios is True
     assert args.include_rag_end_to_end_smoke is True
+    assert args.require_llm_generation is True
     assert args.answer_api_min_evidence_count == 1
     assert args.answer_api_min_document_source_count == 1
 
@@ -448,6 +453,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "qdrantSearch",
         "ragSearchPipeline",
         "documentIndexPipeline",
+        "llm",
     ]
     assert result["summary"] == {
         "totalStepCount": 12,
@@ -883,6 +889,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "requireRdbEvidence": False,
         "minDocumentSourceCount": 0,
         "requireVectorSearch": False,
+        "requireLlmGeneration": False,
     }
 
 
@@ -925,6 +932,7 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
             "evidenceCount": kwargs["min_evidence_count"],
             "usedRdbEvidence": kwargs["require_rdb_evidence"],
             "usedVectorSearch": kwargs["require_vector_search"],
+            "usedLlmGeneration": kwargs["require_llm_generation"],
         }
 
     monkeypatch.setattr(
@@ -946,6 +954,48 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
     assert calls == ["자재 부족 현황 알려줘"]
     assert result["steps"][-1]["result"]["evidenceCount"] == 2
     assert result["steps"][-1]["result"]["usedRdbEvidence"] is True
+
+
+def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(
+        network=True,
+        include_answer_api_smoke=True,
+        require_llm_generation=True,
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_answer_check(**kwargs):
+        captured["require_llm_generation"] = kwargs["require_llm_generation"]
+        return {
+            "checkStatus": "PASS",
+            "usedLlmGeneration": kwargs["require_llm_generation"],
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_chat_answer,
+        "check_chat_answer",
+        fake_answer_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert captured == {"require_llm_generation": True}
 
 
 def test_check_chat_runtime_validate_only_checks_recommendation_api_smoke() -> None:

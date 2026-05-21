@@ -68,7 +68,7 @@ STEP_ACTION_GUIDE = {
         "확인하세요."
     ),
     "answerApiSmoke": (
-        "챗봇 답변 내부 토큰, FastAPI base URL, RDB/Qdrant Evidence 조건을 "
+        "챗봇 답변 내부 토큰, FastAPI base URL, RDB/Qdrant Evidence, LLM 생성 조건을 "
         "확인하세요."
     ),
     "recommendationApiSmoke": (
@@ -116,6 +116,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-document-index",
         action="store_true",
         help="문서 인덱싱 파이프라인이 준비되어 있어야 합니다.",
+    )
+    parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="챗봇 답변 API smoke check에서 LLM 답변 생성 사용을 요구합니다.",
     )
     parser.add_argument(
         "--include-vector-smoke",
@@ -355,6 +360,8 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.include_answer_output_policy_smoke = True
     if preset in {"rdb", "full"}:
         args.include_rdb_chat_scenarios = True
+    if preset == "full":
+        args.require_llm_generation = True
     args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
     return args
 
@@ -954,6 +961,7 @@ async def run_answer_api_smoke(
             "requireRdbEvidence": require_rdb_evidence,
             "minDocumentSourceCount": args.answer_api_min_document_source_count,
             "requireVectorSearch": require_vector_search,
+            "requireLlmGeneration": bool(args.require_llm_generation),
         }
 
     return await check_chat_answer.check_chat_answer(
@@ -966,6 +974,7 @@ async def run_answer_api_smoke(
         require_rdb_evidence=require_rdb_evidence,
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
+        require_llm_generation=bool(args.require_llm_generation),
     )
 
 

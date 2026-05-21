@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Qdrant Vector Search가 실제로 수행됐는지 검증합니다.",
     )
     parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="LLM 답변 생성이 실제로 수행됐는지 검증합니다.",
+    )
+    parser.add_argument(
         "--expected-security-status",
         choices=[status.value for status in SecurityStatus],
         help="기대하는 응답 보안 상태. 예: PASSED, BLOCKED_UNAUTHORIZED",
@@ -113,6 +118,7 @@ async def check_chat_answer(
     require_rdb_evidence: bool = False,
     min_document_source_count: int = 0,
     require_vector_search: bool = False,
+    require_llm_generation: bool = False,
     expected_security_status: str | None = None,
     expected_security_code: str | None = None,
     http_client: httpx.AsyncClient | None = None,
@@ -192,6 +198,13 @@ async def check_chat_answer(
             message="FastAPI 챗봇 응답에 Qdrant Vector Search가 사용되지 않았습니다.",
         )
 
+    if require_llm_generation and not answer.model_result.used_llm_generation:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_LLM_004,
+            message="FastAPI 챗봇 응답에 LLM 답변 생성이 사용되지 않았습니다.",
+        )
+
     return {
         "checkStatus": "PASS",
         "url": url,
@@ -211,6 +224,8 @@ async def check_chat_answer(
         "requireVectorSearch": require_vector_search,
         "vectorSearchSkippedReason": answer.model_result.vector_search_skipped_reason,
         "usedLlmGeneration": answer.model_result.used_llm_generation,
+        "requireLlmGeneration": require_llm_generation,
+        "llmGenerationSkippedReason": answer.model_result.llm_generation_skipped_reason,
         "sourceCount": len(answer.sources),
         "urlCount": len(answer.urls),
     }
@@ -281,6 +296,8 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"requireVectorSearch={result['requireVectorSearch']}",
         f"vectorSearchSkippedReason={result['vectorSearchSkippedReason']}",
         f"usedLlmGeneration={result['usedLlmGeneration']}",
+        f"requireLlmGeneration={result['requireLlmGeneration']}",
+        f"llmGenerationSkippedReason={result['llmGenerationSkippedReason']}",
         f"sourceCount={result['sourceCount']}",
         f"urlCount={result['urlCount']}",
     ]
@@ -316,6 +333,7 @@ def main(
                 require_rdb_evidence=args.require_rdb_evidence,
                 min_document_source_count=args.min_document_source_count,
                 require_vector_search=args.require_vector_search,
+                require_llm_generation=args.require_llm_generation,
                 expected_security_status=args.expected_security_status,
                 expected_security_code=args.expected_security_code,
             )

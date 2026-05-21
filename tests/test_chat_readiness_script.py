@@ -88,6 +88,7 @@ def test_check_chat_readiness_script_builds_required_components() -> None:
         require_rdb_evidence=True,
         require_vector_search=True,
         require_document_index=True,
+        require_llm_generation=True,
     )
 
     assert check_chat_readiness.build_required_components(args) == [
@@ -95,6 +96,7 @@ def test_check_chat_readiness_script_builds_required_components() -> None:
         "qdrantSearch",
         "ragSearchPipeline",
         "documentIndexPipeline",
+        "llm",
     ]
 
 
@@ -163,6 +165,29 @@ def test_check_chat_readiness_script_accepts_required_vector_search() -> None:
 
     assert result["status"] == "ready"
     assert result["requirementFailures"] == []
+
+
+def test_check_chat_readiness_script_marks_required_llm_generation_failure() -> None:
+    result = check_chat_readiness.build_readiness_result(
+        Settings(
+            chat_answer_internal_token="answer-token",
+            chat_recommendation_internal_token="recommendation-token",
+            document_index_internal_token="document-token",
+            evidence_lookup_enabled=True,
+            evidence_lookup_internal_token="evidence-token",
+            llm_enabled=False,
+        ),
+        required_components=["llm"],
+    )
+
+    assert result["status"] == "not_ready"
+    assert result["requirementFailures"] == [
+        {
+            "name": "llm",
+            "code": "CHAT_LLM_001",
+            "reason": "비활성화되어 있습니다.",
+        }
+    ]
 
 
 def test_check_chat_readiness_script_returns_zero_on_ready(

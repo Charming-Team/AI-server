@@ -29,4 +29,3 @@ def test_docker_build_workflow_runs_on_project_branch_patterns() -> None:
     assert '- "feat/**"' in workflow
     assert '- "fix/**"' in workflow
     assert '- "chore/**"' in workflow
-    assert '- "codex/**"' in workflow

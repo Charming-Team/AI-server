@@ -24,6 +24,10 @@ REQUIRED_COMPONENT_OPTIONS = {
         "code": ChatErrorCode.CHAT_DOCUMENT_001,
         "reason": "문서 인덱싱 사용이 요구되지만 파이프라인이 활성화되어 있지 않습니다.",
     },
+    "llm": {
+        "code": ChatErrorCode.CHAT_LLM_001,
+        "reason": "LLM 답변 생성이 요구되지만 활성화되어 있지 않습니다.",
+    },
 }
 
 
@@ -54,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-document-index",
         action="store_true",
         help="문서 인덱싱 파이프라인이 활성화되어 있어야 합니다.",
+    )
+    parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="LLM 답변 생성이 활성화되어 있어야 합니다.",
     )
     return parser
 
@@ -96,6 +105,8 @@ def build_required_components(args: argparse.Namespace) -> list[str]:
         required_components.extend(["qdrantSearch", "ragSearchPipeline"])
     if args.require_document_index:
         required_components.append("documentIndexPipeline")
+    if args.require_llm_generation:
+        required_components.append("llm")
     return required_components
 
 

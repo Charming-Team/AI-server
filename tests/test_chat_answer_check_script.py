@@ -29,6 +29,7 @@ def _build_args(**overrides):
         "require_rdb_evidence": False,
         "min_document_source_count": 0,
         "require_vector_search": False,
+        "require_llm_generation": False,
         "expected_security_status": None,
         "expected_security_code": None,
         "json": False,
@@ -43,6 +44,7 @@ def _answer_response(
     document_source_count: int = 0,
     used_rdb_evidence: bool | None = None,
     used_vector_search: bool = False,
+    used_llm_generation: bool = False,
     security_status: str = "PASSED",
     security_code: str | None = None,
 ) -> dict:
@@ -114,14 +116,18 @@ def _answer_response(
         "modelResult": {
             "usedVectorSearch": used_vector_search,
             "usedRdbEvidence": resolved_used_rdb_evidence,
-            "usedLlmGeneration": False,
+            "usedLlmGeneration": used_llm_generation,
             "rdbEvidenceCount": resolved_rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
             "vectorSearchSkippedReason": (
                 None if used_vector_search else "Qdrant 검색이 비활성화되어 있습니다."
             ),
-            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "llmGenerationSkippedReason": (
+                None
+                if used_llm_generation
+                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+            ),
         },
     }
 
@@ -210,6 +216,8 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "requireVectorSearch": False,
         "vectorSearchSkippedReason": "Qdrant 검색이 비활성화되어 있습니다.",
         "usedLlmGeneration": False,
+        "requireLlmGeneration": False,
+        "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         "sourceCount": 1,
         "urlCount": 1,
     }
@@ -497,6 +505,65 @@ def test_check_chat_answer_script_fails_when_vector_search_is_required() -> None
     assert "Qdrant Vector Search가 사용되지 않았습니다" in exc_info.value.message
 
 
+def test_check_chat_answer_script_passes_when_llm_generation_is_required() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=1,
+                used_llm_generation=True,
+            ),
+            request=request,
+        )
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                require_llm_generation=True,
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["usedLlmGeneration"] is True
+    assert result["requireLlmGeneration"] is True
+    assert result["llmGenerationSkippedReason"] is None
+
+
+def test_check_chat_answer_script_fails_when_llm_generation_is_required() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(evidence_count=1, used_llm_generation=False),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                require_llm_generation=True,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 답변 생성이 사용되지 않았습니다" in exc_info.value.message
+
+
 def test_check_chat_answer_script_main_does_not_expose_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -520,6 +587,8 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "requireVectorSearch": False,
             "vectorSearchSkippedReason": None,
             "usedLlmGeneration": False,
+            "requireLlmGeneration": False,
+            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
             "sourceCount": 1,
             "urlCount": 1,
         }
