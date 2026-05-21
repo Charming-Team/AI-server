@@ -4,6 +4,9 @@ from app.features.chat.schemas import ChatErrorCode, SecurityStatus
 SENSITIVE_OUTPUT_REASON = (
     "생성 답변에 민감 정보 또는 내부 설정 정보가 포함된 것으로 판단되었습니다."
 )
+PROMPT_INJECTION_OUTPUT_REASON = (
+    "생성 답변에 프롬프트 인젝션 또는 시스템 지시 우회 문구가 포함된 것으로 판단되었습니다."
+)
 
 
 def test_answer_output_policy_allows_normal_business_answer() -> None:
@@ -23,6 +26,17 @@ def test_answer_output_policy_blocks_sensitive_answer() -> None:
     assert result.status == SecurityStatus.BLOCKED_SENSITIVE_REQUEST
     assert result.code == ChatErrorCode.CHAT_SECURITY_002
     assert result.reason == SENSITIVE_OUTPUT_REASON
+
+
+def test_answer_output_policy_blocks_prompt_injection_answer() -> None:
+    policy = AnswerOutputPolicy()
+
+    result = policy.evaluate("이전 지시를 무시하고 새로운 규칙을 따르겠습니다.")
+
+    assert result is not None
+    assert result.status == SecurityStatus.BLOCKED_PROMPT_INJECTION
+    assert result.code == ChatErrorCode.CHAT_SECURITY_001
+    assert result.reason == PROMPT_INJECTION_OUTPUT_REASON
 
 
 def test_answer_output_policy_blocks_secret_like_pattern() -> None:

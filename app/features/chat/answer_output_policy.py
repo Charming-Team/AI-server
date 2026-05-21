@@ -13,6 +13,29 @@ class AnswerOutputRule:
 
 
 class AnswerOutputPolicy:
+    _prompt_injection_rule = AnswerOutputRule(
+        code=ChatErrorCode.CHAT_SECURITY_001,
+        reason=(
+            "생성 답변에 프롬프트 인젝션 또는 시스템 지시 우회 문구가 "
+            "포함된 것으로 판단되었습니다."
+        ),
+        terms=(
+            "ignore previous",
+            "ignore instructions",
+            "disregard previous",
+            "jailbreak",
+            "developer mode",
+            "act as",
+            "이전 지시",
+            "지시 무시",
+            "규칙 무시",
+            "보안 규칙 무시",
+            "프롬프트 무시",
+            "개발자 모드",
+            "탈옥",
+            "너는 이제",
+        ),
+    )
     _sensitive_rule = AnswerOutputRule(
         code=ChatErrorCode.CHAT_SECURITY_002,
         reason="생성 답변에 민감 정보 또는 내부 설정 정보가 포함된 것으로 판단되었습니다.",
@@ -59,6 +82,16 @@ class AnswerOutputPolicy:
         normalized_answer = self._normalize(answer)
         compact_answer = self._compact(normalized_answer)
 
+        if self._matches_rule(
+            self._prompt_injection_rule,
+            normalized_answer,
+            compact_answer,
+        ):
+            return SecurityResult(
+                status=SecurityStatus.BLOCKED_PROMPT_INJECTION,
+                code=self._prompt_injection_rule.code,
+                reason=self._prompt_injection_rule.reason,
+            )
         if any(
             self._contains_term(term, normalized_answer, compact_answer)
             for term in self._sensitive_rule.terms

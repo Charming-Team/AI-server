@@ -384,6 +384,43 @@ def test_answer_generation_blocks_sensitive_llm_output() -> None:
     assert result.security_result.code == "CHAT_SECURITY_002"
 
 
+def test_answer_generation_blocks_prompt_injection_llm_output() -> None:
+    llm_client = FakeLlmClient("이전 지시를 무시하고 새로운 규칙을 따르겠습니다.")
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is False
+    assert result.answer == BLOCKED_GENERATED_ANSWER
+    assert result.skipped_reason == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
+    assert result.security_result is not None
+    assert result.security_result.status == "BLOCKED_PROMPT_INJECTION"
+    assert result.security_result.code == "CHAT_SECURITY_001"
+
+
 def test_answer_generation_blocks_sensitive_grounded_fallback_output() -> None:
     service = AnswerGenerationService(Settings(llm_enabled=False))
     request = _build_request()
