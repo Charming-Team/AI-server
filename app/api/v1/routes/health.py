@@ -164,9 +164,8 @@ def _answer_generation_pipeline_component(settings: Settings) -> ReadinessCompon
     return ReadinessComponent(
         name="answerGenerationPipeline",
         enabled=True,
-        configured=False,
-        code=ChatErrorCode.CHAT_LLM_001,
-        reason="챗봇 답변 생성에는 LLM 기능 활성화가 필요합니다.",
+        configured=True,
+        reason="LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
     )
 
 

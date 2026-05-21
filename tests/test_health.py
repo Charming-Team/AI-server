@@ -75,9 +75,8 @@ def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() ->
     assert components["answerGenerationPipeline"] == {
         "name": "answerGenerationPipeline",
         "enabled": True,
-        "configured": False,
-        "code": "CHAT_LLM_001",
-        "reason": "챗봇 답변 생성에는 LLM 기능 활성화가 필요합니다.",
+        "configured": True,
+        "reason": "LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
     }
 
 
@@ -217,9 +216,7 @@ def test_readiness_check_accepts_rdb_evidence_view_as_grounding_source() -> None
             rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
             qdrant_search_enabled=False,
             embedding_enabled=False,
-            llm_enabled=True,
-            llm_base_url="http://llm.local/v1",
-            llm_model="local-open-source-model",
+            llm_enabled=False,
         )
     )
     try:
@@ -239,10 +236,16 @@ def test_readiness_check_accepts_rdb_evidence_view_as_grounding_source() -> None
         "enabled": True,
         "configured": True,
     }
+    assert components["answerGenerationPipeline"] == {
+        "name": "answerGenerationPipeline",
+        "enabled": True,
+        "configured": True,
+        "reason": "LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
+    }
     assert "reader:secret" not in response.text
 
 
-def test_readiness_check_requires_llm_for_answer_generation_pipeline() -> None:
+def test_readiness_check_accepts_fallback_answer_generation_when_llm_is_disabled() -> None:
     previous_override = _override_settings(
         Settings(
             chat_answer_internal_token="answer-secret",
@@ -258,9 +261,9 @@ def test_readiness_check_requires_llm_for_answer_generation_pipeline() -> None:
     finally:
         _restore_settings(previous_override)
 
-    assert response.status_code == 503
+    assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "not_ready"
+    assert body["status"] == "ready"
     components = {component["name"]: component for component in body["components"]}
     assert components["chatGroundingPipeline"]["configured"] is True
     assert components["llm"] == {
@@ -272,9 +275,8 @@ def test_readiness_check_requires_llm_for_answer_generation_pipeline() -> None:
     assert components["answerGenerationPipeline"] == {
         "name": "answerGenerationPipeline",
         "enabled": True,
-        "configured": False,
-        "code": "CHAT_LLM_001",
-        "reason": "챗봇 답변 생성에는 LLM 기능 활성화가 필요합니다.",
+        "configured": True,
+        "reason": "LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
     }
 
 
