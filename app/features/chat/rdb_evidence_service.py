@@ -68,7 +68,10 @@ class RdbEvidenceService:
         )
 
     def _build_filters(self, request: ChatAnswerRequest) -> EvidenceLookupFilters:
-        extracted_filters = self.query_filter_extractor.extract_filters(request.question)
+        extracted_filters = self.query_filter_extractor.extract_filters(
+            request.question,
+            request.requested_at,
+        )
         filters = EvidenceLookupFilters.model_validate(extracted_filters)
         return filters.model_copy(
             update={

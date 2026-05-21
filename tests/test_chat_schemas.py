@@ -1,4 +1,12 @@
-from app.features.chat.schemas import ChatUserContext, EvidenceItem, EvidenceLookupUser
+import pytest
+from pydantic import ValidationError
+
+from app.features.chat.schemas import (
+    ChatUserContext,
+    EvidenceItem,
+    EvidenceLookupFilters,
+    EvidenceLookupUser,
+)
 
 
 def test_chat_user_context_normalizes_role_and_status() -> None:
@@ -35,3 +43,32 @@ def test_evidence_item_normalizes_access_metadata() -> None:
     )
 
     assert item.allowed_roles == ["OPERATOR", "EXECUTIVE"]
+
+
+def test_evidence_lookup_filters_normalizes_target_and_dates() -> None:
+    filters = EvidenceLookupFilters(
+        fromDate="2026-05-12",
+        toDate="2026-05-13",
+        targetType=" line ",
+        targetCode=" line-a01 ",
+    )
+
+    assert filters.from_date == "2026-05-12"
+    assert filters.to_date == "2026-05-13"
+    assert filters.target_type == "LINE"
+    assert filters.target_code == "LINE-A01"
+
+
+@pytest.mark.parametrize(
+    ("from_date", "to_date"),
+    [
+        ("2026-13-01", "2026-05-13"),
+        ("2026-05-14", "2026-05-13"),
+    ],
+)
+def test_evidence_lookup_filters_rejects_invalid_date_range(
+    from_date: str,
+    to_date: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        EvidenceLookupFilters(fromDate=from_date, toDate=to_date)

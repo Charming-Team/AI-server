@@ -74,6 +74,7 @@ def build_rdb_evidence_select_sql(
         ),
     ]
     params: list[Any] = []
+    where_clauses: list[str] = []
 
     if filters.target_code and definition.target_code_columns:
         params.append(filters.target_code.upper())
@@ -81,7 +82,26 @@ def build_rdb_evidence_select_sql(
             f"upper({_quote_identifier(column)}::text) = ${len(params)}"
             for column in definition.target_code_columns
         ]
-        sql_parts.append(f"where ({' or '.join(target_conditions)})")
+        where_clauses.append(f"({' or '.join(target_conditions)})")
+
+    if filters.from_date and definition.date_filter_columns:
+        params.append(filters.from_date)
+        from_conditions = [
+            f"{_quote_identifier(column)}::date >= ${len(params)}::date"
+            for column in definition.date_filter_columns
+        ]
+        where_clauses.append(f"({' or '.join(from_conditions)})")
+
+    if filters.to_date and definition.date_filter_columns:
+        params.append(filters.to_date)
+        to_conditions = [
+            f"{_quote_identifier(column)}::date <= ${len(params)}::date"
+            for column in definition.date_filter_columns
+        ]
+        where_clauses.append(f"({' or '.join(to_conditions)})")
+
+    if where_clauses:
+        sql_parts.append(f"where {' and '.join(where_clauses)}")
 
     if definition.default_order_columns:
         order_clause = ", ".join(

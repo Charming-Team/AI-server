@@ -91,7 +91,7 @@ def test_evidence_service_uses_rdb_evidence_service_when_rdb_view_mode_is_enable
 def test_evidence_service_builds_internal_request_payload() -> None:
     service = EvidenceService(Settings(evidence_lookup_internal_token="internal-token"))
     request = _build_request().model_copy(
-        update={"question": "LINE-A01 병목 원인을 알려줘"}
+        update={"question": "오늘 LINE-A01 병목 원인을 알려줘"}
     )
 
     payload = service._build_payload(request, ChatIntent.LINE_BOTTLENECK)
@@ -107,8 +107,8 @@ def test_evidence_service_builds_internal_request_payload() -> None:
     }
     assert payload["filters"] == {
         "limit": 5,
-        "fromDate": None,
-        "toDate": None,
+        "fromDate": "2026-05-12",
+        "toDate": "2026-05-12",
         "targetType": "LINE",
         "targetCode": "LINE-A01",
     }

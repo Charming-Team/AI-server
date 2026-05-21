@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,9 @@ class TargetPattern:
 
 
 class QueryFilterExtractor:
+    _explicit_date_pattern = re.compile(
+        r"(?<!\d)(20\d{2})[-./](0?[1-9]|1[0-2])[-./](0?[1-9]|[12]\d|3[01])(?!\d)"
+    )
     _target_patterns = (
         TargetPattern(
             target_type="ORDER",
@@ -38,12 +42,17 @@ class QueryFilterExtractor:
         ),
     )
 
-    def extract_filters(self, question: str) -> dict:
+    def extract_filters(
+        self,
+        question: str,
+        reference_datetime: datetime | None = None,
+    ) -> dict:
         target = self.extract_target(question)
+        date_range = self.extract_date_range(question, reference_datetime)
         return {
             "limit": 5,
-            "fromDate": None,
-            "toDate": None,
+            "fromDate": date_range[0],
+            "toDate": date_range[1],
             "targetType": target.target_type if target else None,
             "targetCode": target.target_code if target else None,
         }
@@ -69,3 +78,74 @@ class QueryFilterExtractor:
                     target_code=match.group(0).upper(),
                 )
         return None
+
+    def extract_date_range(
+        self,
+        question: str,
+        reference_datetime: datetime | None = None,
+    ) -> tuple[str | None, str | None]:
+        explicit_dates = self._extract_explicit_dates(question)
+        if len(explicit_dates) >= 2:
+            start_date, end_date = sorted(explicit_dates[:2])
+            return start_date.isoformat(), end_date.isoformat()
+        if len(explicit_dates) == 1:
+            target_date = explicit_dates[0]
+            return target_date.isoformat(), target_date.isoformat()
+
+        reference_date = self._reference_date(reference_datetime)
+        compact_question = question.replace(" ", "")
+        if "오늘" in compact_question:
+            return reference_date.isoformat(), reference_date.isoformat()
+        if "내일" in compact_question:
+            target_date = reference_date + timedelta(days=1)
+            return target_date.isoformat(), target_date.isoformat()
+        if "어제" in compact_question:
+            target_date = reference_date - timedelta(days=1)
+            return target_date.isoformat(), target_date.isoformat()
+        if "이번주" in compact_question:
+            return self._week_range(reference_date, week_offset=0)
+        if "다음주" in compact_question:
+            return self._week_range(reference_date, week_offset=1)
+        if "이번달" in compact_question or "이번월" in compact_question:
+            return self._month_range(reference_date, month_offset=0)
+        if "다음달" in compact_question or "다음월" in compact_question:
+            return self._month_range(reference_date, month_offset=1)
+        return None, None
+
+    def _extract_explicit_dates(self, question: str) -> list[date]:
+        dates: list[date] = []
+        for match in self._explicit_date_pattern.finditer(question):
+            try:
+                dates.append(
+                    date(
+                        int(match.group(1)),
+                        int(match.group(2)),
+                        int(match.group(3)),
+                    )
+                )
+            except ValueError:
+                continue
+        return dates
+
+    def _reference_date(self, reference_datetime: datetime | None) -> date:
+        if reference_datetime is None:
+            return date.today()
+        return reference_datetime.date()
+
+    def _week_range(self, reference_date: date, week_offset: int) -> tuple[str, str]:
+        start_date = reference_date - timedelta(days=reference_date.weekday())
+        start_date += timedelta(days=week_offset * 7)
+        end_date = start_date + timedelta(days=6)
+        return start_date.isoformat(), end_date.isoformat()
+
+    def _month_range(self, reference_date: date, month_offset: int) -> tuple[str, str]:
+        month_index = reference_date.month - 1 + month_offset
+        year = reference_date.year + month_index // 12
+        month = month_index % 12 + 1
+        start_date = date(year, month, 1)
+        if month == 12:
+            next_month_start = date(year + 1, 1, 1)
+        else:
+            next_month_start = date(year, month + 1, 1)
+        end_date = next_month_start - timedelta(days=1)
+        return start_date.isoformat(), end_date.isoformat()

@@ -59,6 +59,18 @@ def test_rdb_evidence_view_definitions_do_not_select_restricted_columns() -> Non
         assert selected_columns.isdisjoint(definition.restricted_columns)
 
 
+def test_rdb_evidence_view_definitions_define_selected_date_filter_columns() -> None:
+    for definition in RDB_EVIDENCE_VIEW_DEFINITIONS:
+        selected_columns = (
+            set(definition.title_columns)
+            | set(definition.summary_columns)
+            | set(definition.data_columns)
+        )
+
+        assert definition.date_filter_columns
+        assert set(definition.date_filter_columns).issubset(selected_columns)
+
+
 @pytest.mark.parametrize(
     ("role", "expected_intents"),
     [

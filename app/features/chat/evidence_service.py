@@ -140,7 +140,10 @@ class EvidenceService:
                 company_name=request.user.company_name,
             ),
             filters=EvidenceLookupFilters.model_validate(
-                self.query_filter_extractor.extract_filters(request.question)
+                self.query_filter_extractor.extract_filters(
+                    request.question,
+                    request.requested_at,
+                )
             ),
         )
         return lookup_request.model_dump(mode="json", by_alias=True)

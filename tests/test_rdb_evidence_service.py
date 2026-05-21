@@ -130,3 +130,20 @@ def test_rdb_evidence_service_caps_filter_limit_by_settings() -> None:
 
     assert provider.filters is not None
     assert provider.filters.limit == 3
+
+
+def test_rdb_evidence_service_passes_date_filters_from_question() -> None:
+    provider = StubRdbEvidenceProvider()
+    service = RdbEvidenceService(
+        Settings(rdb_evidence_enabled=True),
+        providers=[provider],
+    )
+    request = _build_request("이번 주 RM-AL-001 자재 부족 현황 알려줘")
+
+    anyio.run(service.get_evidence, request, ChatIntent.MATERIAL_SHORTAGE)
+
+    assert provider.filters is not None
+    assert provider.filters.from_date == "2026-05-11"
+    assert provider.filters.to_date == "2026-05-17"
+    assert provider.filters.target_type == "MATERIAL"
+    assert provider.filters.target_code == "RM-AL-001"

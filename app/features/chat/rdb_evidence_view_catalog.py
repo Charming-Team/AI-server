@@ -35,6 +35,7 @@ class RdbEvidenceViewDefinition:
     data_columns: tuple[str, ...]
     allowed_roles: frozenset[str]
     target_code_columns: tuple[str, ...] = ()
+    date_filter_columns: tuple[str, ...] = ()
     restricted_columns: tuple[str, ...] = ()
     default_order_columns: tuple[str, ...] = ()
     schema_name: str = "chat_evidence"
@@ -100,6 +101,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
         ),
         allowed_roles=BUSINESS_ALLOWED_ROLES,
         target_code_columns=("material_code", "line_code", "order_no", "product_code"),
+        date_filter_columns=("planned_start_at",),
         default_order_columns=("shortage_quantity", "planned_start_at", "plan_id"),
     ),
     RdbEvidenceViewDefinition(
@@ -152,6 +154,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
         ),
         allowed_roles=BUSINESS_ALLOWED_ROLES,
         target_code_columns=("order_no", "line_code", "product_code"),
+        date_filter_columns=("due_date",),
         restricted_columns=("contract_amount", "late_penalty_amount"),
         default_order_columns=("risk_level", "delay_probability", "predicted_at"),
     ),
@@ -202,6 +205,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
         ),
         allowed_roles=BUSINESS_ALLOWED_ROLES,
         target_code_columns=("order_no", "line_code", "product_code"),
+        date_filter_columns=("planned_start_at",),
         restricted_columns=("contract_amount", "late_penalty_amount"),
         default_order_columns=("planned_start_at", "plan_sequence", "plan_id"),
     ),
@@ -256,6 +260,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
         ),
         allowed_roles=BUSINESS_ALLOWED_ROLES,
         target_code_columns=("line_code", "product_code"),
+        date_filter_columns=("recorded_at",),
         default_order_columns=("waiting_time_hr", "waiting_quantity", "recorded_at"),
     ),
     RdbEvidenceViewDefinition(
@@ -322,6 +327,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
         ),
         allowed_roles=MANAGER_ALLOWED_ROLES,
         target_code_columns=("order_no", "before_line_code", "after_line_code", "product_code"),
+        date_filter_columns=("after_start_at",),
         restricted_columns=("cost_change_amount",),
         default_order_columns=("recommendation_grade", "delay_reduction_hr", "created_at"),
     ),
@@ -378,6 +384,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
         ),
         allowed_roles=BUSINESS_ALLOWED_ROLES,
         target_code_columns=("order_no", "line_code", "product_code"),
+        date_filter_columns=("due_date",),
         restricted_columns=("contract_amount", "late_penalty_amount"),
         default_order_columns=("priority_rank", "due_date", "planned_start_at"),
     ),
@@ -415,6 +422,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
             "updated_at",
         ),
         allowed_roles=MANAGER_ALLOWED_ROLES,
+        date_filter_columns=("created_at", "target_start_date", "target_end_date"),
         default_order_columns=("created_at", "report_id"),
     ),
 )
