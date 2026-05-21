@@ -624,18 +624,6 @@ async def run_qdrant_vector_smoke(
     settings: Settings,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
-    if not settings.embedding_dimension:
-        raise ValueError("embedding_dimension is required")
-    if not args.network:
-        return {
-            "checkStatus": "VALIDATED",
-            "mode": "VALIDATE_ONLY",
-            "networkChecked": False,
-            "collectionName": settings.qdrant_collection,
-            "documentId": check_qdrant_vector_search.DEFAULT_DOCUMENT_ID,
-            "embeddingDimension": settings.embedding_dimension,
-        }
-
     smoke_args = argparse.Namespace(
         document_id=check_qdrant_vector_search.DEFAULT_DOCUMENT_ID,
         title=check_qdrant_vector_search.DEFAULT_TITLE,
@@ -651,6 +639,22 @@ async def run_qdrant_vector_smoke(
         requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
     )
     document = check_qdrant_vector_search.build_sample_document(smoke_args)
+    if not args.network:
+        vector = check_qdrant_vector_search.build_static_vector(
+            settings.embedding_dimension
+        )
+        point = check_qdrant_vector_search.build_sample_point(
+            settings,
+            document,
+            vector,
+        )
+        return check_qdrant_vector_search.build_validate_only_result(
+            settings,
+            document,
+            point,
+            smoke_args,
+        )
+
     request = chat_check_common.build_chat_answer_request(smoke_args)
     return await check_qdrant_vector_search.check_qdrant_vector_search(
         settings,

@@ -250,7 +250,32 @@ def test_check_chat_runtime_validate_only_checks_vector_smoke_metadata() -> None
         "networkChecked": False,
         "collectionName": "smap_internal_documents",
         "documentId": "smoke-company-line-bottleneck",
+        "pointId": "5700a63b-27df-5374-8281-b1e6cd67f3d8",
+        "intent": "LINE_BOTTLENECK",
+        "role": "MANUFACTURING_MANAGER",
         "embeddingDimension": 1024,
+        "qdrantUrlConfigured": True,
+        "apiKeyConfigured": False,
+    }
+
+
+def test_check_chat_runtime_vector_smoke_validate_only_validates_sample_point() -> None:
+    settings = _base_ready_settings(
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+        embedding_dimension=0,
+    )
+    args = _build_args(include_vector_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "qdrantVectorSmoke"
+    assert result["steps"][-1]["status"] == "FAIL"
+    assert result["steps"][-1]["error"] == {
+        "code": "CHAT_EMBEDDING_003",
+        "message": "Qdrant smoke test 벡터 차원은 1 이상이어야 합니다.",
     }
 
 
