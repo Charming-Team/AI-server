@@ -4,7 +4,9 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings, get_settings
 from app.features.chat.error_handlers import register_chat_error_handlers
 from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.router import get_chat_service
 from app.features.chat.schemas import ChatErrorCode
+from app.features.chat.service import ChatService
 from app.main import app
 
 client = TestClient(app)
@@ -156,4 +158,65 @@ def test_external_service_exception_returns_error_response() -> None:
     assert response.json() == {
         "code": "CHAT_QDRANT_002",
         "message": "Qdrant 검색에 실패했습니다.",
+    }
+
+
+def test_chat_answer_returns_evidence_error_when_rdb_lookup_fails() -> None:
+    class FailingEvidenceService:
+        async def get_evidence(self, request, intent):
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_EVIDENCE_004,
+                message="RDB Evidence View 조회에 실패했습니다.",
+            )
+
+    def build_chat_service() -> ChatService:
+        service = ChatService(Settings())
+        service.evidence_service = FailingEvidenceService()
+        return service
+
+    previous_settings_override = app.dependency_overrides.get(
+        get_settings,
+        _MISSING_OVERRIDE,
+    )
+    previous_service_override = app.dependency_overrides.get(
+        get_chat_service,
+        _MISSING_OVERRIDE,
+    )
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
+    )
+    app.dependency_overrides[get_chat_service] = build_chat_service
+    try:
+        response = client.post(
+            "/api/v1/chat/answer",
+            headers=CHAT_ANSWER_HEADERS,
+            json={
+                "sessionId": 10,
+                "messageId": 24,
+                "user": {
+                    "userId": 1,
+                    "role": "MANUFACTURING_MANAGER",
+                    "companyName": "S-MAP",
+                    "status": "ACTIVE",
+                },
+                "question": "자재 부족 현황 알려줘",
+                "requestedAt": "2026-05-12T10:30:00+09:00",
+            },
+        )
+    finally:
+        if previous_settings_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_settings, None)
+        else:
+            app.dependency_overrides[get_settings] = previous_settings_override
+
+        if previous_service_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_service_override
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "CHAT_EVIDENCE_004",
+        "message": "RDB Evidence View 조회에 실패했습니다.",
     }
