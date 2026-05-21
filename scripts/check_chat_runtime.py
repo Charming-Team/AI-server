@@ -11,6 +11,8 @@ from app.features.chat.schemas import ChatIntent
 from scripts import (
     chat_check_common,
     check_chat_readiness,
+    check_document_delete_api,
+    check_document_index_api,
     check_qdrant_collection,
     check_qdrant_document_payloads,
     check_qdrant_vector_search,
@@ -52,6 +54,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-vector-smoke",
         action="store_true",
         help="Qdrant에 임시 문서를 저장/검색/삭제하는 Vector smoke check를 수행합니다.",
+    )
+    parser.add_argument(
+        "--include-document-api-smoke",
+        action="store_true",
+        help=(
+            "FastAPI 문서 인덱싱/삭제 내부 API를 smoke 문서로 호출해 "
+            "계약과 토큰 설정을 점검합니다."
+        ),
+    )
+    parser.add_argument(
+        "--document-api-base-url",
+        default=check_document_index_api.DEFAULT_BASE_URL,
+        help="문서 인덱싱/삭제 API smoke check에 사용할 FastAPI base URL",
+    )
+    parser.add_argument(
+        "--document-api-smoke-document-id",
+        default=check_document_delete_api.DEFAULT_DOCUMENT_ID,
+        help="문서 API smoke check에 사용할 임시 documentId",
+    )
+    parser.add_argument(
+        "--document-api-timeout-seconds",
+        type=float,
+        default=10.0,
+        help="문서 API smoke check HTTP timeout seconds",
     )
     parser.add_argument(
         "--skip-rdb-privilege-check",
@@ -126,6 +152,14 @@ async def check_chat_runtime(
             await run_step(
                 "qdrantVectorSmoke",
                 lambda: run_qdrant_vector_smoke(settings),
+            )
+        )
+
+    if args.include_document_api_smoke:
+        steps.append(
+            await run_step(
+                "documentApiSmoke",
+                lambda: run_document_api_smoke(settings, args),
             )
         )
 
@@ -259,6 +293,74 @@ async def run_qdrant_vector_smoke(settings: Settings) -> dict[str, Any]:
         request,
         ChatIntent.LINE_BOTTLENECK,
     )
+
+
+async def run_document_api_smoke(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    token = check_document_index_api.resolve_index_token(
+        argparse.Namespace(token=None),
+        settings,
+    )
+    index_path = f"{settings.api_v1_prefix}/chat/internal/documents/index"
+    delete_path = f"{settings.api_v1_prefix}/chat/internal/documents/delete"
+    document = check_document_index_api.build_sample_document(
+        argparse.Namespace(
+            document_id=args.document_api_smoke_document_id,
+            document_type=check_document_index_api.DEFAULT_DOCUMENT_TYPE,
+            title=check_document_index_api.DEFAULT_TITLE,
+            content=check_document_index_api.DEFAULT_CONTENT,
+            summary=None,
+            url=check_document_index_api.DEFAULT_URL,
+            reference_type="SYSTEM",
+            reference_id=None,
+            basis_time=None,
+            roles=["MANUFACTURING_MANAGER"],
+            intents=[ChatIntent.LINE_BOTTLENECK.value],
+            requested_by_role="MANUFACTURING_MANAGER",
+            company_name="S-MAP",
+        )
+    )
+    delete_request = check_document_delete_api.build_delete_request(
+        argparse.Namespace(document_id=args.document_api_smoke_document_id)
+    )
+
+    if not args.network:
+        return {
+            "checkStatus": "VALIDATED",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "baseUrl": args.document_api_base_url,
+            "indexPath": index_path,
+            "deletePath": delete_path,
+            "documentId": args.document_api_smoke_document_id,
+            "tokenConfigured": bool(token),
+        }
+
+    index_result = await check_document_index_api.check_document_index_api(
+        base_url=args.document_api_base_url,
+        path=index_path,
+        token=token,
+        document=document,
+        timeout_seconds=args.document_api_timeout_seconds,
+        allow_skipped=True,
+    )
+    delete_result = await check_document_delete_api.check_document_delete_api(
+        base_url=args.document_api_base_url,
+        path=delete_path,
+        token=token,
+        request=delete_request,
+        timeout_seconds=args.document_api_timeout_seconds,
+    )
+    return {
+        "checkStatus": "PASS",
+        "mode": "NETWORK",
+        "networkChecked": True,
+        "documentId": args.document_api_smoke_document_id,
+        "index": index_result,
+        "delete": delete_result,
+    }
 
 
 def format_text_result(result: dict[str, Any]) -> str:

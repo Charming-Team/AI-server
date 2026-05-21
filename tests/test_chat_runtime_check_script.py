@@ -17,6 +17,10 @@ def _build_args(**overrides: Any) -> Namespace:
         "require_vector_search": False,
         "require_document_index": False,
         "include_vector_smoke": False,
+        "include_document_api_smoke": False,
+        "document_api_base_url": "http://fastapi.local",
+        "document_api_smoke_document_id": "smoke-document-api-contract",
+        "document_api_timeout_seconds": 10.0,
         "skip_rdb_privilege_check": False,
         "qdrant_min_points": 0,
         "json": False,
@@ -180,6 +184,99 @@ def test_check_chat_runtime_network_runs_vector_smoke(
     assert result["checkStatus"] == "PASS"
     assert result["steps"][-1]["name"] == "qdrantVectorSmoke"
     assert calls == ["smap_internal_documents"]
+
+
+def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(include_document_api_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert result["steps"][-1]["name"] == "documentApiSmoke"
+    assert result["steps"][-1]["result"] == {
+        "checkStatus": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "networkChecked": False,
+        "baseUrl": "http://fastapi.local",
+        "indexPath": "/api/v1/chat/internal/documents/index",
+        "deletePath": "/api/v1/chat/internal/documents/delete",
+        "documentId": "smoke-document-api-contract",
+        "tokenConfigured": True,
+    }
+
+
+def test_check_chat_runtime_document_api_smoke_requires_token() -> None:
+    settings = Settings(chat_answer_internal_token="answer-token")
+    args = _build_args(include_document_api_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "documentApiSmoke"
+    assert result["steps"][-1]["status"] == "FAIL"
+    assert result["steps"][-1]["error"]["code"] == "CHAT_SECURITY_003"
+
+
+def test_check_chat_runtime_network_runs_document_api_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(network=True, include_document_api_smoke=True)
+    calls: list[str] = []
+
+    async def fake_index_check(**kwargs):
+        calls.append(f"index:{kwargs['document'].document_id}")
+        return {
+            "checkStatus": "PASS",
+            "documentId": kwargs["document"].document_id,
+            "indexedCount": 0,
+            "skippedReason": "임베딩 기능이 비활성화되어 있습니다.",
+        }
+
+    async def fake_delete_check(**kwargs):
+        calls.append(f"delete:{kwargs['request'].document_id}")
+        return {
+            "checkStatus": "PASS",
+            "documentId": kwargs["request"].document_id,
+            "operationStatus": "completed",
+        }
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_document_index_api,
+        "check_document_index_api",
+        fake_index_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_document_delete_api,
+        "check_document_delete_api",
+        fake_delete_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "NETWORK"
+    assert result["steps"][-1]["name"] == "documentApiSmoke"
+    assert calls == [
+        "index:smoke-document-api-contract",
+        "delete:smoke-document-api-contract",
+    ]
 
 
 def test_check_chat_runtime_text_output_includes_step_status() -> None:
