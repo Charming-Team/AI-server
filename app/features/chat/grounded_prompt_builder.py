@@ -138,10 +138,30 @@ class GroundedPromptBuilder:
         return "\n".join(lines)
 
     def _format_data(self, data: dict) -> str:
-        return json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+        return json.dumps(
+            self._sanitize_data_for_prompt(data),
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
 
     def _safe_internal_url(self, url: str | None) -> str | None:
         return normalize_internal_url(url)
+
+    def _sanitize_data_for_prompt(self, value: object, key: str | None = None) -> object:
+        if isinstance(value, dict):
+            return {
+                item_key: self._sanitize_data_for_prompt(item_value, str(item_key))
+                for item_key, item_value in value.items()
+            }
+        if isinstance(value, list):
+            return [self._sanitize_data_for_prompt(item, key) for item in value]
+        if isinstance(value, str) and self._is_url_key(key):
+            return self._safe_internal_url(value)
+        return value
+
+    def _is_url_key(self, key: str | None) -> bool:
+        return key is not None and "url" in key.casefold()
 
     def _truncate(self, text: str, max_chars: int) -> str:
         if max_chars <= 0:

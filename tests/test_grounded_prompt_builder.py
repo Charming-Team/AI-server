@@ -140,6 +140,47 @@ def test_grounded_prompt_builder_sanitizes_source_urls_before_prompt() -> None:
     assert "URL: /reports/21?mode=read" in prompt.user_prompt
 
 
+def test_grounded_prompt_builder_sanitizes_data_urls_before_prompt() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="원천 데이터 URL도 내부 경로만 프롬프트에 남습니다.",
+                source="reports",
+                data={
+                    "reportUrl": "/reports/20?mode=read",
+                    "externalUrl": "https://evil.example/reports/20",
+                    "nested": {
+                        "detailUrl": " /lines/1?mode=read ",
+                        "scriptUrl": "javascript:alert(1)",
+                    },
+                    "relatedUrls": [
+                        "/materials/11?mode=read",
+                        "https://evil.example/materials/11",
+                    ],
+                },
+            )
+        ],
+    )
+
+    prompt = builder.build(
+        request,
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+    )
+
+    assert "https://evil.example" not in prompt.user_prompt
+    assert "javascript:alert" not in prompt.user_prompt
+    assert '"reportUrl": "/reports/20?mode=read"' in prompt.user_prompt
+    assert '"detailUrl": "/lines/1?mode=read"' in prompt.user_prompt
+    assert '"relatedUrls": ["/materials/11?mode=read", null]' in prompt.user_prompt
+
+
 def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
     builder = GroundedPromptBuilder(
         Settings(
