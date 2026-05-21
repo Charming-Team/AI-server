@@ -694,6 +694,9 @@ async def run_document_api_smoke(
     delete_request = check_document_delete_api.build_delete_request(
         argparse.Namespace(document_id=args.document_api_smoke_document_id)
     )
+    require_document_index = bool(args.require_document_index)
+    min_indexed_count = 1 if require_document_index else 0
+    allow_skipped = not require_document_index
 
     if not args.network:
         return {
@@ -705,6 +708,9 @@ async def run_document_api_smoke(
             "deletePath": delete_path,
             "documentId": args.document_api_smoke_document_id,
             "tokenConfigured": bool(token),
+            "minIndexedCount": min_indexed_count,
+            "allowSkipped": allow_skipped,
+            "requireDocumentIndex": require_document_index,
         }
 
     index_result = await check_document_index_api.check_document_index_api(
@@ -713,7 +719,8 @@ async def run_document_api_smoke(
         token=token,
         document=document,
         timeout_seconds=args.document_api_timeout_seconds,
-        allow_skipped=True,
+        min_indexed_count=min_indexed_count,
+        allow_skipped=allow_skipped,
     )
     delete_result = await check_document_delete_api.check_document_delete_api(
         base_url=args.document_api_base_url,

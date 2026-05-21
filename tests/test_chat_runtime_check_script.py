@@ -526,7 +526,32 @@ def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:
         "deletePath": "/api/v1/chat/internal/documents/delete",
         "documentId": "smoke-document-api-contract",
         "tokenConfigured": True,
+        "minIndexedCount": 0,
+        "allowSkipped": True,
+        "requireDocumentIndex": False,
     }
+
+
+def test_check_chat_runtime_document_api_smoke_requires_real_index_when_required() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(
+        include_document_api_smoke=True,
+        require_document_index=True,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "documentApiSmoke"
+    assert result["steps"][-1]["result"]["minIndexedCount"] == 1
+    assert result["steps"][-1]["result"]["allowSkipped"] is False
+    assert result["steps"][-1]["result"]["requireDocumentIndex"] is True
 
 
 def test_check_chat_runtime_document_api_smoke_requires_token() -> None:
@@ -596,6 +621,85 @@ def test_check_chat_runtime_network_runs_document_api_smoke(
         "index:smoke-document-api-contract",
         "delete:smoke-document-api-contract",
     ]
+
+
+def test_check_chat_runtime_network_requires_document_index_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(
+        network=True,
+        include_document_api_smoke=True,
+        require_document_index=True,
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_index_check(**kwargs):
+        captured["min_indexed_count"] = kwargs["min_indexed_count"]
+        captured["allow_skipped"] = kwargs["allow_skipped"]
+        return {
+            "checkStatus": "PASS",
+            "documentId": kwargs["document"].document_id,
+            "indexedCount": kwargs["min_indexed_count"],
+            "skippedReason": None,
+        }
+
+    async def fake_delete_check(**kwargs):
+        return {
+            "checkStatus": "PASS",
+            "documentId": kwargs["request"].document_id,
+            "operationStatus": "completed",
+        }
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_qdrant_collection_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "collectionName": settings_arg.qdrant_collection}
+
+    async def fake_qdrant_payload_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "pointCount": 0}
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_document_index_api,
+        "check_document_index_api",
+        fake_index_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_document_delete_api,
+        "check_document_delete_api",
+        fake_delete_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_collection_check",
+        fake_qdrant_collection_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_payload_check",
+        fake_qdrant_payload_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "documentApiSmoke"
+    assert captured == {
+        "min_indexed_count": 1,
+        "allow_skipped": False,
+    }
 
 
 def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
