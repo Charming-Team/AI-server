@@ -19,6 +19,7 @@ from scripts import (
     check_qdrant_collection,
     check_qdrant_document_payloads,
     check_qdrant_vector_search,
+    check_rag_chat_scenarios,
     check_rdb_chat_scenarios,
     check_rdb_evidence_views,
 )
@@ -41,6 +42,10 @@ STEP_ACTION_GUIDE = {
     "rdbChatScenarios": (
         "챗봇 답변 API, RDB Evidence, Role 기반 접근 제어 시나리오의 intent, "
         "securityStatus, securityCode 결과를 확인하세요."
+    ),
+    "ragChatScenarios": (
+        "RDB Evidence, Qdrant 문서 출처, Vector Search 사용 여부가 함께 충족되는지 "
+        "확인하세요."
     ),
     "qdrantCollection": (
         "Qdrant URL, collection 이름, embedding dimension 설정이 일치하는지 "
@@ -153,6 +158,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--include-rag-chat-scenarios",
+        action="store_true",
+        help=(
+            "RDB Evidence와 Qdrant 문서 출처가 함께 필요한 RAG 챗봇 질문 "
+            "시나리오를 실행합니다. 기본으로 core 시나리오 그룹을 점검합니다."
+        ),
+    )
+    parser.add_argument(
         "--rdb-chat-scenario-group",
         action="append",
         choices=sorted(check_rdb_chat_scenarios.RDB_CHAT_SCENARIO_GROUPS),
@@ -169,6 +182,24 @@ def build_parser() -> argparse.ArgumentParser:
             for scenario in check_rdb_chat_scenarios.ALL_RDB_CHAT_SCENARIOS
         ],
         help="실행할 RDB 챗봇 시나리오 ID입니다. 여러 번 지정할 수 있습니다.",
+    )
+    parser.add_argument(
+        "--rag-chat-scenario-group",
+        action="append",
+        choices=sorted(check_rag_chat_scenarios.RAG_CHAT_SCENARIO_GROUPS),
+        help=(
+            "RAG 챗봇 시나리오 그룹입니다. core, access 중 선택하며 "
+            "여러 번 지정할 수 있습니다. 생략하면 core를 실행합니다."
+        ),
+    )
+    parser.add_argument(
+        "--rag-chat-scenario",
+        action="append",
+        choices=[
+            scenario.scenario_id
+            for scenario in check_rag_chat_scenarios.ALL_RAG_CHAT_SCENARIOS
+        ],
+        help="실행할 RAG 챗봇 시나리오 ID입니다. 여러 번 지정할 수 있습니다.",
     )
     parser.add_argument(
         "--recommendation-api-base-url",
@@ -288,7 +319,7 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
     if preset == "none":
         return args
 
-    if preset in {"rdb", "full"}:
+    if preset in {"rdb", "rag", "full"}:
         args.require_rdb_evidence = True
 
     if preset in {"qdrant", "rag", "full"}:
@@ -298,6 +329,7 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.require_vector_search = True
         args.require_document_index = True
         args.include_document_api_smoke = True
+        args.include_rag_chat_scenarios = True
         args.answer_api_min_document_source_count = max(
             args.answer_api_min_document_source_count,
             1,
@@ -358,6 +390,14 @@ async def check_chat_runtime(
             await run_step(
                 "rdbChatScenarios",
                 lambda: run_rdb_chat_scenarios(settings, args),
+            )
+        )
+
+    if args.include_rag_chat_scenarios:
+        steps.append(
+            await run_step(
+                "ragChatScenarios",
+                lambda: run_rag_chat_scenarios(settings, args),
             )
         )
 
@@ -598,6 +638,56 @@ async def run_rdb_chat_scenarios(
         json=False,
     )
     return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(scenario_args)
+
+
+async def run_rag_chat_scenarios(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    token = check_chat_answer.resolve_answer_token(
+        argparse.Namespace(token=None),
+        settings,
+    )
+    path = f"{settings.api_v1_prefix}/chat/answer"
+    scenario_groups = args.rag_chat_scenario_group or ["core"]
+    scenarios = check_rag_chat_scenarios.select_scenarios(
+        args.rag_chat_scenario,
+        scenario_groups,
+    )
+
+    if not args.network:
+        return {
+            "checkStatus": "VALIDATED",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "baseUrl": args.answer_api_base_url,
+            "path": path,
+            "tokenConfigured": bool(token),
+            "scenarioGroups": scenario_groups,
+            "scenarioCount": len(scenarios),
+            "scenarioIds": [scenario.scenario_id for scenario in scenarios],
+        }
+
+    scenario_args = argparse.Namespace(
+        base_url=args.answer_api_base_url,
+        path=path,
+        token=token,
+        env_file=None,
+        timeout_seconds=args.answer_api_timeout_seconds,
+        role=args.answer_api_role,
+        user_id=args.answer_api_user_id,
+        company_name="S-MAP",
+        session_id=1,
+        message_id=1,
+        requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
+        scenario=args.rag_chat_scenario,
+        scenario_group=scenario_groups,
+        min_evidence_count=None,
+        min_rdb_evidence_count=None,
+        min_document_source_count=None,
+        json=False,
+    )
+    return await check_rag_chat_scenarios.check_rag_chat_scenarios(scenario_args)
 
 
 async def run_qdrant_collection_check(

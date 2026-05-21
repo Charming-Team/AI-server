@@ -23,8 +23,11 @@ def _build_args(**overrides: Any) -> Namespace:
         "include_recommendation_api_smoke": False,
         "include_answer_output_policy_smoke": False,
         "include_rdb_chat_scenarios": False,
+        "include_rag_chat_scenarios": False,
         "rdb_chat_scenario_group": None,
         "rdb_chat_scenario": None,
+        "rag_chat_scenario_group": None,
+        "rag_chat_scenario": None,
         "answer_api_base_url": "http://fastapi.local",
         "answer_api_question": "자재 부족 현황 알려줘",
         "answer_api_role": "MANUFACTURING_MANAGER",
@@ -92,6 +95,7 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.include_vector_smoke is True
     assert args.include_answer_output_policy_smoke is True
     assert args.include_rdb_chat_scenarios is True
+    assert args.include_rag_chat_scenarios is True
     assert args.answer_api_min_evidence_count == 1
     assert args.answer_api_min_document_source_count == 1
 
@@ -369,6 +373,44 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     assert result["steps"][4]["result"]["requireRdbEvidence"] is True
 
 
+def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(preset="rag")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert result["requiredComponents"] == [
+        "rdbEvidence",
+        "qdrantSearch",
+        "ragSearchPipeline",
+        "documentIndexPipeline",
+    ]
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "answerOutputPolicySmoke",
+        "rdbEvidenceViews",
+        "ragChatScenarios",
+        "qdrantCollection",
+        "qdrantDocumentPayloads",
+        "qdrantVectorSmoke",
+        "documentApiSmoke",
+        "answerApiSmoke",
+        "recommendationApiSmoke",
+    ]
+    assert result["steps"][3]["result"]["scenarioGroups"] == ["core"]
+    assert result["steps"][3]["result"]["scenarioCount"] == 3
+    assert result["steps"][8]["result"]["requireRdbEvidence"] is True
+    assert result["steps"][8]["result"]["requireVectorSearch"] is True
+
+
 def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
     settings = _base_ready_settings(
         rdb_evidence_enabled=True,
@@ -388,6 +430,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "answerOutputPolicySmoke",
         "rdbEvidenceViews",
         "rdbChatScenarios",
+        "ragChatScenarios",
         "qdrantCollection",
         "qdrantDocumentPayloads",
         "qdrantVectorSmoke",
@@ -402,8 +445,8 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "documentIndexPipeline",
     ]
     assert result["summary"] == {
-        "totalStepCount": 10,
-        "passedStepCount": 10,
+        "totalStepCount": 11,
+        "passedStepCount": 11,
         "failedStepCount": 0,
         "failedSteps": [],
         "nextActions": [],
