@@ -9,6 +9,7 @@ from app.features.chat.schemas import (
     EvidenceItem,
     EvidenceResult,
 )
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 @dataclass(frozen=True)
@@ -89,8 +90,8 @@ class GroundedPromptBuilder:
             f"   요약: {self._truncate(item.summary, self.max_summary_chars)}",
             f"   출처: {item.source}",
         ]
-        if item.url:
-            lines.append(f"   URL: {item.url}")
+        if safe_url := self._safe_internal_url(item.url):
+            lines.append(f"   URL: {safe_url}")
         if item.reference_id is not None:
             lines.append(f"   참조 ID: {item.reference_id}")
         if item.data:
@@ -126,8 +127,8 @@ class GroundedPromptBuilder:
             lines.append(f"   근거 원천: {source.source_origin}")
         if source.relevance_score is not None:
             lines.append(f"   관련도 점수: {source.relevance_score:.4f}")
-        if source.url:
-            lines.append(f"   URL: {source.url}")
+        if safe_url := self._safe_internal_url(source.url):
+            lines.append(f"   URL: {safe_url}")
         if source.reference_id is not None:
             lines.append(f"   참조 ID: {source.reference_id}")
         if source.source:
@@ -138,6 +139,9 @@ class GroundedPromptBuilder:
 
     def _format_data(self, data: dict) -> str:
         return json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+
+    def _safe_internal_url(self, url: str | None) -> str | None:
+        return normalize_internal_url(url)
 
     def _truncate(self, text: str, max_chars: int) -> str:
         if max_chars <= 0:

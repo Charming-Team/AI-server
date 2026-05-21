@@ -92,6 +92,54 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
     assert "기준 시각: 2026-05-12T11:00:00+09:00" in prompt.user_prompt
 
 
+def test_grounded_prompt_builder_sanitizes_source_urls_before_prompt() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="외부 URL 보고서 근거",
+                summary="URL은 프롬프트에 그대로 들어가면 안 됩니다.",
+                url="https://evil.example/reports/20",
+                source="reports",
+            ),
+            EvidenceItem(
+                type="REPORT",
+                title="내부 URL 보고서 근거",
+                summary="내부 상대 경로만 프롬프트에 남습니다.",
+                url=" /reports/20?mode=read ",
+                source="reports",
+            ),
+        ],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="스크립트 URL 문서 근거",
+                summary="허용되지 않은 URL은 제외됩니다.",
+                url="javascript:alert(1)",
+            ),
+            ChatSource(
+                sourceType="REPORT",
+                title="내부 URL 문서 근거",
+                summary="허용된 URL만 포함됩니다.",
+                url="/reports/21?mode=read",
+            ),
+        ]
+    )
+
+    prompt = builder.build(request, evidence_result, document_result)
+
+    assert "https://evil.example" not in prompt.user_prompt
+    assert "javascript:alert" not in prompt.user_prompt
+    assert "URL: /reports/20?mode=read" in prompt.user_prompt
+    assert "URL: /reports/21?mode=read" in prompt.user_prompt
+
+
 def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
     builder = GroundedPromptBuilder(
         Settings(
