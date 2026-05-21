@@ -27,6 +27,9 @@ class RdbChatScenario:
     scenario_id: str
     intent: ChatIntent
     question: str
+    role: str | None = None
+    expected_security_status: str = "PASSED"
+    require_rdb_evidence: bool = True
     min_evidence_count: int = 1
 
 
@@ -58,6 +61,74 @@ DEFAULT_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     ),
 )
 
+ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
+    RdbChatScenario(
+        scenario_id="operator-report-blocked",
+        intent=ChatIntent.REPORT_LOOKUP,
+        question="이번 달 월간 리포트 요약해줘",
+        role="OPERATOR",
+        expected_security_status="BLOCKED_UNAUTHORIZED",
+        require_rdb_evidence=False,
+        min_evidence_count=0,
+    ),
+    RdbChatScenario(
+        scenario_id="operator-urgent-order-blocked",
+        intent=ChatIntent.URGENT_ORDER_IMPACT,
+        question="긴급 주문이 생산계획에 미치는 영향 알려줘",
+        role="OPERATOR",
+        expected_security_status="BLOCKED_UNAUTHORIZED",
+        require_rdb_evidence=False,
+        min_evidence_count=0,
+    ),
+    RdbChatScenario(
+        scenario_id="operator-financial-blocked",
+        intent=ChatIntent.DELIVERY_RISK,
+        question="납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
+        role="OPERATOR",
+        expected_security_status="BLOCKED_UNAUTHORIZED",
+        require_rdb_evidence=False,
+        min_evidence_count=0,
+    ),
+    RdbChatScenario(
+        scenario_id="admin-chat-blocked",
+        intent=ChatIntent.DELIVERY_RISK,
+        question="납기 위험이 있는 주문 알려줘",
+        role="ADMIN",
+        expected_security_status="BLOCKED_UNAUTHORIZED",
+        require_rdb_evidence=False,
+        min_evidence_count=0,
+    ),
+)
+
+FILTERED_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
+    RdbChatScenario(
+        scenario_id="material-shortage-this-week-target",
+        intent=ChatIntent.MATERIAL_SHORTAGE,
+        question="이번 주 RM-AL-001 자재 부족 현황 알려줘",
+    ),
+    RdbChatScenario(
+        scenario_id="line-bottleneck-today-target",
+        intent=ChatIntent.LINE_BOTTLENECK,
+        question="오늘 LINE-A01 라인 병목 현황 알려줘",
+    ),
+    RdbChatScenario(
+        scenario_id="production-plan-date-range",
+        intent=ChatIntent.PRODUCTION_PLAN,
+        question="2026-05-12부터 2026-05-18까지 생산계획 현황 알려줘",
+    ),
+)
+
+RDB_CHAT_SCENARIO_GROUPS = {
+    "core": DEFAULT_RDB_CHAT_SCENARIOS,
+    "access": ACCESS_CONTROL_RDB_CHAT_SCENARIOS,
+    "filtered": FILTERED_RDB_CHAT_SCENARIOS,
+}
+ALL_RDB_CHAT_SCENARIOS = tuple(
+    scenario
+    for group in RDB_CHAT_SCENARIO_GROUPS.values()
+    for scenario in group
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -87,8 +158,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scenario",
         action="append",
-        choices=[scenario.scenario_id for scenario in DEFAULT_RDB_CHAT_SCENARIOS],
+        choices=[scenario.scenario_id for scenario in ALL_RDB_CHAT_SCENARIOS],
         help="특정 시나리오만 실행합니다. 여러 번 지정할 수 있습니다.",
+    )
+    parser.add_argument(
+        "--scenario-group",
+        action="append",
+        choices=sorted(RDB_CHAT_SCENARIO_GROUPS),
+        help=(
+            "실행할 시나리오 묶음입니다. core, access, filtered 중 선택하며 "
+            "여러 번 지정할 수 있습니다. 생략하면 core만 실행합니다."
+        ),
     )
     parser.add_argument(
         "--min-evidence-count",
@@ -109,14 +189,19 @@ def build_settings(args: argparse.Namespace) -> Settings:
     return Settings()
 
 
-def select_scenarios(scenario_ids: list[str] | None) -> tuple[RdbChatScenario, ...]:
+def select_scenarios(
+    scenario_ids: list[str] | None,
+    scenario_groups: list[str] | None = None,
+) -> tuple[RdbChatScenario, ...]:
+    selected_scenarios = _select_scenario_groups(scenario_groups)
     if not scenario_ids:
-        return DEFAULT_RDB_CHAT_SCENARIOS
+        return selected_scenarios
 
     requested_ids = set(scenario_ids)
+    search_space = selected_scenarios if scenario_groups else ALL_RDB_CHAT_SCENARIOS
     return tuple(
         scenario
-        for scenario in DEFAULT_RDB_CHAT_SCENARIOS
+        for scenario in search_space
         if scenario.scenario_id in requested_ids
     )
 
@@ -139,11 +224,15 @@ async def check_rdb_chat_scenarios(
     settings = build_settings(args)
     token = resolve_answer_token(args, settings)
     path = args.path or f"{settings.api_v1_prefix}/chat/answer"
-    scenarios = select_scenarios(args.scenario)
+    scenarios = select_scenarios(args.scenario, args.scenario_group)
     scenario_results = []
 
     for index, scenario in enumerate(scenarios):
-        min_evidence_count = args.min_evidence_count or scenario.min_evidence_count
+        min_evidence_count = (
+            args.min_evidence_count
+            if args.min_evidence_count is not None
+            else scenario.min_evidence_count
+        )
         result = await check_chat_answer.check_chat_answer(
             base_url=args.base_url,
             path=path,
@@ -151,7 +240,7 @@ async def check_rdb_chat_scenarios(
             request=build_request(args, scenario, index),
             timeout_seconds=args.timeout_seconds,
             min_evidence_count=min_evidence_count,
-            require_rdb_evidence=True,
+            require_rdb_evidence=scenario.require_rdb_evidence,
             http_client=http_client,
         )
         if result["intent"] != scenario.intent.value:
@@ -164,12 +253,26 @@ async def check_rdb_chat_scenarios(
                     f"expected={scenario.intent.value}, actual={result['intent']}"
                 ),
             )
+        if result["securityStatus"] != scenario.expected_security_status:
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message=(
+                    "챗봇 시나리오 보안 상태가 예상과 다릅니다. "
+                    f"scenario={scenario.scenario_id}, "
+                    f"expected={scenario.expected_security_status}, "
+                    f"actual={result['securityStatus']}"
+                ),
+            )
 
         scenario_results.append(
             {
                 "scenarioId": scenario.scenario_id,
+                "role": scenario.role or args.role,
                 "question": scenario.question,
                 "expectedIntent": scenario.intent.value,
+                "expectedSecurityStatus": scenario.expected_security_status,
+                "requireRdbEvidence": scenario.require_rdb_evidence,
                 **result,
             }
         )
@@ -191,7 +294,7 @@ def build_request(
         messageId=args.message_id + index,
         user=ChatUserContext(
             userId=args.user_id,
-            role=args.role,
+            role=scenario.role or args.role,
             companyName=args.company_name,
             status="ACTIVE",
         ),
@@ -209,13 +312,30 @@ def format_text_result(result: dict[str, Any]) -> str:
         lines.append(
             "scenario="
             f"{scenario['scenarioId']} "
+            f"role={scenario['role']} "
             f"intent={scenario['intent']} "
             f"securityStatus={scenario['securityStatus']} "
+            f"requireRdbEvidence={scenario['requireRdbEvidence']} "
             f"rdbEvidenceCount={scenario['rdbEvidenceCount']} "
             f"sourceCount={scenario['sourceCount']} "
             f"urlCount={scenario['urlCount']}"
         )
     return "\n".join(lines)
+
+
+def _select_scenario_groups(
+    scenario_groups: list[str] | None,
+) -> tuple[RdbChatScenario, ...]:
+    requested_groups = scenario_groups or ["core"]
+    scenarios: list[RdbChatScenario] = []
+    seen_scenario_ids: set[str] = set()
+    for group in requested_groups:
+        for scenario in RDB_CHAT_SCENARIO_GROUPS[group]:
+            if scenario.scenario_id in seen_scenario_ids:
+                continue
+            seen_scenario_ids.add(scenario.scenario_id)
+            scenarios.append(scenario)
+    return tuple(scenarios)
 
 
 def format_json_result(result: dict[str, Any]) -> str:
