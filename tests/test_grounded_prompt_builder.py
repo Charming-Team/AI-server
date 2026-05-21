@@ -13,13 +13,13 @@ from app.features.chat.schemas import (
 )
 
 
-def _build_request() -> ChatAnswerRequest:
+def _build_request(role: str = "EXECUTIVE") -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
         messageId=24,
         user=ChatUserContext(
             userId=1,
-            role="EXECUTIVE",
+            role=role,
             companyName="S-MAP",
             status="ACTIVE",
         ),
@@ -43,8 +43,29 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "제공된 내부 근거만 사용" in prompt.system_prompt
     assert "웹 검색" in prompt.system_prompt
     assert "일반 상식" in prompt.system_prompt
+    assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
+    assert "역할별 응답 제한:" in prompt.user_prompt
     assert "RDB 근거:\n없음" in prompt.user_prompt
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request(role="OPERATOR")
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(sources=[])
+
+    prompt = builder.build(request, evidence_result, document_result)
+
+    assert "사용자 역할:\nOPERATOR" in prompt.user_prompt
+    assert "OPERATOR에게는 금액, 계약, 패널티, 비용, 매출, 수익" in (
+        prompt.user_prompt
+    )
+    assert "비금액성 보고서 근거만 요약" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None:

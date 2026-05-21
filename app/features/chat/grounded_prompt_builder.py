@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.features.chat.access_control import OPERATOR_ROLE
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatSource,
@@ -70,8 +71,10 @@ class GroundedPromptBuilder:
         return "\n\n".join(
             [
                 f"사용자 질문:\n{request.question}",
+                f"사용자 역할:\n{request.user.role}",
                 f"질문 의도:\n{evidence_result.intent}",
                 f"데이터 기준 시각:\n{evidence_result.basis_time.isoformat()}",
+                f"역할별 응답 제한:\n{self._format_role_constraints(request.user.role)}",
                 f"RDB 근거:\n{self._format_evidence_items(evidence_result.items)}",
                 f"문서 검색 근거:\n{self._format_document_sources(document_result.sources)}",
                 "응답 규칙:\n"
@@ -81,6 +84,32 @@ class GroundedPromptBuilder:
                 "- 근거가 부족한 항목은 확인 필요라고 명시한다.",
             ]
         )
+
+    def _format_role_constraints(self, role: str) -> str:
+        normalized_role = role.strip().upper()
+        lines = [
+            "- 요청자의 역할 권한 범위 안에서만 답변한다.",
+            (
+                "- 근거에 포함되지 않거나 권한 밖으로 판단되는 내용은 "
+                "확인 필요 또는 답변 불가로 처리한다."
+            ),
+        ]
+        if normalized_role == OPERATOR_ROLE:
+            lines.extend(
+                [
+                    (
+                        "- OPERATOR에게는 금액, 계약, 패널티, 비용, 매출, 수익 등 "
+                        "경영/재무성 정보를 답변하지 않는다."
+                    ),
+                    (
+                        "- OPERATOR에게는 조회 가능한 생산계획, 자재현황, "
+                        "라인/설비 상태, 비금액성 보고서 근거만 요약한다."
+                    ),
+                ]
+            )
+        else:
+            lines.append("- 제공된 근거에 포함된 업무 범위 내에서만 요약한다.")
+        return "\n".join(lines)
 
     def _format_evidence_items(self, items: list[EvidenceItem]) -> str:
         if not items:
