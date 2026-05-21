@@ -75,10 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--preset",
-        choices=("none", "rdb", "rag", "full"),
+        choices=("none", "rdb", "qdrant", "rag", "full"),
         default="none",
         help=(
             "자주 쓰는 점검 옵션 묶음. rdb는 RDB Evidence와 답변/추천 API, "
+            "qdrant는 Qdrant 컬렉션/페이로드/벡터 smoke, "
             "rag는 Qdrant/문서/답변/추천 API, full은 전체 경로를 점검합니다."
         ),
     )
@@ -290,19 +291,22 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
     if preset in {"rdb", "full"}:
         args.require_rdb_evidence = True
 
+    if preset in {"qdrant", "rag", "full"}:
+        args.include_vector_smoke = True
+
     if preset in {"rag", "full"}:
         args.require_vector_search = True
         args.require_document_index = True
-        args.include_vector_smoke = True
         args.include_document_api_smoke = True
         args.answer_api_min_document_source_count = max(
             args.answer_api_min_document_source_count,
             1,
         )
 
-    args.include_answer_api_smoke = True
-    args.include_recommendation_api_smoke = True
-    args.include_answer_output_policy_smoke = True
+    if preset in {"rdb", "rag", "full"}:
+        args.include_answer_api_smoke = True
+        args.include_recommendation_api_smoke = True
+        args.include_answer_output_policy_smoke = True
     if preset in {"rdb", "full"}:
         args.include_rdb_chat_scenarios = True
     args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
@@ -328,7 +332,7 @@ async def check_chat_runtime(
         await run_step(
             "readiness",
             lambda: readiness_result,
-            fail_when=lambda result: result["status"] != "ready",
+            fail_when=lambda result: should_fail_readiness(result, args),
         )
     ]
 
@@ -453,6 +457,8 @@ async def run_step(
 
 
 def should_check_rdb(settings: Settings, args: argparse.Namespace) -> bool:
+    if getattr(args, "preset", "none") == "qdrant" and not args.require_rdb_evidence:
+        return False
     return bool(settings.rdb_evidence_enabled or args.require_rdb_evidence)
 
 
@@ -464,6 +470,12 @@ def should_check_qdrant(settings: Settings, args: argparse.Namespace) -> bool:
         or args.require_document_index
         or args.include_vector_smoke
     )
+
+
+def should_fail_readiness(result: dict[str, Any], args: argparse.Namespace) -> bool:
+    if getattr(args, "preset", "none") == "qdrant":
+        return bool(result.get("requirementFailures"))
+    return result["status"] != "ready"
 
 
 def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:

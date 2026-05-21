@@ -96,6 +96,71 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.answer_api_min_document_source_count == 1
 
 
+def test_check_chat_runtime_qdrant_preset_runs_only_qdrant_checks() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(preset="qdrant")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert result["requiredComponents"] == []
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "qdrantCollection",
+        "qdrantDocumentPayloads",
+        "qdrantVectorSmoke",
+    ]
+    assert result["steps"][0]["status"] == "PASS"
+    assert result["steps"][0]["result"]["status"] in {"ready", "not_ready"}
+    assert result["steps"][1]["result"]["checkStatus"] == "VALIDATED"
+    assert result["steps"][2]["result"]["checkStatus"] == "VALIDATED"
+    assert result["steps"][3]["result"]["checkStatus"] == "VALIDATED"
+    assert result["steps"][3]["result"]["documentId"] == "smoke-company-line-bottleneck"
+
+
+def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(qdrant_collection="smap_internal_documents")
+    args = _build_args(preset="qdrant", network=True)
+    calls: list[str] = []
+
+    async def fake_qdrant_collection_check(settings_arg, args_arg):
+        calls.append("collection")
+        return {"checkStatus": "PASS", "collectionName": settings_arg.qdrant_collection}
+
+    async def fake_qdrant_payload_check(settings_arg, args_arg):
+        calls.append("payload")
+        return {"checkStatus": "PASS", "pointCount": 0}
+
+    async def fake_vector_smoke(settings_arg, args_arg):
+        calls.append("vector")
+        return {"checkStatus": "PASS", "matchedSourceCount": 1}
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_collection_check",
+        fake_qdrant_collection_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_payload_check",
+        fake_qdrant_payload_check,
+    )
+    monkeypatch.setattr(check_chat_runtime, "run_qdrant_vector_smoke", fake_vector_smoke)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "NETWORK"
+    assert calls == ["collection", "payload", "vector"]
+
+
 def test_check_chat_runtime_validate_only_passes_with_rdb_evidence() -> None:
     settings = _base_ready_settings(
         rdb_evidence_enabled=True,
