@@ -29,6 +29,8 @@ def _build_args(**overrides):
         "require_rdb_evidence": False,
         "min_document_source_count": 0,
         "require_vector_search": False,
+        "expected_security_status": None,
+        "expected_security_code": None,
         "json": False,
     }
     values.update(overrides)
@@ -41,6 +43,8 @@ def _answer_response(
     document_source_count: int = 0,
     used_rdb_evidence: bool | None = None,
     used_vector_search: bool = False,
+    security_status: str = "PASSED",
+    security_code: str | None = None,
 ) -> dict:
     resolved_rdb_evidence_count = (
         evidence_count if rdb_evidence_count is None else rdb_evidence_count
@@ -103,8 +107,8 @@ def _answer_response(
         "urls": urls,
         "sources": sources,
         "securityResult": {
-            "status": "PASSED",
-            "code": None,
+            "status": security_status,
+            "code": security_code,
             "reason": "보안 필터를 통과했고 내부 근거가 확인되었습니다.",
         },
         "modelResult": {
@@ -192,7 +196,9 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "url": "http://fastapi.local/api/v1/chat/answer",
         "intent": ChatIntent.MATERIAL_SHORTAGE.value,
         "securityStatus": "PASSED",
+        "expectedSecurityStatus": None,
         "securityCode": None,
+        "expectedSecurityCode": None,
         "evidenceCount": 1,
         "minEvidenceCount": 1,
         "requireRdbEvidence": True,
@@ -264,6 +270,129 @@ def test_check_chat_answer_script_fails_when_rdb_evidence_is_required() -> None:
 
     assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
     assert "RDB Evidence가 사용되지 않았습니다" in exc_info.value.message
+
+
+def test_check_chat_answer_script_validates_expected_security_result() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=0,
+                used_rdb_evidence=False,
+                security_status="BLOCKED_UNAUTHORIZED",
+                security_code="CHAT_SECURITY_004",
+            ),
+            request=request,
+        )
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(
+                    _build_args(
+                        role="OPERATOR",
+                        question="납기 지연 시 예상 패널티를 알려줘",
+                    )
+                ),
+                timeout_seconds=10.0,
+                expected_security_status="BLOCKED_UNAUTHORIZED",
+                expected_security_code="CHAT_SECURITY_004",
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["securityStatus"] == "BLOCKED_UNAUTHORIZED"
+    assert result["expectedSecurityStatus"] == "BLOCKED_UNAUTHORIZED"
+    assert result["securityCode"] == "CHAT_SECURITY_004"
+    assert result["expectedSecurityCode"] == "CHAT_SECURITY_004"
+
+
+def test_check_chat_answer_script_validates_empty_security_code() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_answer_response(), request=request)
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_security_status="PASSED",
+                expected_security_code="NONE",
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["securityStatus"] == "PASSED"
+    assert result["securityCode"] is None
+    assert result["expectedSecurityCode"] == "NONE"
+
+
+def test_check_chat_answer_script_fails_when_security_status_is_unexpected() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_answer_response(), request=request)
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_security_status="BLOCKED_UNAUTHORIZED",
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_SECURITY_001"
+    assert "expected=BLOCKED_UNAUTHORIZED, actual=PASSED" in exc_info.value.message
+
+
+def test_check_chat_answer_script_fails_when_security_code_is_unexpected() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=0,
+                used_rdb_evidence=False,
+                security_status="BLOCKED_UNAUTHORIZED",
+                security_code="CHAT_SECURITY_004",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_security_status="BLOCKED_UNAUTHORIZED",
+                expected_security_code="CHAT_SECURITY_001",
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_SECURITY_001"
+    assert "expected=CHAT_SECURITY_001, actual=CHAT_SECURITY_004" in exc_info.value.message
 
 
 def test_check_chat_answer_script_passes_when_vector_search_is_required() -> None:
@@ -377,7 +506,9 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "url": "http://fastapi.local/api/v1/chat/answer",
             "intent": "MATERIAL_SHORTAGE",
             "securityStatus": "PASSED",
+            "expectedSecurityStatus": None,
             "securityCode": None,
+            "expectedSecurityCode": None,
             "evidenceCount": 1,
             "minEvidenceCount": 1,
             "requireRdbEvidence": True,

@@ -12,6 +12,7 @@ from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatAnswerResponse,
     ChatErrorCode,
+    SecurityStatus,
 )
 from scripts import chat_check_common
 
@@ -56,6 +57,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-vector-search",
         action="store_true",
         help="Qdrant Vector Search가 실제로 수행됐는지 검증합니다.",
+    )
+    parser.add_argument(
+        "--expected-security-status",
+        choices=[status.value for status in SecurityStatus],
+        help="기대하는 응답 보안 상태. 예: PASSED, BLOCKED_UNAUTHORIZED",
+    )
+    parser.add_argument(
+        "--expected-security-code",
+        choices=[code.value for code in ChatErrorCode] + ["NONE"],
+        help="기대하는 응답 보안 에러 코드. 코드가 없어야 하면 NONE을 사용합니다.",
     )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
@@ -102,6 +113,8 @@ async def check_chat_answer(
     require_rdb_evidence: bool = False,
     min_document_source_count: int = 0,
     require_vector_search: bool = False,
+    expected_security_status: str | None = None,
+    expected_security_code: str | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     url = build_answer_url(base_url, path)
@@ -113,6 +126,36 @@ async def check_chat_answer(
         http_client=http_client,
     )
     answer = ChatAnswerResponse.model_validate(response.json())
+    security_status = answer.security_result.status.value
+    security_code = (
+        answer.security_result.code.value if answer.security_result.code else None
+    )
+    if expected_security_status and security_status != expected_security_status:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_SECURITY_001,
+            message=(
+                "FastAPI 챗봇 응답 보안 상태가 기대값과 다릅니다. "
+                f"expected={expected_security_status}, actual={security_status}"
+            ),
+        )
+
+    expected_security_code_value = _resolve_expected_security_code(
+        expected_security_code
+    )
+    if (
+        expected_security_code is not None
+        and security_code != expected_security_code_value
+    ):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_SECURITY_001,
+            message=(
+                "FastAPI 챗봇 응답 보안 코드가 기대값과 다릅니다. "
+                f"expected={expected_security_code_value}, actual={security_code}"
+            ),
+        )
+
     evidence_count = answer.model_result.evidence_count
     if evidence_count < min_evidence_count:
         raise ChatServiceError(
@@ -153,10 +196,10 @@ async def check_chat_answer(
         "checkStatus": "PASS",
         "url": url,
         "intent": answer.intent.value,
-        "securityStatus": answer.security_result.status.value,
-        "securityCode": (
-            answer.security_result.code.value if answer.security_result.code else None
-        ),
+        "securityStatus": security_status,
+        "expectedSecurityStatus": expected_security_status,
+        "securityCode": security_code,
+        "expectedSecurityCode": expected_security_code,
         "evidenceCount": evidence_count,
         "minEvidenceCount": min_evidence_count,
         "requireRdbEvidence": require_rdb_evidence,
@@ -171,6 +214,12 @@ async def check_chat_answer(
         "sourceCount": len(answer.sources),
         "urlCount": len(answer.urls),
     }
+
+
+def _resolve_expected_security_code(expected_security_code: str | None) -> str | None:
+    if expected_security_code == "NONE":
+        return None
+    return expected_security_code
 
 
 async def _post_chat_answer(
@@ -218,7 +267,9 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"url={result['url']}",
         f"intent={result['intent']}",
         f"securityStatus={result['securityStatus']}",
+        f"expectedSecurityStatus={result['expectedSecurityStatus']}",
         f"securityCode={result['securityCode']}",
+        f"expectedSecurityCode={result['expectedSecurityCode']}",
         f"evidenceCount={result['evidenceCount']}",
         f"minEvidenceCount={result['minEvidenceCount']}",
         f"requireRdbEvidence={result['requireRdbEvidence']}",
@@ -265,6 +316,8 @@ def main(
                 require_rdb_evidence=args.require_rdb_evidence,
                 min_document_source_count=args.min_document_source_count,
                 require_vector_search=args.require_vector_search,
+                expected_security_status=args.expected_security_status,
+                expected_security_code=args.expected_security_code,
             )
         )
     except ChatServiceError as exc:

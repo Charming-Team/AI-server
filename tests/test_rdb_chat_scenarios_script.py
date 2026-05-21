@@ -148,6 +148,7 @@ def test_select_scenarios_supports_scenario_groups() -> None:
         "INSUFFICIENT_EVIDENCE",
         "PASSED",
     )
+    assert scenarios[0].expected_security_codes == ("CHAT_EVIDENCE_001", None)
 
 
 def test_select_scenarios_finds_explicit_scenario_without_group() -> None:
@@ -198,6 +199,14 @@ def test_check_rdb_chat_scenarios_calls_fastapi_for_each_scenario() -> None:
     }
     assert all(
         scenario["expectedSecurityStatuses"] == ["PASSED"]
+        for scenario in result["scenarios"]
+    )
+    assert all(
+        scenario["expectedSecurityCodes"] == [None]
+        for scenario in result["scenarios"]
+    )
+    assert all(
+        scenario["expectedSecurityResults"] == [{"status": "PASSED", "code": None}]
         for scenario in result["scenarios"]
     )
 
@@ -297,9 +306,47 @@ def test_check_rdb_chat_scenarios_fails_when_security_status_is_different() -> N
     with pytest.raises(ChatServiceError) as exc_info:
         anyio.run(run)
 
-    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert exc_info.value.code.value == "CHAT_SECURITY_001"
     assert "expected=BLOCKED_UNAUTHORIZED" in exc_info.value.message
     assert "actual=PASSED" in exc_info.value.message
+
+
+def test_check_rdb_chat_scenarios_fails_when_security_code_is_different() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                **_answer_response(
+                    ChatIntent.DELIVERY_RISK,
+                    evidence_count=0,
+                    security_status="BLOCKED_UNAUTHORIZED",
+                ),
+                "securityResult": {
+                    "status": "BLOCKED_UNAUTHORIZED",
+                    "code": "CHAT_SECURITY_001",
+                    "reason": "다른 보안 코드입니다.",
+                },
+            },
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
+                _build_args(
+                    scenario_group=["access"],
+                    scenario=["operator-financial-blocked"],
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_SECURITY_001"
+    assert "expected=CHAT_SECURITY_004" in exc_info.value.message
+    assert "actual=CHAT_SECURITY_001" in exc_info.value.message
 
 
 def test_check_rdb_chat_scenarios_formats_text_result() -> None:
@@ -312,7 +359,10 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
                 "role": "MANUFACTURING_MANAGER",
                 "intent": "MATERIAL_SHORTAGE",
                 "securityStatus": "PASSED",
+                "securityCode": None,
                 "expectedSecurityStatuses": ["PASSED"],
+                "expectedSecurityCodes": [None],
+                "expectedSecurityResults": [{"status": "PASSED", "code": None}],
                 "requireRdbEvidence": True,
                 "rdbEvidenceCount": 3,
                 "sourceCount": 3,
@@ -327,6 +377,7 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
     assert "scenarioCount=1" in output
     assert "scenario=material-shortage" in output
     assert "role=MANUFACTURING_MANAGER" in output
+    assert "securityCode=None" in output
     assert "requireRdbEvidence=True" in output
     assert "rdbEvidenceCount=3" in output
 
@@ -344,7 +395,10 @@ def test_check_rdb_chat_scenarios_main_does_not_expose_secret(
                     "role": "MANUFACTURING_MANAGER",
                     "intent": "MATERIAL_SHORTAGE",
                     "securityStatus": "PASSED",
+                    "securityCode": None,
                     "expectedSecurityStatuses": ["PASSED"],
+                    "expectedSecurityCodes": [None],
+                    "expectedSecurityResults": [{"status": "PASSED", "code": None}],
                     "requireRdbEvidence": True,
                     "rdbEvidenceCount": 1,
                     "sourceCount": 1,

@@ -21,6 +21,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "include_document_api_smoke": False,
         "include_answer_api_smoke": False,
         "include_recommendation_api_smoke": False,
+        "include_answer_output_policy_smoke": False,
         "answer_api_base_url": "http://fastapi.local",
         "answer_api_question": "자재 부족 현황 알려줘",
         "answer_api_role": "MANUFACTURING_MANAGER",
@@ -51,6 +52,8 @@ def _base_ready_settings(**overrides: Any) -> Settings:
         "chat_recommendation_internal_token": "recommendation-token",
         "document_index_internal_token": "document-token",
         "llm_enabled": True,
+        "llm_base_url": "http://llm.local",
+        "llm_model": "test-model",
     }
     values.update(overrides)
     return Settings(**values)
@@ -84,6 +87,7 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.include_recommendation_api_smoke is True
     assert args.include_document_api_smoke is True
     assert args.include_vector_smoke is True
+    assert args.include_answer_output_policy_smoke is True
     assert args.answer_api_min_evidence_count == 1
     assert args.answer_api_min_document_source_count == 1
 
@@ -258,12 +262,14 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     assert result["checkStatus"] == "PASS"
     assert [step["name"] for step in result["steps"]] == [
         "readiness",
+        "answerOutputPolicySmoke",
         "rdbEvidenceViews",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
-    assert result["steps"][2]["result"]["minEvidenceCount"] == 1
-    assert result["steps"][2]["result"]["requireRdbEvidence"] is True
+    assert result["steps"][1]["result"]["checkStatus"] == "PASS"
+    assert result["steps"][3]["result"]["minEvidenceCount"] == 1
+    assert result["steps"][3]["result"]["requireRdbEvidence"] is True
 
 
 def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
@@ -282,6 +288,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
     assert result["mode"] == "VALIDATE_ONLY"
     assert [step["name"] for step in result["steps"]] == [
         "readiness",
+        "answerOutputPolicySmoke",
         "rdbEvidenceViews",
         "qdrantCollection",
         "qdrantDocumentPayloads",
@@ -297,12 +304,62 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "documentIndexPipeline",
     ]
     assert result["summary"] == {
-        "totalStepCount": 8,
-        "passedStepCount": 8,
+        "totalStepCount": 9,
+        "passedStepCount": 9,
         "failedStepCount": 0,
         "failedSteps": [],
         "nextActions": [],
     }
+
+
+def test_check_chat_runtime_validate_only_checks_answer_output_policy_smoke() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(include_answer_output_policy_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "answerOutputPolicySmoke",
+        "rdbEvidenceViews",
+    ]
+    assert result["steps"][1]["result"]["checkStatus"] == "PASS"
+    assert result["steps"][1]["result"]["caseCount"] == 4
+
+
+def test_check_chat_runtime_fails_when_answer_output_policy_smoke_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(include_answer_output_policy_smoke=True)
+
+    def fake_answer_output_policy_smoke():
+        return {
+            "checkStatus": "FAIL",
+            "failedCaseCount": 1,
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_answer_output_policy_smoke",
+        fake_answer_output_policy_smoke,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][1]["name"] == "answerOutputPolicySmoke"
+    assert result["steps"][1]["status"] == "FAIL"
+    assert result["summary"]["failedSteps"][0]["name"] == "answerOutputPolicySmoke"
+    assert "LLM 출력 보안 정책" in result["summary"]["nextActions"][0]
 
 
 def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:

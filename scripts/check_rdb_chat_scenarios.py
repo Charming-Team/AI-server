@@ -28,9 +28,17 @@ class RdbChatScenario:
     intent: ChatIntent
     question: str
     role: str | None = None
-    expected_security_statuses: tuple[str, ...] = ("PASSED",)
+    expected_security_results: tuple[tuple[str, str | None], ...] = (("PASSED", None),)
     require_rdb_evidence: bool = True
     min_evidence_count: int = 1
+
+    @property
+    def expected_security_statuses(self) -> tuple[str, ...]:
+        return tuple(status for status, _ in self.expected_security_results)
+
+    @property
+    def expected_security_codes(self) -> tuple[str | None, ...]:
+        return tuple(code for _, code in self.expected_security_results)
 
 
 DEFAULT_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
@@ -67,7 +75,10 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         intent=ChatIntent.REPORT_LOOKUP,
         question="이번 달 월간 리포트 요약해줘",
         role="OPERATOR",
-        expected_security_statuses=("INSUFFICIENT_EVIDENCE", "PASSED"),
+        expected_security_results=(
+            ("INSUFFICIENT_EVIDENCE", "CHAT_EVIDENCE_001"),
+            ("PASSED", None),
+        ),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -76,7 +87,7 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         intent=ChatIntent.URGENT_ORDER_IMPACT,
         question="긴급 주문이 생산계획에 미치는 영향 알려줘",
         role="OPERATOR",
-        expected_security_statuses=("BLOCKED_UNAUTHORIZED",),
+        expected_security_results=(("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -85,7 +96,7 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         intent=ChatIntent.DELIVERY_RISK,
         question="납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
         role="OPERATOR",
-        expected_security_statuses=("BLOCKED_UNAUTHORIZED",),
+        expected_security_results=(("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -94,7 +105,7 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         intent=ChatIntent.DELIVERY_RISK,
         question="납기 위험이 있는 주문 알려줘",
         role="ADMIN",
-        expected_security_statuses=("BLOCKED_UNAUTHORIZED",),
+        expected_security_results=(("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -241,6 +252,8 @@ async def check_rdb_chat_scenarios(
             timeout_seconds=args.timeout_seconds,
             min_evidence_count=min_evidence_count,
             require_rdb_evidence=scenario.require_rdb_evidence,
+            expected_security_status=_single_expected_security_status(scenario),
+            expected_security_code=_single_expected_security_code(scenario),
             http_client=http_client,
         )
         if result["intent"] != scenario.intent.value:
@@ -253,15 +266,16 @@ async def check_rdb_chat_scenarios(
                     f"expected={scenario.intent.value}, actual={result['intent']}"
                 ),
             )
-        if result["securityStatus"] not in scenario.expected_security_statuses:
+        actual_security_result = (result["securityStatus"], result["securityCode"])
+        if actual_security_result not in scenario.expected_security_results:
             raise ChatServiceError(
                 status_code=500,
                 code=ChatErrorCode.CHAT_EVIDENCE_001,
                 message=(
-                    "챗봇 시나리오 보안 상태가 예상과 다릅니다. "
+                    "챗봇 시나리오 보안 결과가 예상과 다릅니다. "
                     f"scenario={scenario.scenario_id}, "
-                    f"expected={','.join(scenario.expected_security_statuses)}, "
-                    f"actual={result['securityStatus']}"
+                    f"expected={_format_security_results(scenario.expected_security_results)}, "
+                    f"actual={_format_security_result(actual_security_result)}"
                 ),
             )
 
@@ -272,6 +286,11 @@ async def check_rdb_chat_scenarios(
                 "question": scenario.question,
                 "expectedIntent": scenario.intent.value,
                 "expectedSecurityStatuses": list(scenario.expected_security_statuses),
+                "expectedSecurityCodes": list(scenario.expected_security_codes),
+                "expectedSecurityResults": [
+                    {"status": status, "code": code}
+                    for status, code in scenario.expected_security_results
+                ],
                 "requireRdbEvidence": scenario.require_rdb_evidence,
                 **result,
             }
@@ -315,6 +334,7 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"role={scenario['role']} "
             f"intent={scenario['intent']} "
             f"securityStatus={scenario['securityStatus']} "
+            f"securityCode={scenario['securityCode']} "
             f"requireRdbEvidence={scenario['requireRdbEvidence']} "
             f"rdbEvidenceCount={scenario['rdbEvidenceCount']} "
             f"sourceCount={scenario['sourceCount']} "
@@ -336,6 +356,36 @@ def _select_scenario_groups(
             seen_scenario_ids.add(scenario.scenario_id)
             scenarios.append(scenario)
     return tuple(scenarios)
+
+
+def _single_expected_security_status(scenario: RdbChatScenario) -> str | None:
+    if len(scenario.expected_security_results) != 1:
+        return None
+    return scenario.expected_security_results[0][0]
+
+
+def _single_expected_security_code(scenario: RdbChatScenario) -> str | None:
+    if len(scenario.expected_security_results) != 1:
+        return None
+
+    expected_code = scenario.expected_security_results[0][1]
+    if expected_code is None:
+        return "NONE"
+    return expected_code
+
+
+def _format_security_results(
+    security_results: tuple[tuple[str, str | None], ...],
+) -> str:
+    return ",".join(
+        _format_security_result(security_result)
+        for security_result in security_results
+    )
+
+
+def _format_security_result(security_result: tuple[str, str | None]) -> str:
+    status, code = security_result
+    return f"{status}:{code or 'NONE'}"
 
 
 def format_json_result(result: dict[str, Any]) -> str:

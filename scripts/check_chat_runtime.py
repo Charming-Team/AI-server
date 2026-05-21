@@ -10,6 +10,7 @@ from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatIntent
 from scripts import (
     chat_check_common,
+    check_answer_output_policy,
     check_chat_answer,
     check_chat_readiness,
     check_chat_recommendations,
@@ -27,6 +28,10 @@ STEP_ACTION_GUIDE = {
     "readiness": (
         "readiness 구성값을 확인하고 누락된 내부 토큰, RDB, Qdrant, LLM 설정을 "
         "보완하세요."
+    ),
+    "answerOutputPolicySmoke": (
+        "LLM 출력 보안 정책의 프롬프트 인젝션, 민감정보, OPERATOR 금액성 답변 "
+        "차단 규칙을 확인하세요."
     ),
     "rdbEvidenceViews": (
         "RDB DSN, chat_evidence view 생성 여부, smap_chat_reader read-only 권한을 "
@@ -123,6 +128,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "FastAPI 추천 질문 내부 API를 smoke 요청으로 호출해 "
             "Role 기반 추천 계약을 점검합니다."
+        ),
+    )
+    parser.add_argument(
+        "--include-answer-output-policy-smoke",
+        action="store_true",
+        help=(
+            "LLM 출력 보안 정책의 핵심 차단 케이스를 로컬에서 점검합니다. "
+            "네트워크 연결은 수행하지 않습니다."
         ),
     )
     parser.add_argument(
@@ -258,6 +271,7 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
 
     args.include_answer_api_smoke = True
     args.include_recommendation_api_smoke = True
+    args.include_answer_output_policy_smoke = True
     args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
     return args
 
@@ -284,6 +298,15 @@ async def check_chat_runtime(
             fail_when=lambda result: result["status"] != "ready",
         )
     ]
+
+    if args.include_answer_output_policy_smoke:
+        steps.append(
+            await run_step(
+                "answerOutputPolicySmoke",
+                run_answer_output_policy_smoke,
+                fail_when=lambda result: result["checkStatus"] != "PASS",
+            )
+        )
 
     if should_check_rdb(settings, args):
         steps.append(
@@ -666,6 +689,10 @@ async def run_answer_api_smoke(
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
     )
+
+
+def run_answer_output_policy_smoke() -> dict[str, Any]:
+    return check_answer_output_policy.check_answer_output_policy()
 
 
 async def run_recommendation_api_smoke(
