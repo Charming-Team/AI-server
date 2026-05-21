@@ -12,6 +12,7 @@ from scripts import (
     chat_check_common,
     check_chat_answer,
     check_chat_readiness,
+    check_chat_recommendations,
     check_document_delete_api,
     check_document_index_api,
     check_qdrant_collection,
@@ -71,6 +72,47 @@ def build_parser() -> argparse.ArgumentParser:
             "FastAPI 챗봇 답변 내부 API를 smoke 질문으로 호출해 "
             "응답 계약과 Evidence 조건을 점검합니다."
         ),
+    )
+    parser.add_argument(
+        "--include-recommendation-api-smoke",
+        action="store_true",
+        help=(
+            "FastAPI 추천 질문 내부 API를 smoke 요청으로 호출해 "
+            "Role 기반 추천 계약을 점검합니다."
+        ),
+    )
+    parser.add_argument(
+        "--recommendation-api-base-url",
+        default=check_chat_recommendations.DEFAULT_BASE_URL,
+        help="추천 질문 API smoke check에 사용할 FastAPI base URL",
+    )
+    parser.add_argument(
+        "--recommendation-api-keyword",
+        default=check_chat_recommendations.DEFAULT_KEYWORD,
+        help="추천 질문 API smoke check 키워드",
+    )
+    parser.add_argument(
+        "--recommendation-api-role",
+        default=check_chat_recommendations.DEFAULT_ROLE,
+        help="추천 질문 API smoke check 사용자 Role",
+    )
+    parser.add_argument(
+        "--recommendation-api-user-id",
+        type=int,
+        default=1,
+        help="추천 질문 API smoke check 사용자 ID",
+    )
+    parser.add_argument(
+        "--recommendation-api-timeout-seconds",
+        type=float,
+        default=10.0,
+        help="추천 질문 API smoke check HTTP timeout seconds",
+    )
+    parser.add_argument(
+        "--recommendation-api-min-item-count",
+        type=int,
+        default=1,
+        help="추천 질문 API smoke check에서 요구하는 최소 추천 질문 개수",
     )
     parser.add_argument(
         "--answer-api-base-url",
@@ -216,6 +258,14 @@ async def check_chat_runtime(
             await run_step(
                 "answerApiSmoke",
                 lambda: run_answer_api_smoke(settings, args),
+            )
+        )
+
+    if args.include_recommendation_api_smoke:
+        steps.append(
+            await run_step(
+                "recommendationApiSmoke",
+                lambda: run_recommendation_api_smoke(settings, args),
             )
         )
 
@@ -468,6 +518,49 @@ async def run_answer_api_smoke(
         require_rdb_evidence=require_rdb_evidence,
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
+    )
+
+
+async def run_recommendation_api_smoke(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    token = check_chat_recommendations.resolve_recommendation_token(
+        argparse.Namespace(token=None),
+        settings,
+    )
+    path = f"{settings.api_v1_prefix}/chat/recommendations"
+    request = check_chat_recommendations.build_request(
+        argparse.Namespace(
+            user_id=args.recommendation_api_user_id,
+            role=args.recommendation_api_role,
+            company_name="S-MAP",
+            status="ACTIVE",
+            keyword=args.recommendation_api_keyword,
+        )
+    )
+
+    if not args.network:
+        return {
+            "checkStatus": "VALIDATED",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "baseUrl": args.recommendation_api_base_url,
+            "path": path,
+            "role": request.user.role,
+            "keywordConfigured": bool(request.keyword),
+            "tokenConfigured": bool(token),
+            "minItemCount": args.recommendation_api_min_item_count,
+        }
+
+    return await check_chat_recommendations.check_chat_recommendations(
+        base_url=args.recommendation_api_base_url,
+        path=path,
+        token=token,
+        request=request,
+        timeout_seconds=args.recommendation_api_timeout_seconds,
+        min_item_count=args.recommendation_api_min_item_count,
+        expect_fallback=False,
     )
 
 
