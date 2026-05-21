@@ -23,6 +23,41 @@ from scripts import (
 
 StepRunner = Callable[[], Awaitable[dict[str, Any]] | dict[str, Any]]
 
+STEP_ACTION_GUIDE = {
+    "readiness": (
+        "readiness 구성값을 확인하고 누락된 내부 토큰, RDB, Qdrant, LLM 설정을 "
+        "보완하세요."
+    ),
+    "rdbEvidenceViews": (
+        "RDB DSN, chat_evidence view 생성 여부, smap_chat_reader read-only 권한을 "
+        "확인하세요."
+    ),
+    "qdrantCollection": (
+        "Qdrant URL, collection 이름, embedding dimension 설정이 일치하는지 "
+        "확인하세요."
+    ),
+    "qdrantDocumentPayloads": (
+        "Qdrant payload의 documentId, allowedRoles, intentTags, url 메타데이터를 "
+        "확인하세요."
+    ),
+    "qdrantVectorSmoke": (
+        "Embedding/Qdrant 연결과 smoke 문서 저장, 검색, 삭제 경로를 확인하세요."
+    ),
+    "documentApiSmoke": (
+        "문서 인덱싱 내부 토큰, FastAPI base URL, Qdrant/Embedding 설정을 "
+        "확인하세요."
+    ),
+    "answerApiSmoke": (
+        "챗봇 답변 내부 토큰, FastAPI base URL, RDB/Qdrant Evidence 조건을 "
+        "확인하세요."
+    ),
+    "recommendationApiSmoke": (
+        "추천 질문 내부 토큰, Role별 추천 규칙, OPERATOR read-only URL 조건을 "
+        "확인하세요."
+    ),
+}
+DEFAULT_STEP_ACTION = "실패한 step의 설정과 네트워크 연결, 응답 형식을 확인하세요."
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -305,11 +340,13 @@ async def check_chat_runtime(
         )
 
     check_status = "PASS" if all(step["status"] == "PASS" for step in steps) else "FAIL"
+    summary = build_runtime_summary(steps)
     return {
         "checkStatus": check_status,
         "mode": "NETWORK" if args.network else "VALIDATE_ONLY",
         "networkChecked": bool(args.network),
         "requiredComponents": required_components,
+        "summary": summary,
         "steps": steps,
     }
 
@@ -363,6 +400,68 @@ def should_check_qdrant(settings: Settings, args: argparse.Namespace) -> bool:
         or args.require_document_index
         or args.include_vector_smoke
     )
+
+
+def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    failed_steps = [step for step in steps if step["status"] != "PASS"]
+    failure_items = [build_failure_item(step) for step in failed_steps]
+    next_actions = list(
+        dict.fromkeys(item["action"] for item in failure_items if item["action"])
+    )
+    return {
+        "totalStepCount": len(steps),
+        "passedStepCount": len(steps) - len(failed_steps),
+        "failedStepCount": len(failed_steps),
+        "failedSteps": failure_items,
+        "nextActions": next_actions,
+    }
+
+
+def build_failure_item(step: dict[str, Any]) -> dict[str, Any]:
+    code, message = extract_failure_reason(step)
+    return {
+        "name": step["name"],
+        "code": code,
+        "message": message,
+        "action": STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION),
+    }
+
+
+def extract_failure_reason(step: dict[str, Any]) -> tuple[str | None, str]:
+    if "error" in step:
+        error = step["error"]
+        return error.get("code"), error.get("message", "step 실행에 실패했습니다.")
+
+    result = step.get("result")
+    if isinstance(result, dict):
+        requirement_failures = result.get("requirementFailures")
+        if isinstance(requirement_failures, list) and requirement_failures:
+            first_failure = requirement_failures[0]
+            if isinstance(first_failure, dict):
+                return (
+                    _optional_text(first_failure.get("code")),
+                    _optional_text(first_failure.get("reason"))
+                    or "필수 readiness 조건을 만족하지 못했습니다.",
+                )
+
+        error = result.get("error")
+        if isinstance(error, dict):
+            return (
+                _optional_text(error.get("code")),
+                _optional_text(error.get("message")) or "step 결과가 실패했습니다.",
+            )
+
+        status = result.get("status") or result.get("checkStatus")
+        if isinstance(status, str):
+            return None, f"step 결과 상태가 {status}입니다."
+
+    return None, "step 결과가 실패했습니다."
+
+
+def _optional_text(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 async def run_rdb_evidence_view_check(
@@ -613,11 +712,18 @@ async def run_recommendation_api_smoke(
 
 
 def format_text_result(result: dict[str, Any]) -> str:
+    summary = result.get("summary", {})
     lines = [
         f"status={result['checkStatus']}",
         f"mode={result['mode']}",
         f"networkChecked={result['networkChecked']}",
         f"requiredComponents={','.join(result['requiredComponents'])}",
+        (
+            "summary="
+            f"passed:{summary.get('passedStepCount', 0)} "
+            f"failed:{summary.get('failedStepCount', 0)} "
+            f"total:{summary.get('totalStepCount', len(result['steps']))}"
+        ),
     ]
     for step in result["steps"]:
         line = f"{step['name']}: status={step['status']}"
@@ -625,6 +731,14 @@ def format_text_result(result: dict[str, Any]) -> str:
             error = step["error"]
             line = f"{line} code={error['code']} message={error['message']}"
         lines.append(line)
+    for item in summary.get("failedSteps", []):
+        line = f"failure={item['name']}"
+        if item.get("code"):
+            line = f"{line} code={item['code']}"
+        line = f"{line} message={item['message']}"
+        lines.append(line)
+    for action in summary.get("nextActions", []):
+        lines.append(f"nextAction={action}")
     return "\n".join(lines)
 
 

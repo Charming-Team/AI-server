@@ -118,6 +118,10 @@ def test_check_chat_runtime_fails_when_required_rdb_is_disabled() -> None:
     assert result["steps"][1]["name"] == "rdbEvidenceViews"
     assert result["steps"][1]["status"] == "FAIL"
     assert result["steps"][1]["error"]["code"] == "CHAT_EVIDENCE_004"
+    assert result["summary"]["failedStepCount"] == 2
+    assert result["summary"]["failedSteps"][0]["name"] == "readiness"
+    assert result["summary"]["failedSteps"][1]["name"] == "rdbEvidenceViews"
+    assert "RDB DSN" in result["summary"]["nextActions"][1]
 
 
 def test_check_chat_runtime_validate_only_checks_qdrant_when_vector_is_required() -> None:
@@ -292,6 +296,13 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "ragSearchPipeline",
         "documentIndexPipeline",
     ]
+    assert result["summary"] == {
+        "totalStepCount": 8,
+        "passedStepCount": 8,
+        "failedStepCount": 0,
+        "failedSteps": [],
+        "nextActions": [],
+    }
 
 
 def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:
@@ -573,6 +584,20 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
             "mode": "VALIDATE_ONLY",
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence"],
+            "summary": {
+                "totalStepCount": 1,
+                "passedStepCount": 0,
+                "failedStepCount": 1,
+                "failedSteps": [
+                    {
+                        "name": "readiness",
+                        "code": "CHAT_EVIDENCE_004",
+                        "message": "RDB Evidence DSN이 설정되지 않았습니다.",
+                        "action": "RDB Evidence 설정을 확인하세요.",
+                    }
+                ],
+                "nextActions": ["RDB Evidence 설정을 확인하세요."],
+            },
             "steps": [
                 {
                     "name": "readiness",
@@ -588,7 +613,41 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
 
     assert "status=FAIL" in output
     assert "requiredComponents=rdbEvidence" in output
+    assert "summary=passed:0 failed:1 total:1" in output
     assert "readiness: status=FAIL code=CHAT_EVIDENCE_004" in output
+    assert "failure=readiness code=CHAT_EVIDENCE_004" in output
+    assert "nextAction=RDB Evidence 설정을 확인하세요." in output
+
+
+def test_check_chat_runtime_builds_failure_summary_from_result_error() -> None:
+    steps = [
+        {
+            "name": "qdrantCollection",
+            "status": "FAIL",
+            "result": {
+                "checkStatus": "FAIL",
+                "error": {
+                    "code": "CHAT_QDRANT_002",
+                    "message": "Qdrant 컬렉션 조회에 실패했습니다.",
+                },
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["totalStepCount"] == 1
+    assert summary["passedStepCount"] == 0
+    assert summary["failedStepCount"] == 1
+    assert summary["failedSteps"][0] == {
+        "name": "qdrantCollection",
+        "code": "CHAT_QDRANT_002",
+        "message": "Qdrant 컬렉션 조회에 실패했습니다.",
+        "action": (
+            "Qdrant URL, collection 이름, embedding dimension 설정이 일치하는지 "
+            "확인하세요."
+        ),
+    }
 
 
 def test_check_chat_runtime_main_returns_two_on_failed_check(
