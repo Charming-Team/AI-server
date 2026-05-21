@@ -220,6 +220,59 @@ def test_validate_document_payload_script_requires_input_or_input_directory() ->
     assert "CHAT_DOCUMENT_002" in stderr.getvalue()
 
 
+def test_validate_document_payload_script_prints_company_info_sample() -> None:
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--print-sample",
+            "--sample-document-type",
+            "COMPANY_INFO",
+        ],
+        stdout=stdout,
+    )
+    payload = json.loads(stdout.getvalue())
+
+    assert exit_code == 0
+    assert payload["documentType"] == "COMPANY_INFO"
+    assert payload["documentId"] == "company-line-a01-bottleneck-guide"
+    assert payload["requestedByRole"] == "MANUFACTURING_MANAGER"
+    assert "OPERATOR" in payload["allowedRoles"]
+    assert "LINE_BOTTLENECK" in payload["intentTags"]
+    assert "패널티" not in payload["content"]
+
+
+def test_validate_document_payload_script_prints_report_sample() -> None:
+    stdout = StringIO()
+
+    exit_code = validate_document_payload.main(
+        [
+            "--print-sample",
+            "--sample-document-type",
+            "REPORT",
+        ],
+        stdout=stdout,
+    )
+    payload = json.loads(stdout.getvalue())
+
+    assert exit_code == 0
+    assert payload["documentType"] == "REPORT"
+    assert payload["documentId"] == "report-production-risk-202605"
+    assert "OPERATOR" in payload["allowedRoles"]
+    assert "REPORT_LOOKUP" in payload["intentTags"]
+    assert "계약 금액" not in payload["content"]
+
+
+@pytest.mark.parametrize("document_type", ["COMPANY_INFO", "REPORT"])
+def test_validate_document_payload_sample_is_valid(document_type: str) -> None:
+    payload = validate_document_payload.build_sample_payload(document_type)
+
+    result = validate_document_payload.validate_document_payload(payload, Settings())
+
+    assert result["status"] == "VALID"
+    assert result["documentType"] == document_type
+
+
 def test_validate_document_payload_script_reports_multiple_input_errors(
     tmp_path,
 ) -> None:

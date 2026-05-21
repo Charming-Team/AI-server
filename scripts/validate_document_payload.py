@@ -36,6 +36,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="검증할 문서 payload JSON 파일이 들어 있는 디렉터리 경로",
     )
     parser.add_argument(
+        "--print-sample",
+        action="store_true",
+        help="검증 대신 Qdrant 인덱싱용 샘플 문서 payload JSON을 출력합니다.",
+    )
+    parser.add_argument(
+        "--sample-document-type",
+        choices=("COMPANY_INFO", "REPORT"),
+        default="COMPANY_INFO",
+        help="--print-sample에서 출력할 문서 유형",
+    )
+    parser.add_argument(
         "--env-file",
         help="Settings를 로드할 env 파일 경로. 생략하면 기본 .env 설정을 사용합니다.",
     )
@@ -62,6 +73,74 @@ def build_settings(args: argparse.Namespace) -> Settings:
     if env_file:
         return Settings(_env_file=env_file)
     return Settings()
+
+
+def build_sample_payload(document_type: str) -> dict[str, Any]:
+    normalized_document_type = document_type.strip().upper()
+    if normalized_document_type == "COMPANY_INFO":
+        return {
+            "documentId": "company-line-a01-bottleneck-guide",
+            "documentType": "COMPANY_INFO",
+            "title": "LINE-A01 병목 대응 기준",
+            "content": (
+                "LINE-A01에서 대기 시간이 증가하면 작업자는 대기 수량, "
+                "처리량, 설비 상태를 먼저 확인합니다. 제조관리직은 생산계획 "
+                "순서와 라인 상태를 함께 검토해 병목 원인을 판단합니다."
+            ),
+            "summary": "LINE-A01 병목 발생 시 현장 확인 기준입니다.",
+            "url": "/company-info/line-a01-bottleneck-guide",
+            "referenceType": "LINE",
+            "referenceId": None,
+            "allowedRoles": [
+                "OPERATOR",
+                "MANUFACTURING_MANAGER",
+                "EXECUTIVE",
+            ],
+            "companyName": "S-MAP",
+            "intentTags": [
+                "LINE_BOTTLENECK",
+                "WORK_PRIORITY",
+            ],
+            "requestedByRole": "MANUFACTURING_MANAGER",
+        }
+
+    if normalized_document_type == "REPORT":
+        return {
+            "documentId": "report-production-risk-202605",
+            "documentType": "REPORT",
+            "title": "2026년 5월 생산 리스크 보고서",
+            "content": (
+                "2026년 5월 생산 리스크는 자재 부족, 라인 대기시간 증가, "
+                "설비 점검 일정에 집중되어 있습니다. OPERATOR에게 공개되는 "
+                "보고서는 생산 운영 근거와 조치 방향만 포함해야 합니다."
+            ),
+            "summary": "2026년 5월 생산 리스크 요약 보고서입니다.",
+            "url": "/reports/production-risk-202605",
+            "referenceType": "REPORT",
+            "referenceId": None,
+            "allowedRoles": [
+                "OPERATOR",
+                "MANUFACTURING_MANAGER",
+                "EXECUTIVE",
+            ],
+            "companyName": "S-MAP",
+            "intentTags": [
+                "REPORT_LOOKUP",
+                "DELIVERY_RISK",
+                "LINE_BOTTLENECK",
+            ],
+            "requestedByRole": "MANUFACTURING_MANAGER",
+        }
+
+    raise ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_DOCUMENT_002,
+        message="샘플 문서 유형은 COMPANY_INFO 또는 REPORT만 허용됩니다.",
+    )
+
+
+def format_sample_payload(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def normalize_input_paths(args: argparse.Namespace) -> list[str]:
@@ -468,6 +547,15 @@ def main(
 
     try:
         settings = build_settings(args)
+        if args.print_sample:
+            print(
+                format_sample_payload(
+                    build_sample_payload(args.sample_document_type),
+                ),
+                file=output,
+            )
+            return 0
+
         input_paths = normalize_input_paths(args)
         if len(input_paths) > 1:
             result = validate_document_payload_files(
