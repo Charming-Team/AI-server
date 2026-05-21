@@ -24,6 +24,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "include_answer_output_policy_smoke": False,
         "include_rdb_chat_scenarios": False,
         "include_rag_chat_scenarios": False,
+        "include_rag_end_to_end_smoke": False,
         "rdb_chat_scenario_group": None,
         "rdb_chat_scenario": None,
         "rag_chat_scenario_group": None,
@@ -96,6 +97,7 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.include_answer_output_policy_smoke is True
     assert args.include_rdb_chat_scenarios is True
     assert args.include_rag_chat_scenarios is True
+    assert args.include_rag_end_to_end_smoke is True
     assert args.answer_api_min_evidence_count == 1
     assert args.answer_api_min_document_source_count == 1
 
@@ -402,13 +404,15 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
         "qdrantDocumentPayloads",
         "qdrantVectorSmoke",
         "documentApiSmoke",
+        "ragEndToEndSmoke",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
     assert result["steps"][3]["result"]["scenarioGroups"] == ["core"]
     assert result["steps"][3]["result"]["scenarioCount"] == 3
-    assert result["steps"][8]["result"]["requireRdbEvidence"] is True
-    assert result["steps"][8]["result"]["requireVectorSearch"] is True
+    assert result["steps"][8]["result"]["minDocumentSourceCount"] == 1
+    assert result["steps"][9]["result"]["requireRdbEvidence"] is True
+    assert result["steps"][9]["result"]["requireVectorSearch"] is True
 
 
 def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
@@ -435,6 +439,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "qdrantDocumentPayloads",
         "qdrantVectorSmoke",
         "documentApiSmoke",
+        "ragEndToEndSmoke",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
@@ -445,8 +450,8 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "documentIndexPipeline",
     ]
     assert result["summary"] == {
-        "totalStepCount": 11,
-        "passedStepCount": 11,
+        "totalStepCount": 12,
+        "passedStepCount": 12,
         "failedStepCount": 0,
         "failedSteps": [],
         "nextActions": [],
@@ -580,6 +585,46 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
         "token": "answer-token",
         "scenario_group": ["access"],
         "scenario": ["operator-financial-blocked"],
+    }
+
+
+def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        evidence_lookup_enabled=True,
+        evidence_lookup_internal_token="evidence-token",
+    )
+    args = _build_args(network=True, include_rag_end_to_end_smoke=True)
+    captured: dict[str, Any] = {}
+
+    async def fake_rag_end_to_end(**kwargs):
+        captured["base_url"] = kwargs["args"].base_url
+        captured["document_id"] = kwargs["args"].document_id
+        captured["answer_token"] = kwargs["answer_token"]
+        captured["document_token"] = kwargs["document_token"]
+        return {
+            "checkStatus": "PASS",
+            "mode": "NETWORK",
+            "networkChecked": True,
+            "documentId": kwargs["args"].document_id,
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_rag_end_to_end,
+        "check_rag_end_to_end",
+        fake_rag_end_to_end,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "ragEndToEndSmoke"
+    assert captured == {
+        "base_url": "http://fastapi.local",
+        "document_id": "smoke-document-api-contract",
+        "answer_token": "answer-token",
+        "document_token": "document-token",
     }
 
 

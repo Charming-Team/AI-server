@@ -20,6 +20,7 @@ from scripts import (
     check_qdrant_document_payloads,
     check_qdrant_vector_search,
     check_rag_chat_scenarios,
+    check_rag_end_to_end,
     check_rdb_chat_scenarios,
     check_rdb_evidence_views,
 )
@@ -46,6 +47,10 @@ STEP_ACTION_GUIDE = {
     "ragChatScenarios": (
         "RDB Evidence, Qdrant 문서 출처, Vector Search 사용 여부가 함께 충족되는지 "
         "확인하세요."
+    ),
+    "ragEndToEndSmoke": (
+        "FastAPI 문서 등록, 챗봇 답변, 문서 삭제 API가 같은 설정과 토큰으로 "
+        "연결되는지 확인하세요."
     ),
     "qdrantCollection": (
         "Qdrant URL, collection 이름, embedding dimension 설정이 일치하는지 "
@@ -163,6 +168,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "RDB Evidence와 Qdrant 문서 출처가 함께 필요한 RAG 챗봇 질문 "
             "시나리오를 실행합니다. 기본으로 core 시나리오 그룹을 점검합니다."
+        ),
+    )
+    parser.add_argument(
+        "--include-rag-end-to-end-smoke",
+        action="store_true",
+        help=(
+            "FastAPI 문서 등록, 챗봇 답변, 문서 삭제까지 하나의 RAG smoke "
+            "흐름으로 점검합니다."
         ),
     )
     parser.add_argument(
@@ -330,6 +343,7 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.require_document_index = True
         args.include_document_api_smoke = True
         args.include_rag_chat_scenarios = True
+        args.include_rag_end_to_end_smoke = True
         args.answer_api_min_document_source_count = max(
             args.answer_api_min_document_source_count,
             1,
@@ -428,6 +442,14 @@ async def check_chat_runtime(
             await run_step(
                 "documentApiSmoke",
                 lambda: run_document_api_smoke(settings, args),
+            )
+        )
+
+    if args.include_rag_end_to_end_smoke:
+        steps.append(
+            await run_step(
+                "ragEndToEndSmoke",
+                lambda: run_rag_end_to_end_smoke(settings, args),
             )
         )
 
@@ -839,6 +861,60 @@ async def run_document_api_smoke(
         "index": index_result,
         "delete": delete_result,
     }
+
+
+async def run_rag_end_to_end_smoke(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    answer_token = check_rag_end_to_end.resolve_answer_token(
+        argparse.Namespace(answer_token=None),
+        settings,
+    )
+    document_token = check_rag_end_to_end.resolve_document_token(
+        argparse.Namespace(document_token=None),
+        settings,
+    )
+    smoke_args = argparse.Namespace(
+        base_url=args.answer_api_base_url,
+        answer_token=None,
+        document_token=None,
+        env_file=None,
+        timeout_seconds=args.answer_api_timeout_seconds,
+        document_id=args.document_api_smoke_document_id,
+        title=check_qdrant_vector_search.DEFAULT_TITLE,
+        content=check_qdrant_vector_search.DEFAULT_CONTENT,
+        url=check_qdrant_vector_search.DEFAULT_URL,
+        question=check_qdrant_vector_search.DEFAULT_QUESTION,
+        role=args.answer_api_role,
+        user_id=args.answer_api_user_id,
+        company_name="S-MAP",
+        session_id=1,
+        message_id=1,
+        requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
+        min_indexed_count=1,
+        min_document_source_count=max(args.answer_api_min_document_source_count, 1),
+        min_evidence_count=max(args.answer_api_min_evidence_count, 1),
+        require_rdb_evidence=bool(args.require_rdb_evidence),
+        keep_document=False,
+        validate_only=not args.network,
+        json=False,
+    )
+
+    if not args.network:
+        return check_rag_end_to_end.build_validate_only_result(
+            smoke_args,
+            settings,
+            answer_token,
+            document_token,
+        )
+
+    return await check_rag_end_to_end.check_rag_end_to_end(
+        args=smoke_args,
+        settings=settings,
+        answer_token=answer_token,
+        document_token=document_token,
+    )
 
 
 async def run_answer_api_smoke(
