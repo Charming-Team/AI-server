@@ -1,0 +1,308 @@
+import argparse
+import asyncio
+import json
+import sys
+from collections.abc import Awaitable, Callable
+from typing import Any, TextIO
+
+from app.core.config import Settings
+from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatIntent
+from scripts import (
+    chat_check_common,
+    check_chat_readiness,
+    check_qdrant_collection,
+    check_qdrant_document_payloads,
+    check_qdrant_vector_search,
+    check_rdb_evidence_views,
+)
+
+StepRunner = Callable[[], Awaitable[dict[str, Any]] | dict[str, Any]]
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="챗봇 RDB/Qdrant/Vector 런타임 준비 상태를 한 번에 점검합니다."
+    )
+    parser.add_argument(
+        "--env-file",
+        help="Settings를 로드할 env 파일 경로. 생략하면 기본 .env 설정을 사용합니다.",
+    )
+    parser.add_argument(
+        "--network",
+        action="store_true",
+        help="RDB와 Qdrant에 실제 네트워크 연결을 수행합니다.",
+    )
+    parser.add_argument(
+        "--require-rdb-evidence",
+        action="store_true",
+        help="RDB Evidence View 파이프라인이 준비되어 있어야 합니다.",
+    )
+    parser.add_argument(
+        "--require-vector-search",
+        action="store_true",
+        help="Qdrant Vector Search 파이프라인이 준비되어 있어야 합니다.",
+    )
+    parser.add_argument(
+        "--require-document-index",
+        action="store_true",
+        help="문서 인덱싱 파이프라인이 준비되어 있어야 합니다.",
+    )
+    parser.add_argument(
+        "--include-vector-smoke",
+        action="store_true",
+        help="Qdrant에 임시 문서를 저장/검색/삭제하는 Vector smoke check를 수행합니다.",
+    )
+    parser.add_argument(
+        "--skip-rdb-privilege-check",
+        action="store_true",
+        help="RDB View SELECT 점검만 수행하고 read-only 권한 점검은 건너뜁니다.",
+    )
+    parser.add_argument(
+        "--qdrant-min-points",
+        type=int,
+        default=0,
+        help="Qdrant payload 점검에서 요구하는 최소 point 개수",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print result as JSON",
+    )
+    return parser
+
+
+def build_settings(args: argparse.Namespace) -> Settings:
+    if args.env_file:
+        return Settings(_env_file=args.env_file)
+    return Settings()
+
+
+def build_required_components(args: argparse.Namespace) -> list[str]:
+    return check_chat_readiness.build_required_components(args)
+
+
+async def check_chat_runtime(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    required_components = build_required_components(args)
+    readiness_result = check_chat_readiness.build_readiness_result(
+        settings,
+        required_components=required_components,
+    )
+    steps = [
+        await run_step(
+            "readiness",
+            lambda: readiness_result,
+            fail_when=lambda result: result["status"] != "ready",
+        )
+    ]
+
+    if should_check_rdb(settings, args):
+        steps.append(
+            await run_step(
+                "rdbEvidenceViews",
+                lambda: run_rdb_evidence_view_check(settings, args),
+            )
+        )
+
+    if should_check_qdrant(settings, args):
+        steps.append(
+            await run_step(
+                "qdrantCollection",
+                lambda: run_qdrant_collection_check(settings, args),
+            )
+        )
+        steps.append(
+            await run_step(
+                "qdrantDocumentPayloads",
+                lambda: run_qdrant_payload_check(settings, args),
+            )
+        )
+
+    if args.include_vector_smoke:
+        steps.append(
+            await run_step(
+                "qdrantVectorSmoke",
+                lambda: run_qdrant_vector_smoke(settings),
+            )
+        )
+
+    check_status = "PASS" if all(step["status"] == "PASS" for step in steps) else "FAIL"
+    return {
+        "checkStatus": check_status,
+        "mode": "NETWORK" if args.network else "VALIDATE_ONLY",
+        "networkChecked": bool(args.network),
+        "requiredComponents": required_components,
+        "steps": steps,
+    }
+
+
+async def run_step(
+    name: str,
+    runner: StepRunner,
+    fail_when: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    try:
+        result_or_awaitable = runner()
+        if hasattr(result_or_awaitable, "__await__"):
+            result = await result_or_awaitable
+        else:
+            result = result_or_awaitable
+        status = "FAIL" if fail_when and fail_when(result) else "PASS"
+        return {
+            "name": name,
+            "status": status,
+            "result": result,
+        }
+    except ChatServiceError as exc:
+        return {
+            "name": name,
+            "status": "FAIL",
+            "error": {
+                "code": exc.code.value,
+                "message": exc.message,
+            },
+        }
+    except Exception as exc:
+        return {
+            "name": name,
+            "status": "FAIL",
+            "error": {
+                "code": "UNKNOWN",
+                "message": str(exc),
+            },
+        }
+
+
+def should_check_rdb(settings: Settings, args: argparse.Namespace) -> bool:
+    return bool(settings.rdb_evidence_enabled or args.require_rdb_evidence)
+
+
+def should_check_qdrant(settings: Settings, args: argparse.Namespace) -> bool:
+    return bool(
+        settings.qdrant_search_enabled
+        or settings.embedding_enabled
+        or args.require_vector_search
+        or args.require_document_index
+        or args.include_vector_smoke
+    )
+
+
+async def run_rdb_evidence_view_check(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    if not args.network:
+        return check_rdb_evidence_views.build_validate_only_result(settings)
+    return await check_rdb_evidence_views.check_rdb_evidence_views(
+        settings,
+        check_privileges=not args.skip_rdb_privilege_check,
+    )
+
+
+async def run_qdrant_collection_check(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    if not args.network:
+        return check_qdrant_collection.build_validate_only_result(settings)
+    result = await check_qdrant_collection.check_collection(settings)
+    error = check_qdrant_collection.build_dimension_mismatch_error(result)
+    return {
+        "checkStatus": "PASS" if result.is_dimension_matched else "FAIL",
+        **result.__dict__,
+        "error": error.model_dump(mode="json") if error is not None else None,
+    }
+
+
+async def run_qdrant_payload_check(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    if not args.network:
+        return check_qdrant_document_payloads.build_validate_only_result(
+            settings,
+            limit=20,
+            min_points=args.qdrant_min_points,
+        )
+    return await check_qdrant_document_payloads.check_qdrant_document_payloads(
+        settings,
+        limit=20,
+        min_points=args.qdrant_min_points,
+    )
+
+
+async def run_qdrant_vector_smoke(settings: Settings) -> dict[str, Any]:
+    if not settings.embedding_dimension:
+        raise ValueError("embedding_dimension is required")
+    smoke_args = argparse.Namespace(
+        document_id=check_qdrant_vector_search.DEFAULT_DOCUMENT_ID,
+        title=check_qdrant_vector_search.DEFAULT_TITLE,
+        content=check_qdrant_vector_search.DEFAULT_CONTENT,
+        url=check_qdrant_vector_search.DEFAULT_URL,
+        intent=ChatIntent.LINE_BOTTLENECK.value,
+        role="MANUFACTURING_MANAGER",
+        company_name="S-MAP",
+        question=check_qdrant_vector_search.DEFAULT_QUESTION,
+        user_id=1,
+        session_id=1,
+        message_id=1,
+        requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
+    )
+    document = check_qdrant_vector_search.build_sample_document(smoke_args)
+    request = chat_check_common.build_chat_answer_request(smoke_args)
+    return await check_qdrant_vector_search.check_qdrant_vector_search(
+        settings,
+        document,
+        request,
+        ChatIntent.LINE_BOTTLENECK,
+    )
+
+
+def format_text_result(result: dict[str, Any]) -> str:
+    lines = [
+        f"status={result['checkStatus']}",
+        f"mode={result['mode']}",
+        f"networkChecked={result['networkChecked']}",
+        f"requiredComponents={','.join(result['requiredComponents'])}",
+    ]
+    for step in result["steps"]:
+        line = f"{step['name']}: status={step['status']}"
+        if "error" in step:
+            error = step["error"]
+            line = f"{line} code={error['code']} message={error['message']}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_json_result(result: dict[str, Any]) -> str:
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def main(
+    argv: list[str] | None = None,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
+    output = stdout or sys.stdout
+    error_output = stderr or sys.stderr
+    args = build_parser().parse_args(argv)
+
+    try:
+        settings = build_settings(args)
+        result = asyncio.run(check_chat_runtime(settings, args))
+    except Exception as exc:
+        print(f"챗봇 런타임 통합 점검 실패: {exc}", file=error_output)
+        return 1
+
+    if args.json:
+        print(format_json_result(result), file=output)
+    else:
+        print(format_text_result(result), file=output)
+    return 0 if result["checkStatus"] == "PASS" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
