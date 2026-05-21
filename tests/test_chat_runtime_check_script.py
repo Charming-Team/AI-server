@@ -18,6 +18,14 @@ def _build_args(**overrides: Any) -> Namespace:
         "require_document_index": False,
         "include_vector_smoke": False,
         "include_document_api_smoke": False,
+        "include_answer_api_smoke": False,
+        "answer_api_base_url": "http://fastapi.local",
+        "answer_api_question": "자재 부족 현황 알려줘",
+        "answer_api_role": "MANUFACTURING_MANAGER",
+        "answer_api_user_id": 1,
+        "answer_api_timeout_seconds": 10.0,
+        "answer_api_min_evidence_count": 0,
+        "answer_api_min_document_source_count": 0,
         "document_api_base_url": "http://fastapi.local",
         "document_api_smoke_document_id": "smoke-document-api-contract",
         "document_api_timeout_seconds": 10.0,
@@ -277,6 +285,99 @@ def test_check_chat_runtime_network_runs_document_api_smoke(
         "index:smoke-document-api-contract",
         "delete:smoke-document-api-contract",
     ]
+
+
+def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(
+        include_answer_api_smoke=True,
+        answer_api_min_evidence_count=1,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert result["steps"][-1]["result"] == {
+        "checkStatus": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "networkChecked": False,
+        "baseUrl": "http://fastapi.local",
+        "path": "/api/v1/chat/answer",
+        "question": "자재 부족 현황 알려줘",
+        "role": "MANUFACTURING_MANAGER",
+        "tokenConfigured": True,
+        "minEvidenceCount": 1,
+        "requireRdbEvidence": False,
+        "minDocumentSourceCount": 0,
+        "requireVectorSearch": False,
+    }
+
+
+def test_check_chat_runtime_answer_api_smoke_requires_token() -> None:
+    settings = Settings(document_index_internal_token="document-token")
+    args = _build_args(include_answer_api_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert result["steps"][-1]["status"] == "FAIL"
+    assert result["steps"][-1]["error"]["code"] == "CHAT_SECURITY_003"
+
+
+def test_check_chat_runtime_network_runs_answer_api_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(
+        network=True,
+        include_answer_api_smoke=True,
+        require_rdb_evidence=True,
+        answer_api_min_evidence_count=2,
+    )
+    calls: list[str] = []
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_answer_check(**kwargs):
+        calls.append(kwargs["request"].question)
+        return {
+            "checkStatus": "PASS",
+            "url": f"{kwargs['base_url']}/{kwargs['path'].lstrip('/')}",
+            "intent": "MATERIAL_SHORTAGE",
+            "evidenceCount": kwargs["min_evidence_count"],
+            "usedRdbEvidence": kwargs["require_rdb_evidence"],
+            "usedVectorSearch": kwargs["require_vector_search"],
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_chat_answer,
+        "check_chat_answer",
+        fake_answer_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "NETWORK"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert calls == ["자재 부족 현황 알려줘"]
+    assert result["steps"][-1]["result"]["evidenceCount"] == 2
+    assert result["steps"][-1]["result"]["usedRdbEvidence"] is True
 
 
 def test_check_chat_runtime_text_output_includes_step_status() -> None:

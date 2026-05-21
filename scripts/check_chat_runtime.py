@@ -10,6 +10,7 @@ from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatIntent
 from scripts import (
     chat_check_common,
+    check_chat_answer,
     check_chat_readiness,
     check_document_delete_api,
     check_document_index_api,
@@ -62,6 +63,53 @@ def build_parser() -> argparse.ArgumentParser:
             "FastAPI 문서 인덱싱/삭제 내부 API를 smoke 문서로 호출해 "
             "계약과 토큰 설정을 점검합니다."
         ),
+    )
+    parser.add_argument(
+        "--include-answer-api-smoke",
+        action="store_true",
+        help=(
+            "FastAPI 챗봇 답변 내부 API를 smoke 질문으로 호출해 "
+            "응답 계약과 Evidence 조건을 점검합니다."
+        ),
+    )
+    parser.add_argument(
+        "--answer-api-base-url",
+        default=check_chat_answer.DEFAULT_BASE_URL,
+        help="챗봇 답변 API smoke check에 사용할 FastAPI base URL",
+    )
+    parser.add_argument(
+        "--answer-api-question",
+        default=check_chat_answer.DEFAULT_QUESTION,
+        help="챗봇 답변 API smoke check 질문",
+    )
+    parser.add_argument(
+        "--answer-api-role",
+        default="MANUFACTURING_MANAGER",
+        help="챗봇 답변 API smoke check 사용자 Role",
+    )
+    parser.add_argument(
+        "--answer-api-user-id",
+        type=int,
+        default=1,
+        help="챗봇 답변 API smoke check 사용자 ID",
+    )
+    parser.add_argument(
+        "--answer-api-timeout-seconds",
+        type=float,
+        default=10.0,
+        help="챗봇 답변 API smoke check HTTP timeout seconds",
+    )
+    parser.add_argument(
+        "--answer-api-min-evidence-count",
+        type=int,
+        default=0,
+        help="챗봇 답변 API smoke check에서 요구하는 최소 Evidence 개수",
+    )
+    parser.add_argument(
+        "--answer-api-min-document-source-count",
+        type=int,
+        default=0,
+        help="챗봇 답변 API smoke check에서 요구하는 최소 Qdrant 문서 출처 개수",
     )
     parser.add_argument(
         "--document-api-base-url",
@@ -160,6 +208,14 @@ async def check_chat_runtime(
             await run_step(
                 "documentApiSmoke",
                 lambda: run_document_api_smoke(settings, args),
+            )
+        )
+
+    if args.include_answer_api_smoke:
+        steps.append(
+            await run_step(
+                "answerApiSmoke",
+                lambda: run_answer_api_smoke(settings, args),
             )
         )
 
@@ -361,6 +417,58 @@ async def run_document_api_smoke(
         "index": index_result,
         "delete": delete_result,
     }
+
+
+async def run_answer_api_smoke(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    token = check_chat_answer.resolve_answer_token(
+        argparse.Namespace(token=None),
+        settings,
+    )
+    path = f"{settings.api_v1_prefix}/chat/answer"
+    request = chat_check_common.build_chat_answer_request(
+        argparse.Namespace(
+            question=args.answer_api_question,
+            role=args.answer_api_role,
+            user_id=args.answer_api_user_id,
+            company_name="S-MAP",
+            session_id=1,
+            message_id=1,
+            requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
+        )
+    )
+    require_rdb_evidence = bool(args.require_rdb_evidence)
+    require_vector_search = bool(args.require_vector_search)
+
+    if not args.network:
+        return {
+            "checkStatus": "VALIDATED",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "baseUrl": args.answer_api_base_url,
+            "path": path,
+            "question": request.question,
+            "role": request.user.role,
+            "tokenConfigured": bool(token),
+            "minEvidenceCount": args.answer_api_min_evidence_count,
+            "requireRdbEvidence": require_rdb_evidence,
+            "minDocumentSourceCount": args.answer_api_min_document_source_count,
+            "requireVectorSearch": require_vector_search,
+        }
+
+    return await check_chat_answer.check_chat_answer(
+        base_url=args.answer_api_base_url,
+        path=path,
+        token=token,
+        request=request,
+        timeout_seconds=args.answer_api_timeout_seconds,
+        min_evidence_count=args.answer_api_min_evidence_count,
+        require_rdb_evidence=require_rdb_evidence,
+        min_document_source_count=args.answer_api_min_document_source_count,
+        require_vector_search=require_vector_search,
+    )
 
 
 def format_text_result(result: dict[str, Any]) -> str:
