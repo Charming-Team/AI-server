@@ -56,12 +56,21 @@ def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() ->
         "configured": True,
         "reason": "비활성화되어 있습니다.",
     }
+    assert components["rdbEvidence"] == {
+        "name": "rdbEvidence",
+        "enabled": False,
+        "configured": True,
+        "reason": "비활성화되어 있습니다.",
+    }
     assert components["chatGroundingPipeline"] == {
         "name": "chatGroundingPipeline",
         "enabled": True,
         "configured": False,
         "code": "CHAT_EVIDENCE_001",
-        "reason": "챗봇 답변에는 RDB Evidence 또는 Qdrant 검색 중 하나가 필요합니다.",
+        "reason": (
+            "챗봇 답변에는 RDB Evidence View, Spring Evidence 또는 "
+            "Qdrant 검색 중 하나가 필요합니다."
+        ),
     }
     assert components["answerGenerationPipeline"] == {
         "name": "answerGenerationPipeline",
@@ -119,6 +128,8 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
             evidence_lookup_enabled=True,
             evidence_lookup_base_url=" ",
             evidence_lookup_internal_token="evidence-secret",
+            rdb_evidence_enabled=True,
+            rdb_evidence_dsn=" ",
             qdrant_search_enabled=True,
             qdrant_collection=" ",
             embedding_enabled=True,
@@ -141,6 +152,11 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
         components["evidenceLookup"]["reason"]
         == "필수 설정이 누락되었습니다: evidence_lookup_base_url"
     )
+    assert components["rdbEvidence"]["code"] == "CHAT_EVIDENCE_004"
+    assert (
+        components["rdbEvidence"]["reason"]
+        == "필수 설정이 누락되었습니다: rdb_evidence_dsn"
+    )
     assert components["qdrantSearch"]["code"] == "CHAT_QDRANT_001"
     assert (
         components["qdrantSearch"]["reason"]
@@ -162,6 +178,7 @@ def test_readiness_check_requires_at_least_one_grounding_source() -> None:
             chat_recommendation_internal_token="recommendation-secret",
             document_index_internal_token="document-secret",
             evidence_lookup_enabled=False,
+            rdb_evidence_enabled=False,
             qdrant_search_enabled=False,
         )
     )
@@ -175,14 +192,54 @@ def test_readiness_check_requires_at_least_one_grounding_source() -> None:
     assert body["status"] == "not_ready"
     components = {component["name"]: component for component in body["components"]}
     assert components["evidenceLookup"]["configured"] is True
+    assert components["rdbEvidence"]["configured"] is True
     assert components["qdrantSearch"]["configured"] is True
     assert components["chatGroundingPipeline"] == {
         "name": "chatGroundingPipeline",
         "enabled": True,
         "configured": False,
         "code": "CHAT_EVIDENCE_001",
-        "reason": "챗봇 답변에는 RDB Evidence 또는 Qdrant 검색 중 하나가 필요합니다.",
+        "reason": (
+            "챗봇 답변에는 RDB Evidence View, Spring Evidence 또는 "
+            "Qdrant 검색 중 하나가 필요합니다."
+        ),
     }
+
+
+def test_readiness_check_accepts_rdb_evidence_view_as_grounding_source() -> None:
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token="answer-secret",
+            chat_recommendation_internal_token="recommendation-secret",
+            document_index_internal_token="document-secret",
+            evidence_lookup_enabled=False,
+            rdb_evidence_enabled=True,
+            rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+            qdrant_search_enabled=False,
+            embedding_enabled=False,
+            llm_enabled=True,
+            llm_base_url="http://llm.local/v1",
+            llm_model="local-open-source-model",
+        )
+    )
+    try:
+        response = client.get("/api/v1/health/ready")
+    finally:
+        _restore_settings(previous_override)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    components = {component["name"]: component for component in body["components"]}
+    assert components["evidenceLookup"]["configured"] is True
+    assert components["rdbEvidence"]["configured"] is True
+    assert components["qdrantSearch"]["configured"] is True
+    assert components["chatGroundingPipeline"] == {
+        "name": "chatGroundingPipeline",
+        "enabled": True,
+        "configured": True,
+    }
+    assert "reader:secret" not in response.text
 
 
 def test_readiness_check_requires_llm_for_answer_generation_pipeline() -> None:

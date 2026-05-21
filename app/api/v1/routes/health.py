@@ -75,6 +75,16 @@ def build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
             },
         ),
         _integration_component(
+            name="rdbEvidence",
+            enabled=settings.rdb_evidence_enabled,
+            required_fields={
+                "rdb_evidence_dsn": settings.rdb_evidence_dsn,
+            },
+            field_error_codes={
+                "rdb_evidence_dsn": ChatErrorCode.CHAT_EVIDENCE_004,
+            },
+        ),
+        _integration_component(
             name="qdrantSearch",
             enabled=settings.qdrant_search_enabled,
             required_fields={
@@ -120,7 +130,11 @@ def build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
 
 
 def _chat_grounding_pipeline_component(settings: Settings) -> ReadinessComponent:
-    if settings.evidence_lookup_enabled or settings.qdrant_search_enabled:
+    if (
+        settings.evidence_lookup_enabled
+        or settings.rdb_evidence_enabled
+        or settings.qdrant_search_enabled
+    ):
         return ReadinessComponent(
             name="chatGroundingPipeline",
             enabled=True,
@@ -132,7 +146,10 @@ def _chat_grounding_pipeline_component(settings: Settings) -> ReadinessComponent
         enabled=True,
         configured=False,
         code=ChatErrorCode.CHAT_EVIDENCE_001,
-        reason="챗봇 답변에는 RDB Evidence 또는 Qdrant 검색 중 하나가 필요합니다.",
+        reason=(
+            "챗봇 답변에는 RDB Evidence View, Spring Evidence 또는 "
+            "Qdrant 검색 중 하나가 필요합니다."
+        ),
     )
 
 
