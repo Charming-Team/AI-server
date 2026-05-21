@@ -86,6 +86,7 @@ class FakeGeneratedAnswerGenerationService:
 class FakeCapturingAnswerGenerationService:
     def __init__(self) -> None:
         self.evidence_result: EvidenceResult | None = None
+        self.document_result: DocumentSearchResult | None = None
 
     async def generate_answer(
         self,
@@ -94,6 +95,7 @@ class FakeCapturingAnswerGenerationService:
         document_result: DocumentSearchResult,
     ) -> AnswerGenerationResult:
         self.evidence_result = evidence_result
+        self.document_result = document_result
         return AnswerGenerationResult(
             answer="근거에 따르면 납기 위험이 있습니다.",
             was_generated=True,
@@ -324,6 +326,51 @@ def test_chat_service_sanitizes_operator_financial_evidence_before_llm() -> None
     assert evidence_data["nested"] == {"lineCode": "LINE-A01"}
     assert "contractAmount" not in evidence_data
     assert "latePenaltyAmount" not in evidence_data
+
+
+def test_chat_service_sanitizes_operator_financial_document_sources_before_llm() -> None:
+    service = ChatService(Settings())
+    answer_generation_service = FakeCapturingAnswerGenerationService()
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeDocumentSearchService(
+        was_searched=True,
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="납기 지연 패널티 보고서",
+                summary="계약 금액과 패널티 금액을 함께 검토합니다.",
+                url="/reports/finance?mode=read",
+                sourceOrigin="QDRANT",
+            ),
+            ChatSource(
+                sourceType="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+                url="/reports/20?mode=read",
+                sourceOrigin="QDRANT",
+            ),
+        ],
+    )
+    service.answer_generation_service = answer_generation_service
+
+    response = anyio.run(
+        service.create_answer,
+        _build_request(
+            role="OPERATOR",
+            question="최근 생산 리스크 보고서를 조회해줘",
+        ),
+    )
+
+    assert answer_generation_service.document_result is not None
+    assert [
+        source.title for source in answer_generation_service.document_result.sources
+    ] == ["월간 생산 리스크 보고서"]
+    assert response.model_result.document_source_count == 1
+    assert [source.title for source in response.sources] == [
+        "월간 생산 리스크",
+        "월간 생산 리스크 보고서",
+    ]
+    assert [url.url for url in response.urls] == ["/reports/20?mode=read"]
 
 
 def test_chat_service_filters_allowed_roles_before_llm_and_ignores_company_name() -> None:
