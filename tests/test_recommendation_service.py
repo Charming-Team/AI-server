@@ -216,6 +216,7 @@ def test_recommendation_service_operator_gets_read_only_urls_without_money_quest
     assert "오늘 배정된 생산계획을 조회해줘" in questions
     assert "내 담당 설비의 현재 상태를 조회해줘" in questions
     assert "최근 생산 리스크 보고서를 조회해줘" in questions
+    assert "긴급 주문이 전체 생산계획에 미치는 영향을 알려줘" in questions
     assert "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘" not in questions
     assert all("mode=read" in item.url for item in response.items)
 
@@ -344,11 +345,11 @@ def test_recommendation_service_filters_rules_outside_role_intent_matrix(
         allowed_roles=("OPERATOR",),
     )
     unsafe_rule = RecommendedQuestionRule(
-        question_id="unsafe-operator-urgent-order",
-        question="긴급 주문이 전체 생산계획에 미치는 영향을 알려줘",
-        intent=ChatIntent.URGENT_ORDER_IMPACT,
-        category="긴급 주문 영향",
-        url="/schedule-simulations?mode=read",
+        question_id="unsafe-operator-unknown",
+        question="권한 매트릭스에 없는 질문입니다",
+        intent=ChatIntent.UNKNOWN,
+        category="알 수 없음",
+        url="/chat/unknown?mode=read",
         allowed_roles=("OPERATOR",),
     )
     monkeypatch.setattr(

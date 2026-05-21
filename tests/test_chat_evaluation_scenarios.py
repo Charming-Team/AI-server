@@ -924,13 +924,13 @@ def _build_company_info_qdrant_chat_service() -> ChatService:
             id="manager_production_plan_requires_evidence",
         ),
         pytest.param(
-            "EXECUTIVE",
+            "OPERATOR",
             "긴급 주문이 현재 생산계획에 미치는 영향 알려줘",
             "URGENT_ORDER_IMPACT",
             "INSUFFICIENT_EVIDENCE",
             "CHAT_EVIDENCE_001",
             "근거",
-            id="executive_urgent_order_requires_evidence",
+            id="operator_urgent_order_requires_evidence",
         ),
         pytest.param(
             "MANUFACTURING_MANAGER",
@@ -1329,7 +1329,7 @@ def test_chat_answer_evaluation_returns_urgent_order_impact_answer_from_rdb() ->
     try:
         response = _post_chat_answer(
             json=_build_answer_request(
-                "EXECUTIVE",
+                "OPERATOR",
                 "긴급 주문이 전체 생산계획에 미치는 영향을 알려줘",
             ),
         )

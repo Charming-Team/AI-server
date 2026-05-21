@@ -130,20 +130,20 @@ class RecommendationService:
             allowed_roles=("OPERATOR",),
         ),
         RecommendedQuestionRule(
+            question_id="urgent-order-impact",
+            question="긴급 주문이 전체 생산계획에 미치는 영향을 알려줘",
+            intent=ChatIntent.URGENT_ORDER_IMPACT,
+            category="긴급 주문 영향",
+            url="/schedule-simulations?mode=read",
+            allowed_roles=("OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"),
+        ),
+        RecommendedQuestionRule(
             question_id="operator-production-result-read",
             question="오늘 처리 수량과 불량 수량을 조회해줘",
             intent=ChatIntent.PRODUCTION_PLAN,
             category="생산 실적",
             url="/production-results?mode=read",
             allowed_roles=("OPERATOR",),
-        ),
-        RecommendedQuestionRule(
-            question_id="urgent-order-impact",
-            question="긴급 주문이 전체 생산계획에 미치는 영향을 알려줘",
-            intent=ChatIntent.URGENT_ORDER_IMPACT,
-            category="긴급 주문 영향",
-            url="/schedule-simulations",
-            allowed_roles=("EXECUTIVE", "MANUFACTURING_MANAGER"),
         ),
         RecommendedQuestionRule(
             question_id="work-priority-today",

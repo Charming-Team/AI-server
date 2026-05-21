@@ -1,26 +1,12 @@
 from dataclasses import dataclass
 
 from app.features.chat.access_control import (
-    EXECUTIVE_ROLE,
-    MANUFACTURING_MANAGER_ROLE,
-    OPERATOR_ROLE,
+    BUSINESS_ROLES,
     ROLE_INTENT_MATRIX,
 )
 from app.features.chat.schemas import ChatIntent
 
-BUSINESS_ALLOWED_ROLES = frozenset(
-    {
-        OPERATOR_ROLE,
-        EXECUTIVE_ROLE,
-        MANUFACTURING_MANAGER_ROLE,
-    }
-)
-MANAGER_ALLOWED_ROLES = frozenset(
-    {
-        EXECUTIVE_ROLE,
-        MANUFACTURING_MANAGER_ROLE,
-    }
-)
+BUSINESS_ALLOWED_ROLES = BUSINESS_ROLES
 
 
 @dataclass(frozen=True)
@@ -325,7 +311,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
             "recommendation_grade",
             "created_at",
         ),
-        allowed_roles=MANAGER_ALLOWED_ROLES,
+        allowed_roles=BUSINESS_ALLOWED_ROLES,
         target_code_columns=("order_no", "before_line_code", "after_line_code", "product_code"),
         date_filter_columns=("after_start_at",),
         restricted_columns=("cost_change_amount",),

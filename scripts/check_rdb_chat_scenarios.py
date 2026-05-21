@@ -83,13 +83,13 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         min_evidence_count=0,
     ),
     RdbChatScenario(
-        scenario_id="operator-urgent-order-blocked",
+        scenario_id="operator-urgent-order-allowed",
         intent=ChatIntent.URGENT_ORDER_IMPACT,
         question="긴급 주문이 생산계획에 미치는 영향 알려줘",
         role="OPERATOR",
-        expected_security_results=(("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),),
-        require_rdb_evidence=False,
-        min_evidence_count=0,
+        expected_security_results=(("PASSED", None),),
+        require_rdb_evidence=True,
+        min_evidence_count=1,
     ),
     RdbChatScenario(
         scenario_id="operator-financial-blocked",

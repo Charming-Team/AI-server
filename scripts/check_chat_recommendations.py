@@ -8,6 +8,7 @@ import httpx
 
 from app.core.config import Settings
 from app.features.chat.access_control import (
+    OPERATOR_RESTRICTED_TERMS,
     OPERATOR_ROLE,
     ROLE_INTENT_MATRIX,
 )
@@ -220,6 +221,31 @@ def _validate_recommendations(
                 code=ChatErrorCode.CHAT_RECOMMEND_002,
                 message="OPERATOR 추천 질문 URL은 read-only mode를 포함해야 합니다.",
             )
+
+        if normalized_role == OPERATOR_ROLE and _has_operator_restricted_content(item):
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_RECOMMEND_002,
+                message="OPERATOR 추천 질문에 금액성 내용이 포함되어 있습니다.",
+            )
+
+
+def _has_operator_restricted_content(item: Any) -> bool:
+    target = _compact(
+        " ".join(
+            (
+                item.question,
+                item.category,
+                item.intent.value,
+                item.url,
+            )
+        )
+    )
+    return any(_compact(term) in target for term in OPERATOR_RESTRICTED_TERMS)
+
+
+def _compact(value: str) -> str:
+    return "".join(value.casefold().split()).replace("_", "").replace("-", "")
 
 
 def _raise_response_error(response: httpx.Response) -> None:

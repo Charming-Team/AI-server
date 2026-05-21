@@ -33,6 +33,8 @@ def _build_args(**overrides):
 def _recommendation_response(
     *,
     fallback_used: bool = False,
+    question: str = "현재 병목이 발생한 라인과 원인을 알려줘",
+    category: str = "라인 병목",
     url: str = "/production-lines/status",
     intent: str = "LINE_BOTTLENECK",
 ) -> dict:
@@ -40,9 +42,9 @@ def _recommendation_response(
         "items": [
             {
                 "questionId": "line-bottleneck-current",
-                "question": "현재 병목이 발생한 라인과 원인을 알려줘",
+                "question": question,
                 "intent": intent,
-                "category": "라인 병목",
+                "category": category,
                 "url": url,
             }
         ],
@@ -185,8 +187,8 @@ def test_chat_recommendations_script_fails_on_role_forbidden_intent() -> None:
         return httpx.Response(
             200,
             json=_recommendation_response(
-                intent="URGENT_ORDER_IMPACT",
-                url="/schedule-simulations?mode=read",
+                intent="UNKNOWN",
+                url="/chat/unknown?mode=read",
             ),
             request=request,
         )
@@ -235,6 +237,40 @@ def test_chat_recommendations_script_fails_operator_without_read_only_url() -> N
 
     assert exc_info.value.code.value == "CHAT_RECOMMEND_002"
     assert "read-only mode" in exc_info.value.message
+
+
+def test_chat_recommendations_script_fails_operator_financial_question() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_recommendation_response(
+                question="납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
+                category="금액 영향",
+                url="/orders?mode=read",
+                intent="DELIVERY_RISK",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_recommendations.check_chat_recommendations(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/recommendations",
+                token="recommendation-token",
+                request=check_chat_recommendations.build_request(
+                    _build_args(role="OPERATOR")
+                ),
+                timeout_seconds=10.0,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_RECOMMEND_002"
+    assert "금액성 내용" in exc_info.value.message
 
 
 def test_chat_recommendations_script_allows_operator_read_only_url() -> None:

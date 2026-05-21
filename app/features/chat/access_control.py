@@ -26,6 +26,7 @@ ROLE_INTENT_MATRIX = {
             ChatIntent.DELIVERY_RISK,
             ChatIntent.MATERIAL_SHORTAGE,
             ChatIntent.PRODUCTION_PLAN,
+            ChatIntent.URGENT_ORDER_IMPACT,
             ChatIntent.WORK_PRIORITY,
             ChatIntent.LINE_BOTTLENECK,
             ChatIntent.REPORT_LOOKUP,

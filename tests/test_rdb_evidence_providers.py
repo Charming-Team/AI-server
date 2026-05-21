@@ -123,7 +123,7 @@ def test_catalog_rdb_evidence_provider_blocks_role_outside_view_definition() -> 
 
     items = anyio.run(
         provider.get_evidence,
-        _build_request(role="OPERATOR"),
+        _build_request(role="ADMIN"),
         EvidenceLookupFilters(limit=5),
     )
 

@@ -136,7 +136,7 @@ def test_select_scenarios_supports_scenario_groups() -> None:
 
     assert [scenario.scenario_id for scenario in scenarios] == [
         "operator-report-allowed",
-        "operator-urgent-order-blocked",
+        "operator-urgent-order-allowed",
         "operator-financial-blocked",
         "admin-chat-blocked",
         "material-shortage-this-week-target",
@@ -220,11 +220,14 @@ def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
         for scenario in check_rdb_chat_scenarios.ACCESS_CONTROL_RDB_CHAT_SCENARIOS:
             if scenario.question in body:
                 captured_roles.append(payload["user"]["role"])
+                evidence_count = scenario.min_evidence_count
+                if scenario.expected_security_statuses[0] != "PASSED":
+                    evidence_count = 0
                 return httpx.Response(
                     200,
                     json=_answer_response(
                         scenario.intent,
-                        evidence_count=0,
+                        evidence_count=evidence_count,
                         security_status=scenario.expected_security_statuses[0],
                     ),
                     request=request,
@@ -246,14 +249,16 @@ def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
     assert captured_roles == ["OPERATOR", "OPERATOR", "OPERATOR", "ADMIN"]
     assert [scenario["securityStatus"] for scenario in result["scenarios"]] == [
         "INSUFFICIENT_EVIDENCE",
-        "BLOCKED_UNAUTHORIZED",
+        "PASSED",
         "BLOCKED_UNAUTHORIZED",
         "BLOCKED_UNAUTHORIZED",
     ]
-    assert all(
-        scenario["requireRdbEvidence"] is False
-        for scenario in result["scenarios"]
-    )
+    assert [scenario["requireRdbEvidence"] for scenario in result["scenarios"]] == [
+        False,
+        True,
+        False,
+        False,
+    ]
 
 
 def test_check_rdb_chat_scenarios_fails_when_intent_is_different() -> None:
