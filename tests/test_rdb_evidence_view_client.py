@@ -1,5 +1,16 @@
+import sys
+from types import SimpleNamespace
+
+import anyio
+import pytest
+
+from app.core.config import Settings
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.rdb_evidence_view_catalog import get_rdb_evidence_view_definition
-from app.features.chat.rdb_evidence_view_client import build_rdb_evidence_select_sql
+from app.features.chat.rdb_evidence_view_client import (
+    AsyncpgRdbEvidenceViewClient,
+    build_rdb_evidence_select_sql,
+)
 from app.features.chat.schemas import ChatIntent, EvidenceLookupFilters
 
 
@@ -95,3 +106,61 @@ def test_build_rdb_evidence_select_sql_ignores_dates_without_catalog_date_column
     assert "where" not in sql
     assert "limit $1" in sql
     assert params == [2]
+
+
+def test_asyncpg_rdb_evidence_view_client_wraps_connection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    definition = get_rdb_evidence_view_definition(ChatIntent.MATERIAL_SHORTAGE)
+    assert definition is not None
+
+    async def fail_connect(**kwargs):
+        raise ConnectionRefusedError("connection refused")
+
+    monkeypatch.setitem(sys.modules, "asyncpg", SimpleNamespace(connect=fail_connect))
+    client = AsyncpgRdbEvidenceViewClient(
+        Settings(rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap")
+    )
+
+    async def run() -> None:
+        await client.fetch_rows(definition, EvidenceLookupFilters(limit=5), 5)
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_004"
+    assert exc_info.value.message == "RDB Evidence View 조회에 실패했습니다."
+
+
+def test_asyncpg_rdb_evidence_view_client_closes_connection_after_fetch_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    definition = get_rdb_evidence_view_definition(ChatIntent.MATERIAL_SHORTAGE)
+    assert definition is not None
+    closed = False
+
+    class FakeConnection:
+        async def fetch(self, sql, *params, timeout):
+            raise RuntimeError("query failed")
+
+        async def close(self):
+            nonlocal closed
+            closed = True
+
+    async def connect(**kwargs):
+        return FakeConnection()
+
+    monkeypatch.setitem(sys.modules, "asyncpg", SimpleNamespace(connect=connect))
+    client = AsyncpgRdbEvidenceViewClient(
+        Settings(rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap")
+    )
+
+    async def run() -> None:
+        await client.fetch_rows(definition, EvidenceLookupFilters(limit=5), 5)
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_004"
+    assert closed is True

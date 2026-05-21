@@ -48,15 +48,26 @@ class AsyncpgRdbEvidenceViewClient:
             ) from exc
 
         sql, params = build_rdb_evidence_select_sql(definition, filters, limit)
-        connection = await asyncpg.connect(
-            dsn=self.dsn,
-            timeout=self.timeout_seconds,
-        )
+        connection = None
         try:
+            connection = await asyncpg.connect(
+                dsn=self.dsn,
+                timeout=self.timeout_seconds,
+            )
             rows = await connection.fetch(sql, *params, timeout=self.timeout_seconds)
             return [dict(row) for row in rows]
+        except Exception as exc:
+            raise ChatExternalServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_EVIDENCE_004,
+                message="RDB Evidence View 조회에 실패했습니다.",
+            ) from exc
         finally:
-            await connection.close()
+            if connection is not None:
+                try:
+                    await connection.close()
+                except Exception:
+                    pass
 
 
 def build_rdb_evidence_select_sql(
