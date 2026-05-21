@@ -6,6 +6,7 @@ on:
       - main
       - develop
       - "feat/**"
+      - "fix/**"
       - "chore/**"
   workflow_dispatch:
     inputs:
@@ -36,8 +37,27 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Run lint
+        run: python -m ruff check .
+
       - name: Run tests
-        run: pytest
+        run: python -m pytest
+
+      - name: Run chatbot release gate
+        env:
+          CHAT_ANSWER_INTERNAL_TOKEN: ci-answer-token
+          CHAT_RECOMMENDATION_INTERNAL_TOKEN: ci-recommendation-token
+          DOCUMENT_INDEX_INTERNAL_TOKEN: ci-document-token
+          RDB_EVIDENCE_ENABLED: "true"
+          RDB_EVIDENCE_DSN: postgresql://reader:ci-password@localhost:5432/smap
+          QDRANT_SEARCH_ENABLED: "true"
+          QDRANT_URL: http://localhost:6333
+          QDRANT_COLLECTION: smap_internal_documents
+          EMBEDDING_ENABLED: "true"
+          EMBEDDING_BASE_URL: http://localhost:8002
+          EMBEDDING_PATH: /embed
+          EMBEDDING_MODEL: BAAI/bge-m3
+        run: python -m scripts.check_chat_runtime --preset full --json
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
