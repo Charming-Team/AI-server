@@ -28,6 +28,7 @@ ROLE_INTENT_MATRIX = {
             ChatIntent.PRODUCTION_PLAN,
             ChatIntent.WORK_PRIORITY,
             ChatIntent.LINE_BOTTLENECK,
+            ChatIntent.REPORT_LOOKUP,
         }
     ),
     EXECUTIVE_ROLE: frozenset(

@@ -18,6 +18,11 @@ from app.features.chat.schemas import ChatErrorCode, ChatIntent, SecurityStatus
             ChatIntent.DELIVERY_RISK,
         ),
         (
+            "OPERATOR",
+            "이번 달 월간 리포트 요약해줘",
+            ChatIntent.REPORT_LOOKUP,
+        ),
+        (
             "MANUFACTURING_MANAGER",
             "자재 부족으로 영향받는 생산계획을 알려줘",
             ChatIntent.MATERIAL_SHORTAGE,
@@ -99,8 +104,8 @@ def test_role_access_policy_blocks_operator_financial_question() -> None:
     [
         (
             "OPERATOR",
-            "이번 달 월간 리포트 요약해줘",
-            ChatIntent.REPORT_LOOKUP,
+            "긴급 주문이 생산계획에 미치는 영향 알려줘",
+            ChatIntent.URGENT_ORDER_IMPACT,
         ),
     ],
 )

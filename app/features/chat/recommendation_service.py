@@ -122,6 +122,14 @@ class RecommendationService:
             allowed_roles=("OPERATOR",),
         ),
         RecommendedQuestionRule(
+            question_id="operator-report-summary-read",
+            question="최근 생산 리스크 보고서를 조회해줘",
+            intent=ChatIntent.REPORT_LOOKUP,
+            category="보고서 조회",
+            url="/reports?mode=read",
+            allowed_roles=("OPERATOR",),
+        ),
+        RecommendedQuestionRule(
             question_id="operator-production-result-read",
             question="오늘 처리 수량과 불량 수량을 조회해줘",
             intent=ChatIntent.PRODUCTION_PLAN,

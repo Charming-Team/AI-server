@@ -82,6 +82,7 @@ def test_rdb_evidence_view_definitions_define_selected_date_filter_columns() -> 
                 ChatIntent.PRODUCTION_PLAN,
                 ChatIntent.WORK_PRIORITY,
                 ChatIntent.LINE_BOTTLENECK,
+                ChatIntent.REPORT_LOOKUP,
             },
         ),
         (

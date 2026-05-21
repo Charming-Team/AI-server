@@ -28,7 +28,7 @@ class RdbChatScenario:
     intent: ChatIntent
     question: str
     role: str | None = None
-    expected_security_status: str = "PASSED"
+    expected_security_statuses: tuple[str, ...] = ("PASSED",)
     require_rdb_evidence: bool = True
     min_evidence_count: int = 1
 
@@ -63,11 +63,11 @@ DEFAULT_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
 
 ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     RdbChatScenario(
-        scenario_id="operator-report-blocked",
+        scenario_id="operator-report-allowed",
         intent=ChatIntent.REPORT_LOOKUP,
         question="이번 달 월간 리포트 요약해줘",
         role="OPERATOR",
-        expected_security_status="BLOCKED_UNAUTHORIZED",
+        expected_security_statuses=("INSUFFICIENT_EVIDENCE", "PASSED"),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -76,7 +76,7 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         intent=ChatIntent.URGENT_ORDER_IMPACT,
         question="긴급 주문이 생산계획에 미치는 영향 알려줘",
         role="OPERATOR",
-        expected_security_status="BLOCKED_UNAUTHORIZED",
+        expected_security_statuses=("BLOCKED_UNAUTHORIZED",),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -85,7 +85,7 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         intent=ChatIntent.DELIVERY_RISK,
         question="납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
         role="OPERATOR",
-        expected_security_status="BLOCKED_UNAUTHORIZED",
+        expected_security_statuses=("BLOCKED_UNAUTHORIZED",),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -94,7 +94,7 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
         intent=ChatIntent.DELIVERY_RISK,
         question="납기 위험이 있는 주문 알려줘",
         role="ADMIN",
-        expected_security_status="BLOCKED_UNAUTHORIZED",
+        expected_security_statuses=("BLOCKED_UNAUTHORIZED",),
         require_rdb_evidence=False,
         min_evidence_count=0,
     ),
@@ -253,14 +253,14 @@ async def check_rdb_chat_scenarios(
                     f"expected={scenario.intent.value}, actual={result['intent']}"
                 ),
             )
-        if result["securityStatus"] != scenario.expected_security_status:
+        if result["securityStatus"] not in scenario.expected_security_statuses:
             raise ChatServiceError(
                 status_code=500,
                 code=ChatErrorCode.CHAT_EVIDENCE_001,
                 message=(
                     "챗봇 시나리오 보안 상태가 예상과 다릅니다. "
                     f"scenario={scenario.scenario_id}, "
-                    f"expected={scenario.expected_security_status}, "
+                    f"expected={','.join(scenario.expected_security_statuses)}, "
                     f"actual={result['securityStatus']}"
                 ),
             )
@@ -271,7 +271,7 @@ async def check_rdb_chat_scenarios(
                 "role": scenario.role or args.role,
                 "question": scenario.question,
                 "expectedIntent": scenario.intent.value,
-                "expectedSecurityStatus": scenario.expected_security_status,
+                "expectedSecurityStatuses": list(scenario.expected_security_statuses),
                 "requireRdbEvidence": scenario.require_rdb_evidence,
                 **result,
             }

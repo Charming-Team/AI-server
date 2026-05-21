@@ -421,7 +421,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
             "created_at",
             "updated_at",
         ),
-        allowed_roles=MANAGER_ALLOWED_ROLES,
+        allowed_roles=BUSINESS_ALLOWED_ROLES,
         date_filter_columns=("created_at", "target_start_date", "target_end_date"),
         default_order_columns=("created_at", "report_id"),
     ),

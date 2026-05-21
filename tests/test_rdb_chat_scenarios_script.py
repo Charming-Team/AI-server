@@ -39,6 +39,12 @@ def _answer_response(
     evidence_count: int = 1,
     security_status: str = "PASSED",
 ) -> dict:
+    security_code = None
+    if security_status == "BLOCKED_UNAUTHORIZED":
+        security_code = "CHAT_SECURITY_004"
+    if security_status == "INSUFFICIENT_EVIDENCE":
+        security_code = "CHAT_EVIDENCE_001"
+
     return {
         "sessionId": 10,
         "messageId": 24,
@@ -78,11 +84,11 @@ def _answer_response(
         ),
         "securityResult": {
             "status": security_status,
-            "code": "CHAT_SECURITY_004" if security_status != "PASSED" else None,
+            "code": security_code,
             "reason": (
                 "보안 필터를 통과했고 내부 근거가 확인되었습니다."
                 if security_status == "PASSED"
-                else "역할 권한으로 차단되었습니다."
+                else "근거가 부족하거나 역할 권한으로 차단되었습니다."
             ),
         },
         "modelResult": {
@@ -129,7 +135,7 @@ def test_select_scenarios_supports_scenario_groups() -> None:
     )
 
     assert [scenario.scenario_id for scenario in scenarios] == [
-        "operator-report-blocked",
+        "operator-report-allowed",
         "operator-urgent-order-blocked",
         "operator-financial-blocked",
         "admin-chat-blocked",
@@ -138,16 +144,19 @@ def test_select_scenarios_supports_scenario_groups() -> None:
         "production-plan-date-range",
     ]
     assert scenarios[0].role == "OPERATOR"
-    assert scenarios[0].expected_security_status == "BLOCKED_UNAUTHORIZED"
+    assert scenarios[0].expected_security_statuses == (
+        "INSUFFICIENT_EVIDENCE",
+        "PASSED",
+    )
 
 
 def test_select_scenarios_finds_explicit_scenario_without_group() -> None:
     scenarios = check_rdb_chat_scenarios.select_scenarios(
-        ["operator-report-blocked"],
+        ["operator-report-allowed"],
     )
 
     assert [scenario.scenario_id for scenario in scenarios] == [
-        "operator-report-blocked",
+        "operator-report-allowed",
     ]
 
 
@@ -188,7 +197,7 @@ def test_check_rdb_chat_scenarios_calls_fastapi_for_each_scenario() -> None:
         ChatIntent.WORK_PRIORITY.value,
     }
     assert all(
-        scenario["expectedSecurityStatus"] == "PASSED"
+        scenario["expectedSecurityStatuses"] == ["PASSED"]
         for scenario in result["scenarios"]
     )
 
@@ -207,7 +216,7 @@ def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
                     json=_answer_response(
                         scenario.intent,
                         evidence_count=0,
-                        security_status=scenario.expected_security_status,
+                        security_status=scenario.expected_security_statuses[0],
                     ),
                     request=request,
                 )
@@ -226,10 +235,12 @@ def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
     assert result["checkStatus"] == "PASS"
     assert result["scenarioCount"] == 4
     assert captured_roles == ["OPERATOR", "OPERATOR", "OPERATOR", "ADMIN"]
-    assert all(
-        scenario["securityStatus"] == "BLOCKED_UNAUTHORIZED"
-        for scenario in result["scenarios"]
-    )
+    assert [scenario["securityStatus"] for scenario in result["scenarios"]] == [
+        "INSUFFICIENT_EVIDENCE",
+        "BLOCKED_UNAUTHORIZED",
+        "BLOCKED_UNAUTHORIZED",
+        "BLOCKED_UNAUTHORIZED",
+    ]
     assert all(
         scenario["requireRdbEvidence"] is False
         for scenario in result["scenarios"]
@@ -265,7 +276,7 @@ def test_check_rdb_chat_scenarios_fails_when_security_status_is_different() -> N
         return httpx.Response(
             200,
             json=_answer_response(
-                ChatIntent.REPORT_LOOKUP,
+                ChatIntent.DELIVERY_RISK,
                 evidence_count=0,
                 security_status="PASSED",
             ),
@@ -278,7 +289,7 @@ def test_check_rdb_chat_scenarios_fails_when_security_status_is_different() -> N
             await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
                 _build_args(
                     scenario_group=["access"],
-                    scenario=["operator-report-blocked"],
+                    scenario=["operator-financial-blocked"],
                 ),
                 http_client=http_client,
             )
@@ -301,6 +312,7 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
                 "role": "MANUFACTURING_MANAGER",
                 "intent": "MATERIAL_SHORTAGE",
                 "securityStatus": "PASSED",
+                "expectedSecurityStatuses": ["PASSED"],
                 "requireRdbEvidence": True,
                 "rdbEvidenceCount": 3,
                 "sourceCount": 3,
@@ -332,6 +344,7 @@ def test_check_rdb_chat_scenarios_main_does_not_expose_secret(
                     "role": "MANUFACTURING_MANAGER",
                     "intent": "MATERIAL_SHORTAGE",
                     "securityStatus": "PASSED",
+                    "expectedSecurityStatuses": ["PASSED"],
                     "requireRdbEvidence": True,
                     "rdbEvidenceCount": 1,
                     "sourceCount": 1,

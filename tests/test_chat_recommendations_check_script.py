@@ -184,7 +184,10 @@ def test_chat_recommendations_script_fails_on_role_forbidden_intent() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            json=_recommendation_response(intent="REPORT_LOOKUP"),
+            json=_recommendation_response(
+                intent="URGENT_ORDER_IMPACT",
+                url="/schedule-simulations?mode=read",
+            ),
             request=request,
         )
 
