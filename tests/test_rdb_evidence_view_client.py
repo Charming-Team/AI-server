@@ -1,4 +1,5 @@
 import sys
+from datetime import date
 from types import SimpleNamespace
 
 import anyio
@@ -79,7 +80,7 @@ def test_build_rdb_evidence_select_sql_uses_date_filters() -> None:
     assert "where (" in sql
     assert ") and (" in sql
     assert "limit $4" in sql
-    assert params == ["LINE-A01", "2026-05-12", "2026-05-18", 5]
+    assert params == ["LINE-A01", date(2026, 5, 12), date(2026, 5, 18), 5]
 
 
 def test_build_rdb_evidence_select_sql_ignores_dates_without_catalog_date_columns() -> None:

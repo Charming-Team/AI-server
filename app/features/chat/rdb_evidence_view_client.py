@@ -1,5 +1,6 @@
 import re
 from collections.abc import Mapping
+from datetime import date
 from typing import Any, Protocol
 
 from app.core.config import Settings
@@ -96,7 +97,7 @@ def build_rdb_evidence_select_sql(
         where_clauses.append(f"({' or '.join(target_conditions)})")
 
     if filters.from_date and definition.date_filter_columns:
-        params.append(filters.from_date)
+        params.append(date.fromisoformat(filters.from_date))
         from_conditions = [
             f"{_quote_identifier(column)}::date >= ${len(params)}::date"
             for column in definition.date_filter_columns
@@ -104,7 +105,7 @@ def build_rdb_evidence_select_sql(
         where_clauses.append(f"({' or '.join(from_conditions)})")
 
     if filters.to_date and definition.date_filter_columns:
-        params.append(filters.to_date)
+        params.append(date.fromisoformat(filters.to_date))
         to_conditions = [
             f"{_quote_identifier(column)}::date <= ${len(params)}::date"
             for column in definition.date_filter_columns
