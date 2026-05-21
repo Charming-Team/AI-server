@@ -178,6 +178,21 @@ def test_document_index_policy_allows_operator_operational_document() -> None:
     )
 
 
+def test_document_index_policy_allows_operator_non_financial_report() -> None:
+    policy = DocumentIndexPolicy()
+
+    policy.validate(
+        _build_document(
+            document_type="REPORT",
+            title="월간 생산 리스크 보고서",
+            content="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            url="/reports/20?mode=read",
+            allowed_roles=["OPERATOR"],
+            intent_tags=["REPORT_LOOKUP"],
+        )
+    )
+
+
 def test_document_index_policy_rejects_operator_financial_document() -> None:
     policy = DocumentIndexPolicy()
 
