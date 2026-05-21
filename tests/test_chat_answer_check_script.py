@@ -27,6 +27,8 @@ def _build_args(**overrides):
         "requested_at": "2026-05-12T10:30:00+09:00",
         "min_evidence_count": 0,
         "require_rdb_evidence": False,
+        "min_document_source_count": 0,
+        "require_vector_search": False,
         "json": False,
     }
     values.update(overrides)
@@ -38,6 +40,7 @@ def _answer_response(
     rdb_evidence_count: int | None = None,
     document_source_count: int = 0,
     used_rdb_evidence: bool | None = None,
+    used_vector_search: bool = False,
 ) -> dict:
     resolved_rdb_evidence_count = (
         evidence_count if rdb_evidence_count is None else rdb_evidence_count
@@ -69,6 +72,27 @@ def _answer_response(
                 "sourceOrigin": "RDB",
             }
         )
+    if document_source_count > 0:
+        urls.append(
+            {
+                "label": "LINE-A01 병목 대응 기준",
+                "url": "/lines/LINE-A01",
+                "type": "COMPANY_INFO",
+            }
+        )
+        sources.append(
+            {
+                "sourceType": "COMPANY_INFO",
+                "title": "LINE-A01 병목 대응 기준",
+                "summary": "LINE-A01 대기 시간이 증가하면 처리량과 대기 수량을 확인합니다.",
+                "url": "/lines/LINE-A01",
+                "referenceId": None,
+                "source": "line-bottleneck-guide:chunk-0001",
+                "basisTime": "2026-05-12T10:35:00+09:00",
+                "sourceOrigin": "QDRANT",
+                "relevanceScore": 0.92,
+            }
+        )
 
     return {
         "sessionId": 10,
@@ -84,13 +108,15 @@ def _answer_response(
             "reason": "보안 필터를 통과했고 내부 근거가 확인되었습니다.",
         },
         "modelResult": {
-            "usedVectorSearch": False,
+            "usedVectorSearch": used_vector_search,
             "usedRdbEvidence": resolved_used_rdb_evidence,
             "usedLlmGeneration": False,
             "rdbEvidenceCount": resolved_rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
-            "vectorSearchSkippedReason": None,
+            "vectorSearchSkippedReason": (
+                None if used_vector_search else "Qdrant 검색이 비활성화되어 있습니다."
+            ),
             "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         },
     }
@@ -151,6 +177,8 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
                 timeout_seconds=10.0,
                 min_evidence_count=1,
                 require_rdb_evidence=True,
+                min_document_source_count=0,
+                require_vector_search=False,
                 http_client=http_client,
             )
 
@@ -170,8 +198,11 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "requireRdbEvidence": True,
         "rdbEvidenceCount": 1,
         "documentSourceCount": 0,
+        "minDocumentSourceCount": 0,
         "usedRdbEvidence": True,
         "usedVectorSearch": False,
+        "requireVectorSearch": False,
+        "vectorSearchSkippedReason": "Qdrant 검색이 비활성화되어 있습니다.",
         "usedLlmGeneration": False,
         "sourceCount": 1,
         "urlCount": 1,
@@ -235,6 +266,108 @@ def test_check_chat_answer_script_fails_when_rdb_evidence_is_required() -> None:
     assert "RDB Evidence가 사용되지 않았습니다" in exc_info.value.message
 
 
+def test_check_chat_answer_script_passes_when_vector_search_is_required() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=1,
+                rdb_evidence_count=0,
+                document_source_count=1,
+                used_rdb_evidence=False,
+                used_vector_search=True,
+            ),
+            request=request,
+        )
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                min_document_source_count=1,
+                require_vector_search=True,
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["usedVectorSearch"] is True
+    assert result["requireVectorSearch"] is True
+    assert result["documentSourceCount"] == 1
+    assert result["minDocumentSourceCount"] == 1
+    assert result["sourceCount"] == 2
+
+
+def test_check_chat_answer_script_fails_when_document_source_count_is_below_minimum() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=1,
+                document_source_count=0,
+                used_vector_search=True,
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                min_document_source_count=1,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "Qdrant 문서 출처 개수가 기준보다 적습니다" in exc_info.value.message
+    assert "expected>=1, actual=0" in exc_info.value.message
+
+
+def test_check_chat_answer_script_fails_when_vector_search_is_required() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=1,
+                document_source_count=1,
+                used_vector_search=False,
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                require_vector_search=True,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "Qdrant Vector Search가 사용되지 않았습니다" in exc_info.value.message
+
+
 def test_check_chat_answer_script_main_does_not_expose_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -250,8 +383,11 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "requireRdbEvidence": True,
             "rdbEvidenceCount": 1,
             "documentSourceCount": 0,
+            "minDocumentSourceCount": 0,
             "usedRdbEvidence": True,
             "usedVectorSearch": False,
+            "requireVectorSearch": False,
+            "vectorSearchSkippedReason": None,
             "usedLlmGeneration": False,
             "sourceCount": 1,
             "urlCount": 1,
@@ -269,6 +405,9 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "--min-evidence-count",
             "1",
             "--require-rdb-evidence",
+            "--min-document-source-count",
+            "1",
+            "--require-vector-search",
         ],
         stdout=stdout,
     )

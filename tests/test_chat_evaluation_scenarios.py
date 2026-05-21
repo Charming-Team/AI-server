@@ -579,6 +579,43 @@ class FakeOperatorRestrictedOnlyQdrantClient:
         ]
 
 
+class FakeEmptyQdrantClient:
+    async def search(self, payload: dict) -> list[dict]:
+        assert payload["filter"] == {
+            "must": [
+                {"key": "allowedRoles", "match": {"any": ["MANUFACTURING_MANAGER"]}},
+                {"key": "intentTags", "match": {"any": ["LINE_BOTTLENECK"]}},
+            ]
+        }
+        return []
+
+
+class FakeRoleOutsideQdrantClient:
+    async def search(self, payload: dict) -> list[dict]:
+        assert payload["filter"] == {
+            "must": [
+                {"key": "allowedRoles", "match": {"any": ["OPERATOR"]}},
+                {"key": "intentTags", "match": {"any": ["DELIVERY_RISK"]}},
+            ]
+        }
+        return [
+            {
+                "id": "executive-only-risk-report",
+                "score": 0.9,
+                "payload": {
+                    "documentId": "executive-risk-report",
+                    "chunkId": "chunk-0001",
+                    "documentType": "REPORT",
+                    "title": "경영진 납기 위험 보고서",
+                    "chunkText": "경영진에게만 허용된 납기 위험 보고서입니다.",
+                    "url": "/reports/executive-risk",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["DELIVERY_RISK"],
+                },
+            }
+        ]
+
+
 class FakeReportLookupQdrantClient:
     async def search(self, payload: dict) -> list[dict]:
         assert payload["filter"] == {
@@ -799,6 +836,28 @@ def _build_operator_restricted_only_qdrant_chat_service() -> ChatService:
         Settings(qdrant_search_enabled=True),
         embedding_service=FakeSearchEmbeddingService(),
         qdrant_client=FakeOperatorRestrictedOnlyQdrantClient(),
+    )
+    return service
+
+
+def _build_empty_qdrant_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEmptyEvidenceService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeSearchEmbeddingService(),
+        qdrant_client=FakeEmptyQdrantClient(),
+    )
+    return service
+
+
+def _build_role_outside_qdrant_chat_service() -> ChatService:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEmptyEvidenceService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeSearchEmbeddingService(),
+        qdrant_client=FakeRoleOutsideQdrantClient(),
     )
     return service
 
@@ -1745,6 +1804,78 @@ def test_chat_answer_evaluation_returns_insufficient_evidence_when_qdrant_is_fil
         "evidenceCount": 0,
         "vectorSearchSkippedReason": (
             "Qdrant 검색 결과가 OPERATOR 권한 제한 내용을 포함해 제외되었습니다."
+        ),
+        "llmGenerationSkippedReason": "RDB Evidence와 문서 검색 근거가 없습니다.",
+    }
+
+
+def test_chat_answer_evaluation_returns_insufficient_evidence_when_qdrant_is_empty() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_empty_qdrant_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "MANUFACTURING_MANAGER",
+                "라인 병목이 발생한 공정 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "LINE_BOTTLENECK"
+    assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert body["securityResult"]["code"] == "CHAT_EVIDENCE_001"
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": False,
+        "usedLlmGeneration": False,
+        "rdbEvidenceCount": 0,
+        "documentSourceCount": 0,
+        "evidenceCount": 0,
+        "vectorSearchSkippedReason": "Qdrant 검색 결과가 없습니다.",
+        "llmGenerationSkippedReason": "RDB Evidence와 문서 검색 근거가 없습니다.",
+    }
+
+
+def test_chat_answer_evaluation_returns_insufficient_evidence_for_role_blocked_qdrant() -> None:
+    previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
+    app.dependency_overrides[get_chat_service] = _build_role_outside_qdrant_chat_service
+    try:
+        response = _post_chat_answer(
+            json=_build_answer_request(
+                "OPERATOR",
+                "현재 납기 위험이 높은 주문 알려줘",
+            ),
+        )
+    finally:
+        if previous_override is _MISSING_OVERRIDE:
+            app.dependency_overrides.pop(get_chat_service, None)
+        else:
+            app.dependency_overrides[get_chat_service] = previous_override
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "DELIVERY_RISK"
+    assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert body["securityResult"]["code"] == "CHAT_EVIDENCE_001"
+    assert body["sources"] == []
+    assert body["urls"] == []
+    assert body["modelResult"] == {
+        "usedVectorSearch": True,
+        "usedRdbEvidence": False,
+        "usedLlmGeneration": False,
+        "rdbEvidenceCount": 0,
+        "documentSourceCount": 0,
+        "evidenceCount": 0,
+        "vectorSearchSkippedReason": (
+            "Qdrant 검색 결과가 사용자 권한 범위를 통과하지 못했습니다."
         ),
         "llmGenerationSkippedReason": "RDB Evidence와 문서 검색 근거가 없습니다.",
     }

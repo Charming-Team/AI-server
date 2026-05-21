@@ -46,6 +46,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="RDB Evidence가 실제로 사용됐는지 검증합니다.",
     )
+    parser.add_argument(
+        "--min-document-source-count",
+        type=int,
+        default=0,
+        help="요구하는 최소 Qdrant 문서 출처 개수",
+    )
+    parser.add_argument(
+        "--require-vector-search",
+        action="store_true",
+        help="Qdrant Vector Search가 실제로 수행됐는지 검증합니다.",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -89,6 +100,8 @@ async def check_chat_answer(
     timeout_seconds: float,
     min_evidence_count: int = 0,
     require_rdb_evidence: bool = False,
+    min_document_source_count: int = 0,
+    require_vector_search: bool = False,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     url = build_answer_url(base_url, path)
@@ -118,6 +131,24 @@ async def check_chat_answer(
             message="FastAPI 챗봇 응답에 RDB Evidence가 사용되지 않았습니다.",
         )
 
+    document_source_count = answer.model_result.document_source_count
+    if document_source_count < min_document_source_count:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message=(
+                "FastAPI 챗봇 응답 Qdrant 문서 출처 개수가 기준보다 적습니다. "
+                f"expected>={min_document_source_count}, actual={document_source_count}"
+            ),
+        )
+
+    if require_vector_search and not answer.model_result.used_vector_search:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message="FastAPI 챗봇 응답에 Qdrant Vector Search가 사용되지 않았습니다.",
+        )
+
     return {
         "checkStatus": "PASS",
         "url": url,
@@ -130,9 +161,12 @@ async def check_chat_answer(
         "minEvidenceCount": min_evidence_count,
         "requireRdbEvidence": require_rdb_evidence,
         "rdbEvidenceCount": answer.model_result.rdb_evidence_count,
-        "documentSourceCount": answer.model_result.document_source_count,
+        "documentSourceCount": document_source_count,
+        "minDocumentSourceCount": min_document_source_count,
         "usedRdbEvidence": answer.model_result.used_rdb_evidence,
         "usedVectorSearch": answer.model_result.used_vector_search,
+        "requireVectorSearch": require_vector_search,
+        "vectorSearchSkippedReason": answer.model_result.vector_search_skipped_reason,
         "usedLlmGeneration": answer.model_result.used_llm_generation,
         "sourceCount": len(answer.sources),
         "urlCount": len(answer.urls),
@@ -190,8 +224,11 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"requireRdbEvidence={result['requireRdbEvidence']}",
         f"rdbEvidenceCount={result['rdbEvidenceCount']}",
         f"documentSourceCount={result['documentSourceCount']}",
+        f"minDocumentSourceCount={result['minDocumentSourceCount']}",
         f"usedRdbEvidence={result['usedRdbEvidence']}",
         f"usedVectorSearch={result['usedVectorSearch']}",
+        f"requireVectorSearch={result['requireVectorSearch']}",
+        f"vectorSearchSkippedReason={result['vectorSearchSkippedReason']}",
         f"usedLlmGeneration={result['usedLlmGeneration']}",
         f"sourceCount={result['sourceCount']}",
         f"urlCount={result['urlCount']}",
@@ -226,6 +263,8 @@ def main(
                 timeout_seconds=args.timeout_seconds,
                 min_evidence_count=args.min_evidence_count,
                 require_rdb_evidence=args.require_rdb_evidence,
+                min_document_source_count=args.min_document_source_count,
+                require_vector_search=args.require_vector_search,
             )
         )
     except ChatServiceError as exc:
