@@ -64,6 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="LLM 답변 생성이 실제로 수행됐는지 검증합니다.",
     )
     parser.add_argument(
+        "--expected-llm-skipped-reason",
+        help=(
+            "기대하는 LLM 생성 스킵 사유입니다. 스킵 사유가 없어야 하면 NONE을 "
+            "사용합니다."
+        ),
+    )
+    parser.add_argument(
         "--expected-security-status",
         choices=[status.value for status in SecurityStatus],
         help="기대하는 응답 보안 상태. 예: PASSED, BLOCKED_UNAUTHORIZED",
@@ -119,6 +126,7 @@ async def check_chat_answer(
     min_document_source_count: int = 0,
     require_vector_search: bool = False,
     require_llm_generation: bool = False,
+    expected_llm_skipped_reason: str | None = None,
     expected_security_status: str | None = None,
     expected_security_code: str | None = None,
     http_client: httpx.AsyncClient | None = None,
@@ -205,6 +213,24 @@ async def check_chat_answer(
             message="FastAPI 챗봇 응답에 LLM 답변 생성이 사용되지 않았습니다.",
         )
 
+    llm_skipped_reason = answer.model_result.llm_generation_skipped_reason
+    expected_llm_skipped_reason_value = _resolve_expected_optional_text(
+        expected_llm_skipped_reason
+    )
+    if (
+        expected_llm_skipped_reason is not None
+        and llm_skipped_reason != expected_llm_skipped_reason_value
+    ):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_LLM_004,
+            message=(
+                "FastAPI 챗봇 응답의 LLM 생성 스킵 사유가 기대값과 다릅니다. "
+                f"expected={expected_llm_skipped_reason_value}, "
+                f"actual={llm_skipped_reason}"
+            ),
+        )
+
     return {
         "checkStatus": "PASS",
         "url": url,
@@ -225,16 +251,21 @@ async def check_chat_answer(
         "vectorSearchSkippedReason": answer.model_result.vector_search_skipped_reason,
         "usedLlmGeneration": answer.model_result.used_llm_generation,
         "requireLlmGeneration": require_llm_generation,
-        "llmGenerationSkippedReason": answer.model_result.llm_generation_skipped_reason,
+        "llmGenerationSkippedReason": llm_skipped_reason,
+        "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
         "sourceCount": len(answer.sources),
         "urlCount": len(answer.urls),
     }
 
 
 def _resolve_expected_security_code(expected_security_code: str | None) -> str | None:
-    if expected_security_code == "NONE":
+    return _resolve_expected_optional_text(expected_security_code)
+
+
+def _resolve_expected_optional_text(expected_text: str | None) -> str | None:
+    if expected_text == "NONE":
         return None
-    return expected_security_code
+    return expected_text
 
 
 async def _post_chat_answer(
@@ -298,6 +329,10 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"usedLlmGeneration={result['usedLlmGeneration']}",
         f"requireLlmGeneration={result['requireLlmGeneration']}",
         f"llmGenerationSkippedReason={result['llmGenerationSkippedReason']}",
+        (
+            "expectedLlmGenerationSkippedReason="
+            f"{result['expectedLlmGenerationSkippedReason']}"
+        ),
         f"sourceCount={result['sourceCount']}",
         f"urlCount={result['urlCount']}",
     ]
@@ -334,6 +369,7 @@ def main(
                 min_document_source_count=args.min_document_source_count,
                 require_vector_search=args.require_vector_search,
                 require_llm_generation=args.require_llm_generation,
+                expected_llm_skipped_reason=args.expected_llm_skipped_reason,
                 expected_security_status=args.expected_security_status,
                 expected_security_code=args.expected_security_code,
             )

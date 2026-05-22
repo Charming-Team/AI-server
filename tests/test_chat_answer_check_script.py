@@ -30,6 +30,7 @@ def _build_args(**overrides):
         "min_document_source_count": 0,
         "require_vector_search": False,
         "require_llm_generation": False,
+        "expected_llm_skipped_reason": None,
         "expected_security_status": None,
         "expected_security_code": None,
         "json": False,
@@ -45,6 +46,7 @@ def _answer_response(
     used_rdb_evidence: bool | None = None,
     used_vector_search: bool = False,
     used_llm_generation: bool = False,
+    llm_skipped_reason: str | None = None,
     security_status: str = "PASSED",
     security_code: str | None = None,
 ) -> dict:
@@ -126,7 +128,10 @@ def _answer_response(
             "llmGenerationSkippedReason": (
                 None
                 if used_llm_generation
-                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                else (
+                    llm_skipped_reason
+                    or "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                )
             ),
         },
     }
@@ -218,6 +223,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "usedLlmGeneration": False,
         "requireLlmGeneration": False,
         "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+        "expectedLlmGenerationSkippedReason": None,
         "sourceCount": 1,
         "urlCount": 1,
     }
@@ -534,6 +540,7 @@ def test_check_chat_answer_script_passes_when_llm_generation_is_required() -> No
     assert result["usedLlmGeneration"] is True
     assert result["requireLlmGeneration"] is True
     assert result["llmGenerationSkippedReason"] is None
+    assert result["expectedLlmGenerationSkippedReason"] is None
 
 
 def test_check_chat_answer_script_fails_when_llm_generation_is_required() -> None:
@@ -564,6 +571,100 @@ def test_check_chat_answer_script_fails_when_llm_generation_is_required() -> Non
     assert "LLM 답변 생성이 사용되지 않았습니다" in exc_info.value.message
 
 
+def test_check_chat_answer_script_validates_expected_llm_skipped_reason() -> None:
+    expected_reason = "LLM 서버 호출에 실패해 근거 기반 대체 답변을 반환했습니다."
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=1,
+                used_llm_generation=False,
+                llm_skipped_reason=expected_reason,
+            ),
+            request=request,
+        )
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_llm_skipped_reason=expected_reason,
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["llmGenerationSkippedReason"] == expected_reason
+    assert result["expectedLlmGenerationSkippedReason"] == expected_reason
+
+
+def test_check_chat_answer_script_validates_no_llm_skipped_reason() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(evidence_count=1, used_llm_generation=True),
+            request=request,
+        )
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_llm_skipped_reason="NONE",
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["llmGenerationSkippedReason"] is None
+    assert result["expectedLlmGenerationSkippedReason"] == "NONE"
+
+
+def test_check_chat_answer_script_fails_when_llm_skipped_reason_is_unexpected() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                evidence_count=1,
+                used_llm_generation=False,
+                llm_skipped_reason="LLM이 빈 답변을 반환했습니다.",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_llm_skipped_reason=(
+                    "LLM 서버 호출에 실패해 근거 기반 대체 답변을 반환했습니다."
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 생성 스킵 사유가 기대값과 다릅니다" in exc_info.value.message
+
+
 def test_check_chat_answer_script_main_does_not_expose_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -589,6 +690,7 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "usedLlmGeneration": False,
             "requireLlmGeneration": False,
             "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "expectedLlmGenerationSkippedReason": None,
             "sourceCount": 1,
             "urlCount": 1,
         }

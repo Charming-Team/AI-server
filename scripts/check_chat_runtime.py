@@ -306,6 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="챗봇 답변 API smoke check에서 요구하는 최소 Qdrant 문서 출처 개수",
     )
     parser.add_argument(
+        "--answer-api-expected-llm-skipped-reason",
+        help=(
+            "챗봇 답변 API smoke check에서 기대하는 LLM 생성 스킵 사유입니다. "
+            "스킵 사유가 없어야 하면 NONE을 사용합니다."
+        ),
+    )
+    parser.add_argument(
         "--document-api-base-url",
         default=check_document_index_api.DEFAULT_BASE_URL,
         help="문서 인덱싱/삭제 API smoke check에 사용할 FastAPI base URL",
@@ -989,6 +996,9 @@ async def run_answer_api_smoke(
             "minDocumentSourceCount": args.answer_api_min_document_source_count,
             "requireVectorSearch": require_vector_search,
             "requireLlmGeneration": bool(args.require_llm_generation),
+            "expectedLlmGenerationSkippedReason": (
+                args.answer_api_expected_llm_skipped_reason
+            ),
         }
 
     return await check_chat_answer.check_chat_answer(
@@ -1002,6 +1012,7 @@ async def run_answer_api_smoke(
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
         require_llm_generation=bool(args.require_llm_generation),
+        expected_llm_skipped_reason=args.answer_api_expected_llm_skipped_reason,
     )
 
 

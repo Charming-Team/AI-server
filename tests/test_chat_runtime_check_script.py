@@ -38,6 +38,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "answer_api_timeout_seconds": 10.0,
         "answer_api_min_evidence_count": 0,
         "answer_api_min_document_source_count": 0,
+        "answer_api_expected_llm_skipped_reason": None,
         "recommendation_api_base_url": "http://fastapi.local",
         "recommendation_api_keyword": "라인",
         "recommendation_api_role": "MANUFACTURING_MANAGER",
@@ -1032,6 +1033,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "minDocumentSourceCount": 0,
         "requireVectorSearch": False,
         "requireLlmGeneration": False,
+        "expectedLlmGenerationSkippedReason": None,
     }
 
 
@@ -1109,6 +1111,7 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
         network=True,
         include_answer_api_smoke=True,
         require_llm_generation=True,
+        answer_api_expected_llm_skipped_reason="NONE",
     )
     captured: dict[str, Any] = {}
 
@@ -1117,6 +1120,9 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
 
     async def fake_answer_check(**kwargs):
         captured["require_llm_generation"] = kwargs["require_llm_generation"]
+        captured["expected_llm_skipped_reason"] = kwargs[
+            "expected_llm_skipped_reason"
+        ]
         return {
             "checkStatus": "PASS",
             "usedLlmGeneration": kwargs["require_llm_generation"],
@@ -1137,7 +1143,10 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
 
     assert result["checkStatus"] == "PASS"
     assert result["steps"][-1]["name"] == "answerApiSmoke"
-    assert captured == {"require_llm_generation": True}
+    assert captured == {
+        "require_llm_generation": True,
+        "expected_llm_skipped_reason": "NONE",
+    }
 
 
 def test_check_chat_runtime_validate_only_checks_recommendation_api_smoke() -> None:
