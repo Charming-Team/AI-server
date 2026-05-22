@@ -18,6 +18,27 @@ from app.features.chat.qdrant_client import (
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
 from app.features.chat.source_url_policy import normalize_internal_url
 
+QDRANT_PAYLOAD_SETTINGS_FAILURE_ACTIONS = (
+    "QDRANT_URL과 QDRANT_COLLECTION 설정을 확인하세요.",
+)
+QDRANT_PAYLOAD_NETWORK_FAILURE_ACTIONS = (
+    "Qdrant URL, collection 이름, port-forward 상태를 확인하세요.",
+    "컬렉션이 없다면 scripts.create_qdrant_collection으로 먼저 생성하세요.",
+)
+QDRANT_PAYLOAD_MIN_POINTS_FAILURE_ACTIONS = (
+    "보고서 또는 회사정보 문서가 Qdrant에 인덱싱되어 있는지 확인하세요.",
+    "아직 문서를 넣지 않은 초기 상태라면 --min-points 0으로 점검하세요.",
+)
+QDRANT_PAYLOAD_CONTRACT_FAILURE_ACTIONS = (
+    "Qdrant payload의 documentId, documentType, title, chunkText를 확인하세요.",
+    "allowedRoles에는 OPERATOR, EXECUTIVE, MANUFACTURING_MANAGER 중 허용 역할만 넣으세요.",
+    "intentTags에는 챗봇이 지원하는 intent 값을 넣고, url은 내부 relative path로 저장하세요.",
+    "OPERATOR 허용 문서에는 계약 금액, 패널티, 비용 등 금액성 정보를 넣지 마세요.",
+)
+QDRANT_PAYLOAD_RESPONSE_FAILURE_ACTIONS = (
+    "Qdrant scroll API 응답 형식이 예상 JSON 구조인지 확인하세요.",
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -186,6 +207,20 @@ def validate_point(point: dict, access_policy: DocumentAccessPolicy) -> list[str
     return errors
 
 
+def build_payload_failure_actions(exc: ChatServiceError) -> list[str]:
+    if exc.code == ChatErrorCode.CHAT_QDRANT_001:
+        return list(QDRANT_PAYLOAD_SETTINGS_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_002:
+        return list(QDRANT_PAYLOAD_NETWORK_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_003:
+        if "payload 계약" in exc.message:
+            return list(QDRANT_PAYLOAD_CONTRACT_FAILURE_ACTIONS)
+        return list(QDRANT_PAYLOAD_RESPONSE_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_004:
+        return list(QDRANT_PAYLOAD_MIN_POINTS_FAILURE_ACTIONS)
+    return ["Qdrant 문서 payload 저장 상태와 계약을 확인하세요."]
+
+
 def _allowed_intent_tags() -> set[str]:
     return {intent.value for intent in ChatIntent if intent != ChatIntent.UNKNOWN}
 
@@ -276,6 +311,8 @@ def main(
     except ChatServiceError as exc:
         print(f"Qdrant 문서 payload 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
+        for action in build_payload_failure_actions(exc):
+            print(f"nextAction={action}", file=error_output)
         return 1
     except Exception as exc:
         print(f"Qdrant 문서 payload 점검 실패: {exc}", file=error_output)

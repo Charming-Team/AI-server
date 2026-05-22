@@ -7,7 +7,7 @@ from typing import Any, TextIO
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
-from app.features.chat.schemas import ChatIntent
+from app.features.chat.schemas import ChatErrorCode, ChatIntent
 from scripts import (
     chat_check_common,
     check_answer_output_policy,
@@ -626,7 +626,34 @@ def extract_failure_action(step: dict[str, Any]) -> str:
             )
             if first_action:
                 return first_action
+
+    error = step.get("error")
+    if isinstance(error, dict) and step.get("name") == "qdrantDocumentPayloads":
+        payload_action = build_qdrant_payload_failure_action(error)
+        if payload_action:
+            return payload_action
     return STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION)
+
+
+def build_qdrant_payload_failure_action(error: dict[str, Any]) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = check_qdrant_document_payloads.build_payload_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        )
+    )
+    return actions[0] if actions else None
 
 
 def extract_failure_reason(step: dict[str, Any]) -> tuple[str | None, str]:

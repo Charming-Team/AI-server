@@ -6,7 +6,8 @@ import anyio
 import pytest
 
 from app.core.config import Settings
-from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
+from app.features.chat.schemas import ChatErrorCode
 from scripts import check_qdrant_document_payloads
 
 
@@ -210,3 +211,78 @@ def test_check_qdrant_document_payloads_main_returns_one_for_missing_settings() 
     assert exit_code == 1
     assert "Qdrant 문서 payload 점검 실패" in stderr.getvalue()
     assert "code=CHAT_QDRANT_001" in stderr.getvalue()
+    assert "nextAction=QDRANT_URL" in stderr.getvalue()
+
+
+def test_check_qdrant_document_payloads_main_guides_min_points_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_qdrant_document_payloads(*args: Any, **kwargs: Any) -> dict:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_QDRANT_004,
+            message="Qdrant 문서 point 개수가 기준보다 적습니다. expected>=1, actual=0",
+        )
+
+    monkeypatch.setattr(
+        check_qdrant_document_payloads,
+        "check_qdrant_document_payloads",
+        fake_check_qdrant_document_payloads,
+    )
+    stderr = StringIO()
+
+    exit_code = check_qdrant_document_payloads.main(
+        ["--min-points", "1"],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert "code=CHAT_QDRANT_004" in stderr.getvalue()
+    assert "nextAction=보고서 또는 회사정보 문서" in stderr.getvalue()
+    assert "--min-points 0" in stderr.getvalue()
+
+
+def test_check_qdrant_document_payloads_main_guides_contract_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_qdrant_document_payloads(*args: Any, **kwargs: Any) -> dict:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_QDRANT_003,
+            message="Qdrant 문서 payload 계약을 만족하지 않는 point가 있습니다. invalidCount=1",
+        )
+
+    monkeypatch.setattr(
+        check_qdrant_document_payloads,
+        "check_qdrant_document_payloads",
+        fake_check_qdrant_document_payloads,
+    )
+    stderr = StringIO()
+
+    exit_code = check_qdrant_document_payloads.main([], stderr=stderr)
+
+    assert exit_code == 1
+    assert "code=CHAT_QDRANT_003" in stderr.getvalue()
+    assert "nextAction=Qdrant payload의 documentId" in stderr.getvalue()
+    assert "OPERATOR 허용 문서" in stderr.getvalue()
+
+
+def test_check_qdrant_document_payloads_builds_actions_by_error_code() -> None:
+    assert check_qdrant_document_payloads.build_payload_failure_actions(
+        ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_QDRANT_002,
+            message="Qdrant 문서 payload 조회에 실패했습니다.",
+        )
+    ) == [
+        "Qdrant URL, collection 이름, port-forward 상태를 확인하세요.",
+        "컬렉션이 없다면 scripts.create_qdrant_collection으로 먼저 생성하세요.",
+    ]
+
+    assert check_qdrant_document_payloads.build_payload_failure_actions(
+        ChatServiceError(
+            status_code=502,
+            code=ChatErrorCode.CHAT_QDRANT_003,
+            message="Qdrant 응답 형식이 올바르지 않습니다.",
+        )
+    ) == ["Qdrant scroll API 응답 형식이 예상 JSON 구조인지 확인하세요."]

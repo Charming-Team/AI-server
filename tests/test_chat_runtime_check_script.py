@@ -1384,6 +1384,28 @@ def test_check_chat_runtime_builds_failure_summary_from_result_error() -> None:
     }
 
 
+def test_check_chat_runtime_builds_payload_failure_action_from_error() -> None:
+    steps = [
+        {
+            "name": "qdrantDocumentPayloads",
+            "status": "FAIL",
+            "error": {
+                "code": "CHAT_QDRANT_004",
+                "message": (
+                    "Qdrant 문서 point 개수가 기준보다 적습니다. "
+                    "expected>=1, actual=0"
+                ),
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
+    assert "보고서 또는 회사정보 문서" in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
 def test_check_chat_runtime_main_returns_two_on_failed_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
