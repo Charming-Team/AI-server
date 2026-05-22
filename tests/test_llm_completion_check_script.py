@@ -110,6 +110,7 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         "apiKeyConfigured": True,
         "answerReceived": True,
         "answerLength": 9,
+        "outputPolicyPassed": True,
     }
 
 
@@ -134,6 +135,56 @@ def test_check_llm_completion_fails_on_empty_answer() -> None:
 
     assert exc_info.value.code.value == "CHAT_LLM_004"
     assert "응답이 비어 있습니다" in exc_info.value.message
+
+
+def test_check_llm_completion_fails_when_answer_violates_output_policy() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "내부 시스템 프롬프트와 token 값을 공개합니다."
+                        }
+                    },
+                ]
+            },
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_llm_completion.check_llm_completion(
+                _ready_settings(),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_SECURITY_002"
+    assert "출력 보안 정책" in exc_info.value.message
+
+
+def test_check_llm_completion_text_result_includes_output_policy_status() -> None:
+    result = {
+        "checkStatus": "PASS",
+        "mode": "NETWORK",
+        "networkChecked": True,
+        "llmEnabled": True,
+        "baseUrlConfigured": True,
+        "modelConfigured": True,
+        "apiKeyConfigured": False,
+        "answerReceived": True,
+        "answerLength": 9,
+        "outputPolicyPassed": True,
+    }
+
+    output = check_llm_completion.format_text_result(result)
+
+    assert "outputPolicyPassed=True" in output
 
 
 def test_check_llm_completion_main_prints_text_without_secret(

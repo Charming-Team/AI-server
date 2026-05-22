@@ -7,6 +7,7 @@ from typing import Any, TextIO
 import httpx
 
 from app.core.config import Settings
+from app.features.chat.answer_output_policy import AnswerOutputPolicy
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.llm_client import LlmClient, validate_llm_settings
@@ -72,6 +73,27 @@ def build_validate_only_result(settings: Settings) -> dict[str, Any]:
     }
 
 
+def validate_llm_smoke_answer(
+    answer: str,
+    output_policy: AnswerOutputPolicy | None = None,
+) -> None:
+    security_result = (output_policy or AnswerOutputPolicy()).evaluate(
+        answer,
+        role="EXECUTIVE",
+    )
+    if security_result is None:
+        return
+
+    raise ChatServiceError(
+        status_code=502,
+        code=security_result.code or ChatErrorCode.CHAT_SECURITY_002,
+        message=(
+            "LLM smoke check 응답이 출력 보안 정책에 의해 차단되었습니다. "
+            f"reason={security_result.reason}"
+        ),
+    )
+
+
 async def check_llm_completion(
     settings: Settings,
     http_client: httpx.AsyncClient | None = None,
@@ -86,6 +108,7 @@ async def check_llm_completion(
             code=ChatErrorCode.CHAT_LLM_004,
             message="LLM smoke check 응답이 비어 있습니다.",
         )
+    validate_llm_smoke_answer(answer)
 
     return {
         "checkStatus": "PASS",
@@ -97,6 +120,7 @@ async def check_llm_completion(
         "apiKeyConfigured": bool(settings.llm_api_key),
         "answerReceived": True,
         "answerLength": len(answer),
+        "outputPolicyPassed": True,
     }
 
 
@@ -113,6 +137,7 @@ def format_text_result(result: dict[str, Any]) -> str:
     if result.get("networkChecked"):
         lines.append(f"answerReceived={result['answerReceived']}")
         lines.append(f"answerLength={result['answerLength']}")
+        lines.append(f"outputPolicyPassed={result['outputPolicyPassed']}")
     return "\n".join(lines)
 
 
