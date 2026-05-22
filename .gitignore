@@ -52,3 +52,7 @@ checkpoints/
 artifacts/
 mlruns/
 wandb/
+
+# Local design drafts
+docs/
+*.md
