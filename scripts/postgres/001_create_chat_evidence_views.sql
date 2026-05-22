@@ -2,6 +2,9 @@ begin;
 
 create schema if not exists chat_evidence;
 
+drop view if exists chat_evidence.chat_production_plan_evidence_view;
+drop view if exists chat_evidence.chat_line_bottleneck_evidence_view;
+
 create or replace view chat_evidence.chat_material_shortage_evidence_view as
 select
     ppm.plan_material_id,

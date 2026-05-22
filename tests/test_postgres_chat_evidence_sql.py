@@ -42,6 +42,21 @@ def test_chat_evidence_views_do_not_depend_on_removed_line_type_column() -> None
     assert "line_type" not in sql
 
 
+def test_chat_evidence_view_script_drops_legacy_line_type_views_before_recreate() -> None:
+    sql = _read_sql(CREATE_VIEWS_SQL)
+    shape_changed_views = (
+        "chat_production_plan_evidence_view",
+        "chat_line_bottleneck_evidence_view",
+    )
+
+    for view_name in shape_changed_views:
+        drop_statement = f"drop view if exists chat_evidence.{view_name}"
+        create_statement = f"create or replace view chat_evidence.{view_name}"
+
+        assert drop_statement in sql
+        assert sql.index(drop_statement) < sql.index(create_statement)
+
+
 def test_chat_evidence_views_do_not_use_select_star() -> None:
     sql = _read_sql(CREATE_VIEWS_SQL)
 
