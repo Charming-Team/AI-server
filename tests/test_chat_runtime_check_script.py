@@ -228,6 +228,52 @@ def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
     assert calls == ["collection", "payload", "vector"]
 
 
+def test_check_chat_runtime_fails_when_qdrant_collection_result_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(qdrant_collection="smap_internal_documents")
+    args = _build_args(preset="qdrant", network=True)
+
+    async def fake_qdrant_collection_check(settings_arg, args_arg):
+        return {
+            "checkStatus": "FAIL",
+            "collectionName": settings_arg.qdrant_collection,
+            "error": {
+                "code": "CHAT_QDRANT_004",
+                "message": "Qdrant 컬렉션 vector dimension이 일치하지 않습니다.",
+            },
+            "nextActions": [
+                "EMBEDDING_DIMENSION과 Qdrant collection vector size를 같은 값으로 맞추세요."
+            ],
+        }
+
+    async def fake_qdrant_payload_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "pointCount": 0}
+
+    async def fake_vector_smoke(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "matchedSourceCount": 1}
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_collection_check",
+        fake_qdrant_collection_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_payload_check",
+        fake_qdrant_payload_check,
+    )
+    monkeypatch.setattr(check_chat_runtime, "run_qdrant_vector_smoke", fake_vector_smoke)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][1]["name"] == "qdrantCollection"
+    assert result["steps"][1]["status"] == "FAIL"
+    assert result["summary"]["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
+    assert "EMBEDDING_DIMENSION" in result["summary"]["nextActions"][0]
+
+
 def test_check_chat_runtime_validate_only_passes_with_rdb_evidence() -> None:
     settings = _base_ready_settings(
         rdb_evidence_enabled=True,
@@ -805,6 +851,36 @@ def test_check_chat_runtime_llm_completion_failure_has_next_action() -> None:
     assert result["steps"][1]["status"] == "FAIL"
     assert result["steps"][1]["error"]["code"] == "CHAT_LLM_001"
     assert "OpenAI-compatible" in result["summary"]["nextActions"][0]
+
+
+def test_check_chat_runtime_run_qdrant_collection_check_returns_next_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_collection(settings):
+        return check_chat_runtime.check_qdrant_collection.QdrantCollectionCheckResult(
+            collection_name=settings.qdrant_collection,
+            status="green",
+            expected_dimension=1024,
+            actual_dimension=384,
+            is_dimension_matched=False,
+            points_count=0,
+        )
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_qdrant_collection,
+        "check_collection",
+        fake_check_collection,
+    )
+
+    result = anyio.run(
+        check_chat_runtime.run_qdrant_collection_check,
+        Settings(qdrant_collection="smap_internal_documents", embedding_dimension=1024),
+        _build_args(network=True),
+    )
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["error"]["code"] == "CHAT_QDRANT_004"
+    assert result["nextActions"]
 
 
 def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:

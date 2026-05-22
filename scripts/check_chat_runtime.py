@@ -429,6 +429,7 @@ async def check_chat_runtime(
             await run_step(
                 "llmCompletionSmoke",
                 lambda: run_llm_completion_smoke(settings, args),
+                fail_when=has_failed_check_status,
             )
         )
 
@@ -461,12 +462,14 @@ async def check_chat_runtime(
             await run_step(
                 "qdrantCollection",
                 lambda: run_qdrant_collection_check(settings, args),
+                fail_when=has_failed_check_status,
             )
         )
         steps.append(
             await run_step(
                 "qdrantDocumentPayloads",
                 lambda: run_qdrant_payload_check(settings, args),
+                fail_when=has_failed_check_status,
             )
         )
 
@@ -475,6 +478,7 @@ async def check_chat_runtime(
             await run_step(
                 "qdrantVectorSmoke",
                 lambda: run_qdrant_vector_smoke(settings, args),
+                fail_when=has_failed_check_status,
             )
         )
 
@@ -581,6 +585,10 @@ def should_fail_readiness(result: dict[str, Any], args: argparse.Namespace) -> b
     return result["status"] != "ready"
 
 
+def has_failed_check_status(result: dict[str, Any]) -> bool:
+    return result.get("checkStatus") == "FAIL"
+
+
 def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
     failed_steps = [step for step in steps if step["status"] != "PASS"]
     failure_items = [build_failure_item(step) for step in failed_steps]
@@ -598,12 +606,27 @@ def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_failure_item(step: dict[str, Any]) -> dict[str, Any]:
     code, message = extract_failure_reason(step)
+    action = extract_failure_action(step)
     return {
         "name": step["name"],
         "code": code,
         "message": message,
-        "action": STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION),
+        "action": action,
     }
+
+
+def extract_failure_action(step: dict[str, Any]) -> str:
+    result = step.get("result")
+    if isinstance(result, dict):
+        next_actions = result.get("nextActions")
+        if isinstance(next_actions, list):
+            first_action = next(
+                (action for action in next_actions if isinstance(action, str) and action),
+                None,
+            )
+            if first_action:
+                return first_action
+    return STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION)
 
 
 def extract_failure_reason(step: dict[str, Any]) -> tuple[str | None, str]:
@@ -765,6 +788,7 @@ async def run_qdrant_collection_check(
         "checkStatus": "PASS" if result.is_dimension_matched else "FAIL",
         **result.__dict__,
         "error": error.model_dump(mode="json") if error is not None else None,
+        "nextActions": check_qdrant_collection.build_dimension_mismatch_actions(result),
     }
 
 
