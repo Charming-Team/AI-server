@@ -41,6 +41,38 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.rdb_evidence_max_limit == 20
 
 
+def test_settings_accepts_comma_separated_cors_origins_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:5173",
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.cors_origins == [
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+
+
+def test_settings_accepts_json_cors_origins_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "CORS_ORIGINS",
+        '["http://localhost:3000","http://localhost:5173"]',
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.cors_origins == [
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+
+
 def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     settings = Settings(
         qdrant_top_k=20,

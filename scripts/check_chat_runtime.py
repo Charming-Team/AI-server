@@ -8,6 +8,7 @@ from typing import Any, TextIO
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
+from app.features.chat.skip_reasons import LLM_DISABLED
 from scripts import (
     chat_api_failure_actions,
     chat_check_common,
@@ -637,6 +638,17 @@ def has_failed_check_status(result: dict[str, Any]) -> bool:
     return result.get("checkStatus") == "FAIL"
 
 
+def resolve_expected_answer_llm_skipped_reason(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> str | None:
+    if args.answer_api_expected_llm_skipped_reason is not None:
+        return args.answer_api_expected_llm_skipped_reason
+    if not settings.llm_enabled and not args.require_llm_generation:
+        return LLM_DISABLED
+    return None
+
+
 def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
     failed_steps = [step for step in steps if step["status"] != "PASS"]
     failure_items = [build_failure_item(step) for step in failed_steps]
@@ -1261,6 +1273,10 @@ async def run_answer_api_smoke(
     )
     require_rdb_evidence = bool(args.require_rdb_evidence)
     require_vector_search = bool(args.require_vector_search)
+    expected_llm_skipped_reason = resolve_expected_answer_llm_skipped_reason(
+        settings,
+        args,
+    )
 
     if not args.network:
         return {
@@ -1277,9 +1293,7 @@ async def run_answer_api_smoke(
             "minDocumentSourceCount": args.answer_api_min_document_source_count,
             "requireVectorSearch": require_vector_search,
             "requireLlmGeneration": bool(args.require_llm_generation),
-            "expectedLlmGenerationSkippedReason": (
-                args.answer_api_expected_llm_skipped_reason
-            ),
+            "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
         }
 
     return await check_chat_answer.check_chat_answer(
@@ -1293,7 +1307,7 @@ async def run_answer_api_smoke(
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
         require_llm_generation=bool(args.require_llm_generation),
-        expected_llm_skipped_reason=args.answer_api_expected_llm_skipped_reason,
+        expected_llm_skipped_reason=expected_llm_skipped_reason,
     )
 
 

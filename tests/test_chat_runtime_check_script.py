@@ -1299,6 +1299,45 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
     }
 
 
+def test_check_chat_runtime_answer_api_smoke_expects_fallback_when_llm_disabled() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        llm_enabled=False,
+    )
+    args = _build_args(
+        include_answer_api_smoke=True,
+        answer_api_min_evidence_count=1,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert (
+        result["steps"][-1]["result"]["expectedLlmGenerationSkippedReason"]
+        == "LLM 답변 생성 기능이 비활성화되어 있습니다."
+    )
+
+
+def test_check_chat_runtime_answer_api_smoke_keeps_explicit_llm_skip_expectation() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        llm_enabled=False,
+    )
+    args = _build_args(
+        include_answer_api_smoke=True,
+        answer_api_expected_llm_skipped_reason="NONE",
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert result["steps"][-1]["result"]["expectedLlmGenerationSkippedReason"] == "NONE"
+
+
 def test_check_chat_runtime_answer_api_smoke_requires_token() -> None:
     settings = Settings(document_index_internal_token="document-token")
     args = _build_args(include_answer_api_smoke=True)
@@ -1490,6 +1529,53 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
     assert captured == {
         "require_llm_generation": True,
         "expected_llm_skipped_reason": "NONE",
+    }
+
+
+def test_check_chat_runtime_network_answer_api_smoke_expects_fallback_when_llm_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        llm_enabled=False,
+    )
+    args = _build_args(
+        network=True,
+        include_answer_api_smoke=True,
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_answer_check(**kwargs):
+        captured["expected_llm_skipped_reason"] = kwargs[
+            "expected_llm_skipped_reason"
+        ]
+        return {
+            "checkStatus": "PASS",
+            "usedLlmGeneration": False,
+            "llmGenerationSkippedReason": kwargs["expected_llm_skipped_reason"],
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_chat_answer,
+        "check_chat_answer",
+        fake_answer_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert captured == {
+        "expected_llm_skipped_reason": "LLM 답변 생성 기능이 비활성화되어 있습니다."
     }
 
 
