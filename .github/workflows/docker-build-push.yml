@@ -57,6 +57,9 @@ jobs:
           EMBEDDING_BASE_URL: http://localhost:8002
           EMBEDDING_PATH: /embed
           EMBEDDING_MODEL: BAAI/bge-m3
+          LLM_ENABLED: "true"
+          LLM_BASE_URL: http://localhost:8001/v1
+          LLM_MODEL: local-open-source-model
         run: python -m scripts.check_chat_runtime --preset full --json
 
       - name: Set up Docker Buildx
