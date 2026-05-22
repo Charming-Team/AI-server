@@ -22,6 +22,31 @@ from app.features.chat.schemas import (
 )
 from scripts import chat_check_common
 
+QDRANT_VECTOR_SETTINGS_FAILURE_ACTIONS = (
+    "QDRANT_URL과 QDRANT_COLLECTION 설정을 확인하세요.",
+)
+QDRANT_VECTOR_DIMENSION_FAILURE_ACTIONS = (
+    (
+        "EMBEDDING_DIMENSION은 1 이상이어야 하며 Qdrant collection vector size와 "
+        "같아야 합니다."
+    ),
+)
+QDRANT_VECTOR_DOCUMENT_FAILURE_ACTIONS = (
+    "Smoke 문서 본문이 비어 있지 않은지 확인하세요.",
+)
+QDRANT_VECTOR_NETWORK_FAILURE_ACTIONS = (
+    "Qdrant URL, collection 이름, port-forward 상태를 확인하세요.",
+    "컬렉션이 없다면 scripts.create_qdrant_collection으로 먼저 생성하세요.",
+)
+QDRANT_VECTOR_RESPONSE_FAILURE_ACTIONS = (
+    "Qdrant 저장/검색 API 응답 형식이 예상 JSON 구조인지 확인하세요.",
+)
+QDRANT_VECTOR_MATCH_FAILURE_ACTIONS = (
+    "Smoke 문서가 Qdrant에 저장됐는지 확인하세요.",
+    "allowedRoles와 intentTags가 smoke 질문의 role/intent와 일치하는지 확인하세요.",
+    "EMBEDDING_DIMENSION과 Qdrant collection vector size가 일치하는지 확인하세요.",
+)
+
 DEFAULT_DOCUMENT_ID = "smoke-company-line-bottleneck"
 DEFAULT_TITLE = "LINE-A01 병목 대응 기준"
 DEFAULT_CONTENT = (
@@ -154,6 +179,22 @@ def build_sample_point(
             message="Qdrant smoke test 문서 본문이 비어 있습니다.",
         )
     return builder.build_point(payloads[0], vector)
+
+
+def build_vector_failure_actions(exc: ChatServiceError) -> list[str]:
+    if exc.code == ChatErrorCode.CHAT_QDRANT_001:
+        return list(QDRANT_VECTOR_SETTINGS_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_EMBEDDING_003:
+        return list(QDRANT_VECTOR_DIMENSION_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_DOCUMENT_002:
+        return list(QDRANT_VECTOR_DOCUMENT_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_002:
+        return list(QDRANT_VECTOR_NETWORK_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_003:
+        return list(QDRANT_VECTOR_RESPONSE_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_004:
+        return list(QDRANT_VECTOR_MATCH_FAILURE_ACTIONS)
+    return ["Qdrant Vector smoke 저장, 검색, 삭제 흐름을 확인하세요."]
 
 
 def build_validate_only_result(
@@ -314,6 +355,8 @@ def main(
     except ChatServiceError as exc:
         print(f"Qdrant Vector 검색 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
+        for action in build_vector_failure_actions(exc):
+            print(f"nextAction={action}", file=error_output)
         return 1
     except Exception as exc:
         print(f"Qdrant Vector 검색 점검 실패: {exc}", file=error_output)

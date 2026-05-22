@@ -632,6 +632,10 @@ def extract_failure_action(step: dict[str, Any]) -> str:
         payload_action = build_qdrant_payload_failure_action(error)
         if payload_action:
             return payload_action
+    if isinstance(error, dict) and step.get("name") == "qdrantVectorSmoke":
+        vector_action = build_qdrant_vector_failure_action(error)
+        if vector_action:
+            return vector_action
     return STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION)
 
 
@@ -647,6 +651,27 @@ def build_qdrant_payload_failure_action(error: dict[str, Any]) -> str | None:
         return None
 
     actions = check_qdrant_document_payloads.build_payload_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        )
+    )
+    return actions[0] if actions else None
+
+
+def build_qdrant_vector_failure_action(error: dict[str, Any]) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = check_qdrant_vector_search.build_vector_failure_actions(
         ChatServiceError(
             status_code=500,
             code=error_code,

@@ -244,3 +244,50 @@ def test_qdrant_vector_search_script_main_returns_one_on_service_error() -> None
     assert exit_code == 1
     assert "Qdrant Vector 검색 점검 실패" in stderr.getvalue()
     assert "CHAT_EMBEDDING_003" in stderr.getvalue()
+    assert "nextAction=EMBEDDING_DIMENSION" in stderr.getvalue()
+
+
+def test_qdrant_vector_search_script_main_guides_match_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_qdrant_vector_search(*args: Any, **kwargs: Any) -> dict:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_QDRANT_004,
+            message="Qdrant에 저장한 샘플 문서를 Vector 검색 결과에서 찾지 못했습니다.",
+        )
+
+    monkeypatch.setattr(
+        check_qdrant_vector_search,
+        "check_qdrant_vector_search",
+        fake_check_qdrant_vector_search,
+    )
+    stderr = StringIO()
+
+    exit_code = check_qdrant_vector_search.main([], stderr=stderr)
+
+    assert exit_code == 1
+    assert "code=CHAT_QDRANT_004" in stderr.getvalue()
+    assert "nextAction=Smoke 문서가 Qdrant에 저장" in stderr.getvalue()
+    assert "allowedRoles와 intentTags" in stderr.getvalue()
+
+
+def test_qdrant_vector_search_script_builds_actions_by_error_code() -> None:
+    assert check_qdrant_vector_search.build_vector_failure_actions(
+        ChatServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_QDRANT_002,
+            message="Qdrant 검색에 실패했습니다.",
+        )
+    ) == [
+        "Qdrant URL, collection 이름, port-forward 상태를 확인하세요.",
+        "컬렉션이 없다면 scripts.create_qdrant_collection으로 먼저 생성하세요.",
+    ]
+
+    assert check_qdrant_vector_search.build_vector_failure_actions(
+        ChatServiceError(
+            status_code=502,
+            code=ChatErrorCode.CHAT_QDRANT_003,
+            message="Qdrant 응답 형식이 올바르지 않습니다.",
+        )
+    ) == ["Qdrant 저장/검색 API 응답 형식이 예상 JSON 구조인지 확인하세요."]
