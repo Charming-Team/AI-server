@@ -15,6 +15,7 @@ from app.features.chat.schemas import (
     SecurityStatus,
 )
 from scripts import chat_check_common
+from scripts.chat_api_failure_actions import build_answer_api_failure_actions
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_QUESTION = "자재 부족 현황 알려줘"
@@ -377,6 +378,8 @@ def main(
     except ChatServiceError as exc:
         print(f"FastAPI 챗봇 답변 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
+        for next_action in build_answer_api_failure_actions(exc):
+            print(f"nextAction={next_action}", file=error_output)
         return 1
     except Exception as exc:
         print(f"FastAPI 챗봇 답변 점검 실패: {exc}", file=error_output)

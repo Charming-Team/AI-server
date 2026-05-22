@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
 from scripts import (
+    chat_api_failure_actions,
     chat_check_common,
     check_answer_output_policy,
     check_chat_answer,
@@ -641,6 +642,14 @@ def extract_failure_action(step: dict[str, Any]) -> str:
         document_action = build_document_api_failure_action(error)
         if document_action:
             return document_action
+    if isinstance(error, dict) and step.get("name") == "answerApiSmoke":
+        answer_action = build_answer_api_failure_action(error)
+        if answer_action:
+            return answer_action
+    if isinstance(error, dict) and step.get("name") == "recommendationApiSmoke":
+        recommendation_action = build_recommendation_api_failure_action(error)
+        if recommendation_action:
+            return recommendation_action
     return STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION)
 
 
@@ -698,6 +707,48 @@ def build_document_api_failure_action(error: dict[str, Any]) -> str | None:
         return None
 
     actions = document_api_failure_actions.build_document_api_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        )
+    )
+    return actions[0] if actions else None
+
+
+def build_answer_api_failure_action(error: dict[str, Any]) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = chat_api_failure_actions.build_answer_api_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        )
+    )
+    return actions[0] if actions else None
+
+
+def build_recommendation_api_failure_action(error: dict[str, Any]) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = chat_api_failure_actions.build_recommendation_api_failure_actions(
         ChatServiceError(
             status_code=500,
             code=error_code,

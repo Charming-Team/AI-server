@@ -7,7 +7,7 @@ import pytest
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
-from app.features.chat.schemas import ChatIntent
+from app.features.chat.schemas import ChatErrorCode, ChatIntent
 from scripts import check_chat_answer
 
 
@@ -731,3 +731,58 @@ def test_check_chat_answer_script_main_returns_one_without_token() -> None:
     assert exit_code == 1
     assert "FastAPI 챗봇 답변 점검 실패" in stderr.getvalue()
     assert "code=CHAT_SECURITY_003" in stderr.getvalue()
+    assert "nextAction=CHAT_ANSWER_INTERNAL_TOKEN" in stderr.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_action_text"),
+    [
+        (
+            ChatServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_SERVER_001,
+                message="FastAPI 챗봇 답변 API 호출에 실패했습니다.",
+            ),
+            "FastAPI base URL",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message="FastAPI 챗봇 응답에 RDB Evidence가 사용되지 않았습니다.",
+            ),
+            "RDB_EVIDENCE_ENABLED",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message="FastAPI 챗봇 응답에 Qdrant Vector Search가 사용되지 않았습니다.",
+            ),
+            "QDRANT_SEARCH_ENABLED",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_SECURITY_001,
+                message="FastAPI 챗봇 응답 보안 상태가 기대값과 다릅니다.",
+            ),
+            "securityStatus",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_LLM_004,
+                message="FastAPI 챗봇 응답에 LLM 답변 생성이 사용되지 않았습니다.",
+            ),
+            "LLM_ENABLED",
+        ),
+    ],
+)
+def test_check_chat_answer_script_builds_failure_actions_by_error_type(
+    error: ChatServiceError,
+    expected_action_text: str,
+) -> None:
+    actions = check_chat_answer.build_answer_api_failure_actions(error)
+
+    assert expected_action_text in actions[0]

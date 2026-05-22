@@ -7,6 +7,7 @@ import pytest
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatErrorCode
 from scripts import check_chat_recommendations
 
 
@@ -381,3 +382,42 @@ def test_chat_recommendations_script_main_returns_one_without_token() -> None:
     assert exit_code == 1
     assert "FastAPI 추천 질문 점검 실패" in stderr.getvalue()
     assert "code=CHAT_SECURITY_003" in stderr.getvalue()
+    assert "nextAction=CHAT_RECOMMENDATION_INTERNAL_TOKEN" in stderr.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_action_text"),
+    [
+        (
+            ChatServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_SERVER_001,
+                message="FastAPI 추천 질문 API 호출에 실패했습니다.",
+            ),
+            "FastAPI base URL",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_RECOMMEND_001,
+                message="FastAPI 추천 질문 개수가 기준보다 적습니다.",
+            ),
+            "min item count",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_RECOMMEND_002,
+                message="OPERATOR 추천 질문 URL은 read-only mode를 포함해야 합니다.",
+            ),
+            "OPERATOR read-only",
+        ),
+    ],
+)
+def test_chat_recommendations_script_builds_failure_actions_by_error_type(
+    error: ChatServiceError,
+    expected_action_text: str,
+) -> None:
+    actions = check_chat_recommendations.build_recommendation_api_failure_actions(error)
+
+    assert expected_action_text in actions[0]

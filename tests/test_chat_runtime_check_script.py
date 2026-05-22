@@ -1235,6 +1235,88 @@ def test_check_chat_runtime_answer_api_smoke_requires_token() -> None:
     assert result["steps"][-1]["name"] == "answerApiSmoke"
     assert result["steps"][-1]["status"] == "FAIL"
     assert result["steps"][-1]["error"]["code"] == "CHAT_SECURITY_003"
+    assert any(
+        "CHAT_ANSWER_INTERNAL_TOKEN" in action
+        for action in result["summary"]["nextActions"]
+    )
+
+
+def test_check_chat_runtime_network_reports_answer_evidence_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(network=True, include_answer_api_smoke=True)
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_answer_check(**kwargs):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message="FastAPI 챗봇 응답에 RDB Evidence가 사용되지 않았습니다.",
+        )
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_chat_answer,
+        "check_chat_answer",
+        fake_answer_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert result["steps"][-1]["error"]["code"] == "CHAT_EVIDENCE_001"
+    assert any(
+        "RDB_EVIDENCE_ENABLED" in action
+        for action in result["summary"]["nextActions"]
+    )
+
+
+def test_check_chat_runtime_network_reports_answer_llm_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(network=True, include_answer_api_smoke=True)
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_answer_check(**kwargs):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_LLM_004,
+            message="FastAPI 챗봇 응답에 LLM 답변 생성이 사용되지 않았습니다.",
+        )
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_chat_answer,
+        "check_chat_answer",
+        fake_answer_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert any("LLM_ENABLED" in action for action in result["summary"]["nextActions"])
 
 
 def test_check_chat_runtime_network_runs_answer_api_smoke(
@@ -1375,6 +1457,50 @@ def test_check_chat_runtime_recommendation_api_smoke_requires_token() -> None:
     assert result["steps"][-1]["name"] == "recommendationApiSmoke"
     assert result["steps"][-1]["status"] == "FAIL"
     assert result["steps"][-1]["error"]["code"] == "CHAT_SECURITY_003"
+    assert any(
+        "CHAT_RECOMMENDATION_INTERNAL_TOKEN" in action
+        for action in result["summary"]["nextActions"]
+    )
+
+
+def test_check_chat_runtime_network_reports_recommendation_role_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(network=True, include_recommendation_api_smoke=True)
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_recommendation_check(**kwargs):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_RECOMMEND_002,
+            message="OPERATOR 추천 질문 URL은 read-only mode를 포함해야 합니다.",
+        )
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_chat_recommendations,
+        "check_chat_recommendations",
+        fake_recommendation_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "recommendationApiSmoke"
+    assert any(
+        "OPERATOR read-only" in action
+        for action in result["summary"]["nextActions"]
+    )
 
 
 def test_check_chat_runtime_network_runs_recommendation_api_smoke(
@@ -1573,6 +1699,107 @@ def test_check_chat_runtime_builds_document_api_failure_action_from_error(
     steps = [
         {
             "name": "documentApiSmoke",
+            "status": "FAIL",
+            "error": {
+                "code": code,
+                "message": message,
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["failedSteps"][0]["code"] == code
+    assert expected_action_text in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "expected_action_text"),
+    [
+        (
+            "CHAT_SECURITY_003",
+            "FastAPI chat answer internal token이 설정되지 않았습니다.",
+            "CHAT_ANSWER_INTERNAL_TOKEN",
+        ),
+        (
+            "CHAT_EVIDENCE_001",
+            "FastAPI 챗봇 응답에 RDB Evidence가 사용되지 않았습니다.",
+            "RDB_EVIDENCE_ENABLED",
+        ),
+        (
+            "CHAT_EVIDENCE_001",
+            "FastAPI 챗봇 응답에 Qdrant Vector Search가 사용되지 않았습니다.",
+            "QDRANT_SEARCH_ENABLED",
+        ),
+        (
+            "CHAT_SECURITY_001",
+            "FastAPI 챗봇 응답 보안 상태가 기대값과 다릅니다.",
+            "securityStatus",
+        ),
+        (
+            "CHAT_LLM_004",
+            "FastAPI 챗봇 응답에 LLM 답변 생성이 사용되지 않았습니다.",
+            "LLM_ENABLED",
+        ),
+    ],
+)
+def test_check_chat_runtime_builds_answer_api_failure_action_from_error(
+    code: str,
+    message: str,
+    expected_action_text: str,
+) -> None:
+    steps = [
+        {
+            "name": "answerApiSmoke",
+            "status": "FAIL",
+            "error": {
+                "code": code,
+                "message": message,
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["failedSteps"][0]["code"] == code
+    assert expected_action_text in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "expected_action_text"),
+    [
+        (
+            "CHAT_SECURITY_003",
+            "FastAPI chat recommendation internal token이 설정되지 않았습니다.",
+            "CHAT_RECOMMENDATION_INTERNAL_TOKEN",
+        ),
+        (
+            "CHAT_RECOMMEND_001",
+            "FastAPI 추천 질문 개수가 기준보다 적습니다.",
+            "min item count",
+        ),
+        (
+            "CHAT_RECOMMEND_002",
+            "OPERATOR 추천 질문 URL은 read-only mode를 포함해야 합니다.",
+            "OPERATOR read-only",
+        ),
+        (
+            "CHAT_SERVER_001",
+            "FastAPI 추천 질문 API 호출에 실패했습니다.",
+            "FastAPI base URL",
+        ),
+    ],
+)
+def test_check_chat_runtime_builds_recommendation_api_failure_action_from_error(
+    code: str,
+    message: str,
+    expected_action_text: str,
+) -> None:
+    steps = [
+        {
+            "name": "recommendationApiSmoke",
             "status": "FAIL",
             "error": {
                 "code": code,
