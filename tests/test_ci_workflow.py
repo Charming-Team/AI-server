@@ -16,10 +16,11 @@ def test_docker_build_workflow_configures_chat_runtime_gate() -> None:
 
     assert "CHAT_ANSWER_INTERNAL_TOKEN: ci-answer-token" in workflow
     assert "CHAT_RECOMMENDATION_INTERNAL_TOKEN: ci-recommendation-token" in workflow
-    assert "DOCUMENT_INDEX_INTERNAL_TOKEN: ci-document-token" in workflow
+    assert "DOCUMENT_INDEX_INTERNAL_TOKEN: ci-document-token" not in workflow
     assert 'RDB_EVIDENCE_ENABLED: "true"' in workflow
     assert 'QDRANT_SEARCH_ENABLED: "true"' in workflow
     assert 'EMBEDDING_ENABLED: "true"' in workflow
+    assert 'EMBEDDING_DIMENSION: "1024"' in workflow
     assert "QDRANT_COLLECTION: smap_internal_documents" in workflow
     assert 'LLM_ENABLED: "true"' in workflow
     assert "LLM_BASE_URL: http://localhost:8001/v1" in workflow
