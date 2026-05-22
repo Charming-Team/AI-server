@@ -1,5 +1,6 @@
 from app.core.config import Settings
 from app.features.chat.answer_output_policy import AnswerOutputPolicy
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_fallback_answer_builder import (
     GroundedFallbackAnswerBuilder,
 )
@@ -15,6 +16,7 @@ from app.features.chat.skip_reasons import (
     ANSWER_BLOCKED_BY_OUTPUT_POLICY,
     LLM_DISABLED,
     LLM_EMPTY_ANSWER,
+    LLM_UNAVAILABLE,
     NO_GROUNDING_EVIDENCE,
 )
 
@@ -65,7 +67,17 @@ class AnswerGenerationService:
 
         validate_llm_settings(self.settings)
         prompt = self.build_prompt(request, evidence_result, document_result)
-        answer = await self.llm_client.generate(prompt)
+        try:
+            answer = await self.llm_client.generate(prompt)
+        except ChatExternalServiceError:
+            answer = self.fallback_answer_builder.build(evidence_result, document_result)
+            return self._build_output_checked_result(
+                answer,
+                role=request.user.role,
+                was_generated=False,
+                skipped_reason=LLM_UNAVAILABLE,
+            )
+
         if not answer:
             return AnswerGenerationResult(
                 answer="LLM 답변 생성 결과가 비어 있습니다.",

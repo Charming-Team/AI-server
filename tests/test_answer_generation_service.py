@@ -37,6 +37,19 @@ class FakeLlmClient:
         return self.answer
 
 
+class FakeFailingLlmClient:
+    def __init__(self) -> None:
+        self.prompt: GroundedPrompt | None = None
+
+    async def generate(self, prompt: GroundedPrompt) -> str:
+        self.prompt = prompt
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_LLM_003,
+            message="LLM 서버 호출에 실패했습니다.",
+        )
+
+
 def _build_request(role: str = "EXECUTIVE") -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -268,6 +281,55 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     )
     assert llm_client.prompt is not None
     assert "2026년 5월 생산 리스크 보고서" in llm_client.prompt.user_prompt
+
+
+def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> None:
+    llm_client = FakeFailingLlmClient()
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크",
+                summary="자재 부족이 주요 리스크입니다.",
+                source="reports",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="LINE-A01 병목이 확인되었습니다.",
+            )
+        ]
+    )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is False
+    assert "확인된 내부 근거 기준으로 요약합니다." in result.answer
+    assert "RDB 근거:" in result.answer
+    assert "문서 검색 근거:" in result.answer
+    assert "월간 생산 리스크" in result.answer
+    assert "2026년 5월 생산 리스크 보고서" in result.answer
+    assert (
+        result.skipped_reason
+        == "LLM 서버 호출에 실패해 근거 기반 대체 답변을 반환했습니다."
+    )
+    assert llm_client.prompt is not None
 
 
 def test_answer_generation_appends_source_titles_when_answer_omits_them() -> None:
