@@ -18,10 +18,16 @@ class Settings(BaseSettings):
     evidence_lookup_path: str = "/internal/chat/evidence"
     evidence_lookup_internal_token: str | None = None
     evidence_lookup_timeout_seconds: float = 10.0
+
     rdb_evidence_enabled: bool = False
     rdb_evidence_dsn: str | None = None
     rdb_evidence_timeout_seconds: float = 5.0
     rdb_evidence_max_limit: int = Field(default=20, ge=1, le=100)
+
+    report_rdb_enabled: bool = True
+    report_rdb_dsn: str | None = None
+    report_rdb_timeout_seconds: float = 5.0
+
     qdrant_search_enabled: bool = False
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
@@ -62,6 +68,16 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @property
+    def report_postgres_url(self) -> str:
+        if self.report_rdb_dsn:
+            return self.report_rdb_dsn
+
+        if self.rdb_evidence_dsn:
+            return self.rdb_evidence_dsn
+
+        return "postgresql+psycopg://postgres:postgres@localhost:5432/smap"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
@@ -74,7 +90,7 @@ class Settings(BaseSettings):
         if self.document_chunk_overlap >= self.document_chunk_size:
             raise ValueError("document_chunk_overlap must be smaller than document_chunk_size")
         return self
-
+    
 
 @lru_cache
 def get_settings() -> Settings:

@@ -20,6 +20,9 @@ class ReportPeriod(BaseModel):
     start_date: date = Field(..., alias="startDate")
     end_date: date = Field(..., alias="endDate")
 
+    class Config:
+        populate_by_name = True
+
 
 class ReportGenerateRequest(BaseModel):
     report_job_id: int = Field(..., alias="reportJobId")
