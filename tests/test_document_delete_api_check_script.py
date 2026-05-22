@@ -7,6 +7,7 @@ import pytest
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatErrorCode
 from scripts import check_document_delete_api
 
 
@@ -239,3 +240,27 @@ def test_document_delete_api_script_main_returns_one_without_token() -> None:
     assert exit_code == 1
     assert "FastAPI 문서 삭제 API 점검 실패" in stderr.getvalue()
     assert "code=CHAT_SECURITY_003" in stderr.getvalue()
+    assert "nextAction=DOCUMENT_INDEX_INTERNAL_TOKEN" in stderr.getvalue()
+
+
+def test_document_delete_api_script_builds_failure_actions_by_error_type() -> None:
+    payload_error = ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_DOCUMENT_002,
+        message="문서 삭제 API 점검 payload 필수 필드 또는 타입이 올바르지 않습니다.",
+    )
+    response_error = ChatServiceError(
+        status_code=502,
+        code=ChatErrorCode.CHAT_DOCUMENT_003,
+        message="FastAPI 문서 삭제 API 응답 형식이 올바르지 않습니다.",
+    )
+
+    payload_actions = check_document_delete_api.build_document_api_failure_actions(
+        payload_error
+    )
+    response_actions = check_document_delete_api.build_document_api_failure_actions(
+        response_error
+    )
+
+    assert "documentId" in payload_actions[0]
+    assert "응답" in response_actions[0]

@@ -7,6 +7,7 @@ import pytest
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatErrorCode
 from scripts import check_document_index_api
 
 
@@ -310,3 +311,27 @@ def test_document_index_api_script_main_returns_one_without_token() -> None:
     assert exit_code == 1
     assert "FastAPI 문서 인덱싱 API 점검 실패" in stderr.getvalue()
     assert "code=CHAT_SECURITY_003" in stderr.getvalue()
+    assert "nextAction=DOCUMENT_INDEX_INTERNAL_TOKEN" in stderr.getvalue()
+
+
+def test_document_index_api_script_builds_failure_actions_by_error_type() -> None:
+    skipped_error = ChatServiceError(
+        status_code=500,
+        code=ChatErrorCode.CHAT_DOCUMENT_003,
+        message="FastAPI 문서 인덱싱 API가 문서 저장을 생략했습니다.",
+    )
+    network_error = ChatServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_SERVER_001,
+        message="FastAPI 문서 인덱싱 API 호출에 실패했습니다.",
+    )
+
+    skipped_actions = check_document_index_api.build_document_api_failure_actions(
+        skipped_error
+    )
+    network_actions = check_document_index_api.build_document_api_failure_actions(
+        network_error
+    )
+
+    assert "EMBEDDING_ENABLED" in skipped_actions[0]
+    assert "FastAPI base URL" in network_actions[0]

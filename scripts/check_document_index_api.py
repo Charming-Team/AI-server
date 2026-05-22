@@ -12,6 +12,7 @@ from app.features.chat.document_index_service import DocumentIndexResult
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ErrorResponse
+from scripts.document_api_failure_actions import build_document_api_failure_actions
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_DOCUMENT_ID = "company-info-line-bottleneck"
@@ -339,6 +340,8 @@ def main(
     except ChatServiceError as exc:
         print(f"FastAPI 문서 인덱싱 API 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
+        for next_action in build_document_api_failure_actions(exc):
+            print(f"nextAction={next_action}", file=error_output)
         return 1
     except Exception as exc:
         print(f"FastAPI 문서 인덱싱 API 점검 실패: {exc}", file=error_output)

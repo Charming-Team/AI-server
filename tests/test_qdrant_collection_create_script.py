@@ -151,6 +151,7 @@ def test_create_qdrant_collection_script_keeps_existing_matching_collection(
     assert exit_code == 0
     assert "action=EXISTS" in stdout.getvalue()
     assert "dimensionMatched=True" in stdout.getvalue()
+    assert "nextAction=" not in stdout.getvalue()
 
 
 def test_create_qdrant_collection_script_creates_missing_collection(
@@ -201,6 +202,7 @@ def test_create_qdrant_collection_script_returns_two_on_dimension_mismatch(
     assert "action=MISMATCH" in stdout.getvalue()
     assert "actualDimension=1536" in stdout.getvalue()
     assert "code=CHAT_QDRANT_004" in stdout.getvalue()
+    assert "nextAction=EMBEDDING_DIMENSION" in stdout.getvalue()
 
 
 def test_create_qdrant_collection_script_prints_json(
@@ -217,6 +219,7 @@ def test_create_qdrant_collection_script_prints_json(
     assert exit_code == 0
     assert '"action": "EXISTS"' in stdout.getvalue()
     assert '"collection_name": "smap_internal_documents"' in stdout.getvalue()
+    assert '"nextActions": []' in stdout.getvalue()
     assert '"error": null' in stdout.getvalue()
 
 
@@ -268,6 +271,7 @@ def test_create_qdrant_collection_script_validate_only_prints_json_without_secre
     assert exit_code == 0
     assert '"action": "VALIDATED"' in stdout.getvalue()
     assert '"apiKeyConfigured": true' in stdout.getvalue()
+    assert '"nextActions": []' in stdout.getvalue()
     assert "qdrant-secret-token" not in stdout.getvalue()
 
 
@@ -319,6 +323,7 @@ def test_create_qdrant_collection_script_prints_json_error_on_dimension_mismatch
     assert exit_code == 2
     assert '"action": "MISMATCH"' in stdout.getvalue()
     assert '"code": "CHAT_QDRANT_004"' in stdout.getvalue()
+    assert '"nextActions": [' in stdout.getvalue()
     assert "FastAPI 임베딩 설정과 일치하지 않습니다" in stdout.getvalue()
 
 
@@ -340,3 +345,25 @@ def test_create_qdrant_collection_script_returns_one_on_external_error(
     assert exit_code == 1
     assert "Qdrant 컬렉션 생성/점검 실패" in stderr.getvalue()
     assert "CHAT_QDRANT_002" in stderr.getvalue()
+    assert "nextAction=Qdrant URL" in stderr.getvalue()
+    assert "port-forward" in stderr.getvalue()
+
+
+def test_create_qdrant_collection_script_builds_failure_actions_by_code() -> None:
+    settings_error = ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_QDRANT_001,
+        message="Qdrant 설정이 올바르지 않습니다.",
+    )
+    response_error = ChatExternalServiceError(
+        status_code=502,
+        code=ChatErrorCode.CHAT_QDRANT_003,
+        message="Qdrant 응답 형식이 올바르지 않습니다.",
+    )
+
+    assert "QDRANT_URL" in create_qdrant_collection.build_collection_create_failure_actions(
+        settings_error
+    )[0]
+    assert "응답 형식" in create_qdrant_collection.build_collection_create_failure_actions(
+        response_error
+    )[0]

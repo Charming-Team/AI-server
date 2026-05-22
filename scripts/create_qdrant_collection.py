@@ -18,6 +18,21 @@ from app.features.chat.schemas import ChatErrorCode, ErrorResponse
 DIMENSION_MISMATCH_MESSAGE = (
     "Qdrant 컬렉션 vector dimension이 FastAPI 임베딩 설정과 일치하지 않습니다."
 )
+QDRANT_CREATE_SETTINGS_FAILURE_ACTIONS = (
+    "QDRANT_URL, QDRANT_COLLECTION, EMBEDDING_DIMENSION 설정값을 확인하세요.",
+)
+QDRANT_CREATE_NETWORK_FAILURE_ACTIONS = (
+    "Qdrant URL, collection 이름, port-forward 또는 Kubernetes Service 연결 상태를 확인하세요.",
+    "로컬 점검이면 kubectl port-forward로 Qdrant 6333 포트를 열고 "
+    "http://localhost:6333을 사용하세요.",
+)
+QDRANT_CREATE_RESPONSE_FAILURE_ACTIONS = (
+    "Qdrant 컬렉션 생성/조회 API 응답 형식이 예상 JSON 구조인지 확인하세요.",
+)
+QDRANT_CREATE_DIMENSION_FAILURE_ACTIONS = (
+    "EMBEDDING_DIMENSION과 Qdrant collection vector size를 같은 값으로 맞추세요.",
+    "이미 다른 차원으로 생성된 컬렉션은 재생성하거나 별도 컬렉션 사용을 검토하세요.",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -106,6 +121,7 @@ def build_validate_only_result(settings: Settings, distance: str) -> dict[str, A
         "qdrantUrlConfigured": bool(settings.qdrant_url.strip()),
         "apiKeyConfigured": bool(settings.qdrant_api_key),
         "networkChecked": False,
+        "nextActions": [],
         "error": None,
     }
 
@@ -126,6 +142,24 @@ def build_dimension_mismatch_error(
     )
 
 
+def build_dimension_mismatch_actions(
+    result: QdrantCollectionCheckResult,
+) -> list[str]:
+    if result.is_dimension_matched:
+        return []
+    return list(QDRANT_CREATE_DIMENSION_FAILURE_ACTIONS)
+
+
+def build_collection_create_failure_actions(exc: ChatServiceError) -> list[str]:
+    if exc.code == ChatErrorCode.CHAT_QDRANT_001:
+        return list(QDRANT_CREATE_SETTINGS_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_003:
+        return list(QDRANT_CREATE_RESPONSE_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_004:
+        return list(QDRANT_CREATE_DIMENSION_FAILURE_ACTIONS)
+    return list(QDRANT_CREATE_NETWORK_FAILURE_ACTIONS)
+
+
 async def ensure_collection(settings: Settings, distance: str) -> dict[str, Any]:
     try:
         check_result = await check_collection(settings)
@@ -138,6 +172,7 @@ async def ensure_collection(settings: Settings, distance: str) -> dict[str, Any]
             "action": "CREATED",
             "operation": operation,
             "collection": asdict(check_result),
+            "nextActions": build_dimension_mismatch_actions(check_result),
             "error": None,
         }
 
@@ -146,6 +181,7 @@ async def ensure_collection(settings: Settings, distance: str) -> dict[str, Any]
         "action": "EXISTS" if check_result.is_dimension_matched else "MISMATCH",
         "operation": None,
         "collection": asdict(check_result),
+        "nextActions": build_dimension_mismatch_actions(check_result),
         "error": error.model_dump(mode="json") if error is not None else None,
     }
 
@@ -175,6 +211,8 @@ def format_text_result(result: dict[str, Any]) -> str:
         lines.append(f"networkChecked={result['networkChecked']}")
     if "apiKeyConfigured" in result:
         lines.append(f"apiKeyConfigured={result['apiKeyConfigured']}")
+    for next_action in result.get("nextActions", []):
+        lines.append(f"nextAction={next_action}")
     error = result.get("error")
     if isinstance(error, dict):
         lines.extend(
@@ -208,6 +246,8 @@ def main(
     except ChatServiceError as exc:
         print(f"Qdrant 컬렉션 생성/점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
+        for next_action in build_collection_create_failure_actions(exc):
+            print(f"nextAction={next_action}", file=error_output)
         return 1
 
     if args.json:
