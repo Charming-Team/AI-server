@@ -3,6 +3,7 @@ from pathlib import Path
 from app.features.chat.rdb_evidence_view_catalog import RDB_EVIDENCE_VIEW_DEFINITIONS
 
 POSTGRES_SCRIPT_DIR = Path("scripts/postgres")
+DROP_VIEWS_SQL = POSTGRES_SCRIPT_DIR / "000_drop_chat_evidence_views.sql"
 CREATE_VIEWS_SQL = POSTGRES_SCRIPT_DIR / "001_create_chat_evidence_views.sql"
 GRANT_READONLY_SQL = POSTGRES_SCRIPT_DIR / "002_grant_chat_evidence_readonly.sql"
 VERIFY_READONLY_SQL = POSTGRES_SCRIPT_DIR / "003_verify_chat_evidence_readonly.sql"
@@ -44,17 +45,23 @@ def test_chat_evidence_views_do_not_depend_on_removed_line_type_column() -> None
 
 def test_chat_evidence_view_script_drops_legacy_line_type_views_before_recreate() -> None:
     sql = _read_sql(CREATE_VIEWS_SQL)
-    shape_changed_views = (
-        "chat_production_plan_evidence_view",
-        "chat_line_bottleneck_evidence_view",
-    )
 
-    for view_name in shape_changed_views:
+    for definition in RDB_EVIDENCE_VIEW_DEFINITIONS:
+        view_name = definition.view_name
         drop_statement = f"drop view if exists chat_evidence.{view_name}"
         create_statement = f"create or replace view chat_evidence.{view_name}"
 
         assert drop_statement in sql
         assert sql.index(drop_statement) < sql.index(create_statement)
+
+
+def test_chat_evidence_drop_script_drops_all_catalog_views() -> None:
+    sql = _read_sql(DROP_VIEWS_SQL)
+
+    assert "begin;" in sql
+    assert "commit;" in sql
+    for definition in RDB_EVIDENCE_VIEW_DEFINITIONS:
+        assert f"drop view if exists chat_evidence.{definition.view_name}" in sql
 
 
 def test_chat_evidence_views_do_not_use_select_star() -> None:
