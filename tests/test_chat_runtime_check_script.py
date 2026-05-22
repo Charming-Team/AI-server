@@ -23,6 +23,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "include_answer_api_smoke": False,
         "include_recommendation_api_smoke": False,
         "include_answer_output_policy_smoke": False,
+        "include_llm_smoke": False,
         "include_rdb_chat_scenarios": False,
         "include_rag_chat_scenarios": False,
         "include_rag_end_to_end_smoke": False,
@@ -99,6 +100,7 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.include_document_api_smoke is True
     assert args.include_vector_smoke is True
     assert args.include_answer_output_policy_smoke is True
+    assert args.include_llm_smoke is True
     assert args.include_rdb_chat_scenarios is True
     assert args.include_rag_chat_scenarios is True
     assert args.include_rag_end_to_end_smoke is True
@@ -437,6 +439,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
     assert [step["name"] for step in result["steps"]] == [
         "readiness",
         "answerOutputPolicySmoke",
+        "llmCompletionSmoke",
         "rdbEvidenceViews",
         "rdbChatScenarios",
         "ragChatScenarios",
@@ -456,8 +459,8 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "llm",
     ]
     assert result["summary"] == {
-        "totalStepCount": 12,
-        "passedStepCount": 12,
+        "totalStepCount": 13,
+        "passedStepCount": 13,
         "failedStepCount": 0,
         "failedSteps": [],
         "nextActions": [],
@@ -482,6 +485,33 @@ def test_check_chat_runtime_validate_only_checks_answer_output_policy_smoke() ->
     ]
     assert result["steps"][1]["result"]["checkStatus"] == "PASS"
     assert result["steps"][1]["result"]["caseCount"] == 4
+
+
+def test_check_chat_runtime_validate_only_checks_llm_completion_smoke() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(include_llm_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "llmCompletionSmoke",
+        "rdbEvidenceViews",
+    ]
+    assert result["steps"][1]["result"] == {
+        "checkStatus": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "networkChecked": False,
+        "llmEnabled": True,
+        "baseUrlConfigured": True,
+        "modelConfigured": True,
+        "apiKeyConfigured": False,
+    }
 
 
 def test_check_chat_runtime_validate_only_checks_rdb_chat_scenarios() -> None:
@@ -662,6 +692,65 @@ def test_check_chat_runtime_fails_when_answer_output_policy_smoke_fails(
     assert result["steps"][1]["status"] == "FAIL"
     assert result["summary"]["failedSteps"][0]["name"] == "answerOutputPolicySmoke"
     assert "LLM 출력 보안 정책" in result["summary"]["nextActions"][0]
+
+
+def test_check_chat_runtime_network_runs_llm_completion_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(network=True, include_llm_smoke=True)
+    calls: list[str] = []
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_llm_smoke(settings_arg):
+        calls.append(settings_arg.llm_base_url)
+        return {
+            "checkStatus": "PASS",
+            "mode": "NETWORK",
+            "networkChecked": True,
+            "answerReceived": True,
+            "answerLength": 8,
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_llm_completion,
+        "check_llm_completion",
+        fake_llm_smoke,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "NETWORK"
+    assert result["steps"][1]["name"] == "llmCompletionSmoke"
+    assert calls == ["http://llm.local"]
+
+
+def test_check_chat_runtime_llm_completion_failure_has_next_action() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        llm_enabled=False,
+    )
+    args = _build_args(include_llm_smoke=True)
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][1]["name"] == "llmCompletionSmoke"
+    assert result["steps"][1]["status"] == "FAIL"
+    assert result["steps"][1]["error"]["code"] == "CHAT_LLM_001"
+    assert "OpenAI-compatible" in result["summary"]["nextActions"][0]
 
 
 def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:

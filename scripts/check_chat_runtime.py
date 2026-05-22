@@ -16,6 +16,7 @@ from scripts import (
     check_chat_recommendations,
     check_document_delete_api,
     check_document_index_api,
+    check_llm_completion,
     check_qdrant_collection,
     check_qdrant_document_payloads,
     check_qdrant_vector_search,
@@ -35,6 +36,10 @@ STEP_ACTION_GUIDE = {
     "answerOutputPolicySmoke": (
         "LLM 출력 보안 정책의 프롬프트 인젝션, 민감정보, OPERATOR 금액성 답변 "
         "차단 규칙을 확인하세요."
+    ),
+    "llmCompletionSmoke": (
+        "LLM_ENABLED, LLM_BASE_URL, LLM_MODEL 설정과 OpenAI-compatible "
+        "chat completions 응답 형식을 확인하세요."
     ),
     "rdbEvidenceViews": (
         "RDB DSN, chat_evidence view 생성 여부, smap_chat_reader read-only 권한을 "
@@ -157,6 +162,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "LLM 출력 보안 정책의 핵심 차단 케이스를 로컬에서 점검합니다. "
             "네트워크 연결은 수행하지 않습니다."
+        ),
+    )
+    parser.add_argument(
+        "--include-llm-smoke",
+        action="store_true",
+        help=(
+            "LLM chat completions 연결을 점검합니다. 네트워크 모드에서는 "
+            "실제 LLM 서버를 호출합니다."
         ),
     )
     parser.add_argument(
@@ -362,6 +375,7 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.include_rdb_chat_scenarios = True
     if preset == "full":
         args.require_llm_generation = True
+        args.include_llm_smoke = True
     args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
     return args
 
@@ -395,6 +409,14 @@ async def check_chat_runtime(
                 "answerOutputPolicySmoke",
                 run_answer_output_policy_smoke,
                 fail_when=lambda result: result["checkStatus"] != "PASS",
+            )
+        )
+
+    if args.include_llm_smoke:
+        steps.append(
+            await run_step(
+                "llmCompletionSmoke",
+                lambda: run_llm_completion_smoke(settings, args),
             )
         )
 
@@ -980,6 +1002,15 @@ async def run_answer_api_smoke(
 
 def run_answer_output_policy_smoke() -> dict[str, Any]:
     return check_answer_output_policy.check_answer_output_policy()
+
+
+async def run_llm_completion_smoke(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    if not args.network:
+        return check_llm_completion.build_validate_only_result(settings)
+    return await check_llm_completion.check_llm_completion(settings)
 
 
 async def run_recommendation_api_smoke(
