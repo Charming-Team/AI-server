@@ -303,6 +303,28 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
     assert audit_logger.responses == [response]
 
 
+def test_chat_service_uses_latest_grounding_basis_time() -> None:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeDocumentSearchService(
+        was_searched=True,
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+                basisTime=datetime.fromisoformat("2026-05-12T11:00:00+09:00"),
+                sourceOrigin="QDRANT",
+            )
+        ],
+    )
+    service.answer_generation_service = FakeGeneratedAnswerGenerationService()
+
+    response = anyio.run(service.create_answer, _build_request())
+
+    assert response.basis_time == datetime.fromisoformat("2026-05-12T11:00:00+09:00")
+
+
 def test_chat_service_sanitizes_operator_financial_evidence_before_llm() -> None:
     service = ChatService(Settings())
     answer_generation_service = FakeCapturingAnswerGenerationService()

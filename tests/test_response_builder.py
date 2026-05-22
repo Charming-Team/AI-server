@@ -92,6 +92,51 @@ def test_response_builder_builds_unique_urls_from_sources() -> None:
     assert urls[0].type == "REPORT"
 
 
+def test_response_builder_builds_latest_basis_time_from_sources() -> None:
+    builder = ChatResponseBuilder()
+    sources = [
+        ChatSource(
+            sourceType="MATERIAL",
+            title="자재 부족 현황",
+            summary="MAT-001 부족",
+            basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+            sourceOrigin="RDB",
+        ),
+        ChatSource(
+            sourceType="REPORT",
+            title="월간 생산 리스크 보고서",
+            summary="자재 부족과 라인 병목 분석",
+            basisTime=datetime.fromisoformat("2026-05-12T11:00:00+09:00"),
+            sourceOrigin="QDRANT",
+        ),
+    ]
+
+    basis_time = builder.build_basis_time(
+        sources,
+        fallback=datetime.fromisoformat("2026-05-12T09:00:00+09:00"),
+    )
+
+    assert basis_time == datetime.fromisoformat("2026-05-12T11:00:00+09:00")
+
+
+def test_response_builder_uses_fallback_basis_time_without_source_times() -> None:
+    builder = ChatResponseBuilder()
+    fallback = datetime.fromisoformat("2026-05-12T10:30:00+09:00")
+
+    basis_time = builder.build_basis_time(
+        [
+            ChatSource(
+                sourceType="REPORT",
+                title="기준 시각 없는 보고서",
+                summary="요약",
+            )
+        ],
+        fallback=fallback,
+    )
+
+    assert basis_time == fallback
+
+
 def test_response_builder_keeps_only_safe_internal_urls() -> None:
     builder = ChatResponseBuilder()
     evidence_result = _build_evidence_result(

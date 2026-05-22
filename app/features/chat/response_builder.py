@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.features.chat.schemas import (
     ChatErrorCode,
@@ -44,6 +44,20 @@ class ChatResponseBuilder:
                 )
             )
         return urls
+
+    def build_basis_time(
+        self,
+        sources: list[ChatSource],
+        fallback: datetime,
+    ) -> datetime:
+        source_basis_times = [
+            source.basis_time
+            for source in sources
+            if source.basis_time is not None
+        ]
+        if not source_basis_times:
+            return fallback
+        return max(source_basis_times, key=self._basis_time_sort_key)
 
     def build_security_result(
         self,
@@ -113,3 +127,8 @@ class ChatResponseBuilder:
             source.basis_time,
             source.source_origin,
         )
+
+    def _basis_time_sort_key(self, basis_time: datetime) -> float:
+        if basis_time.tzinfo is not None and basis_time.utcoffset() is not None:
+            return basis_time.timestamp()
+        return basis_time.replace(tzinfo=UTC).timestamp()
