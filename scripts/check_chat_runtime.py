@@ -24,6 +24,7 @@ from scripts import (
     check_rag_end_to_end,
     check_rdb_chat_scenarios,
     check_rdb_evidence_views,
+    document_api_failure_actions,
 )
 
 StepRunner = Callable[[], Awaitable[dict[str, Any]] | dict[str, Any]]
@@ -636,6 +637,10 @@ def extract_failure_action(step: dict[str, Any]) -> str:
         vector_action = build_qdrant_vector_failure_action(error)
         if vector_action:
             return vector_action
+    if isinstance(error, dict) and step.get("name") == "documentApiSmoke":
+        document_action = build_document_api_failure_action(error)
+        if document_action:
+            return document_action
     return STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION)
 
 
@@ -672,6 +677,27 @@ def build_qdrant_vector_failure_action(error: dict[str, Any]) -> str | None:
         return None
 
     actions = check_qdrant_vector_search.build_vector_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        )
+    )
+    return actions[0] if actions else None
+
+
+def build_document_api_failure_action(error: dict[str, Any]) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = document_api_failure_actions.build_document_api_failure_actions(
         ChatServiceError(
             status_code=500,
             code=error_code,

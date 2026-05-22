@@ -6,6 +6,8 @@ import anyio
 import pytest
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatErrorCode
 from scripts import check_chat_runtime
 
 
@@ -942,6 +944,116 @@ def test_check_chat_runtime_document_api_smoke_requires_token() -> None:
     assert result["steps"][-1]["name"] == "documentApiSmoke"
     assert result["steps"][-1]["status"] == "FAIL"
     assert result["steps"][-1]["error"]["code"] == "CHAT_SECURITY_003"
+    assert any(
+        "DOCUMENT_INDEX_INTERNAL_TOKEN" in action
+        for action in result["summary"]["nextActions"]
+    )
+
+
+def test_check_chat_runtime_network_reports_document_index_skip_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(
+        network=True,
+        include_document_api_smoke=True,
+        require_document_index=True,
+    )
+
+    async def fake_index_check(**kwargs):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_DOCUMENT_003,
+            message="FastAPI 문서 인덱싱 API가 문서 저장을 생략했습니다.",
+        )
+
+    async def fake_delete_check(**kwargs):
+        raise AssertionError("인덱싱 실패 후 삭제 API를 호출하면 안 됩니다.")
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_qdrant_collection_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "collectionName": settings_arg.qdrant_collection}
+
+    async def fake_qdrant_payload_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "pointCount": 1}
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_document_index_api,
+        "check_document_index_api",
+        fake_index_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_document_delete_api,
+        "check_document_delete_api",
+        fake_delete_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_collection_check",
+        fake_qdrant_collection_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_payload_check",
+        fake_qdrant_payload_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "documentApiSmoke"
+    assert result["steps"][-1]["error"]["code"] == "CHAT_DOCUMENT_003"
+    assert any("EMBEDDING_ENABLED" in action for action in result["summary"]["nextActions"])
+
+
+def test_check_chat_runtime_network_reports_document_api_network_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+    args = _build_args(network=True, include_document_api_smoke=True)
+
+    async def fake_index_check(**kwargs):
+        raise ChatServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_SERVER_001,
+            message="FastAPI 문서 인덱싱 API 호출에 실패했습니다.",
+        )
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_document_index_api,
+        "check_document_index_api",
+        fake_index_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "documentApiSmoke"
+    assert any("FastAPI base URL" in action for action in result["summary"]["nextActions"])
 
 
 def test_check_chat_runtime_network_runs_document_api_smoke(
@@ -1425,6 +1537,54 @@ def test_check_chat_runtime_builds_vector_failure_action_from_error() -> None:
 
     assert summary["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
     assert "Smoke 문서가 Qdrant에 저장" in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "expected_action_text"),
+    [
+        (
+            "CHAT_SECURITY_003",
+            "FastAPI document index internal token이 설정되지 않았습니다.",
+            "DOCUMENT_INDEX_INTERNAL_TOKEN",
+        ),
+        (
+            "CHAT_DOCUMENT_002",
+            "문서 인덱싱 API 점검 payload 필수 필드 또는 타입이 올바르지 않습니다.",
+            "documentId",
+        ),
+        (
+            "CHAT_DOCUMENT_003",
+            "FastAPI 문서 인덱싱 API indexedCount가 기준보다 적습니다.",
+            "EMBEDDING_ENABLED",
+        ),
+        (
+            "CHAT_SERVER_001",
+            "FastAPI 문서 인덱싱 API 호출에 실패했습니다.",
+            "FastAPI base URL",
+        ),
+    ],
+)
+def test_check_chat_runtime_builds_document_api_failure_action_from_error(
+    code: str,
+    message: str,
+    expected_action_text: str,
+) -> None:
+    steps = [
+        {
+            "name": "documentApiSmoke",
+            "status": "FAIL",
+            "error": {
+                "code": code,
+                "message": message,
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["failedSteps"][0]["code"] == code
+    assert expected_action_text in summary["failedSteps"][0]["action"]
     assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
 
 
