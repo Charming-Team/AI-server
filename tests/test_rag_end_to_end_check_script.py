@@ -9,6 +9,7 @@ import pytest
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.schemas import ChatErrorCode
 from scripts import check_rag_end_to_end
 
 
@@ -316,3 +317,61 @@ def test_rag_end_to_end_main_returns_one_without_tokens() -> None:
     assert exit_code == 1
     assert "RAG end-to-end 점검 실패" in stderr.getvalue()
     assert "CHAT_SECURITY_003" in stderr.getvalue()
+    assert "nextAction=CHAT_ANSWER_INTERNAL_TOKEN" in stderr.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_action_text"),
+    [
+        (
+            ChatServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_SECURITY_003,
+                message="FastAPI chat answer internal token이 설정되지 않았습니다.",
+            ),
+            "CHAT_ANSWER_INTERNAL_TOKEN",
+        ),
+        (
+            ChatServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_SECURITY_003,
+                message="FastAPI document index internal token이 설정되지 않았습니다.",
+            ),
+            "DOCUMENT_INDEX_INTERNAL_TOKEN",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_DOCUMENT_003,
+                message="FastAPI 문서 인덱싱 API indexedCount가 기준보다 적습니다.",
+            ),
+            "EMBEDDING_ENABLED",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message="FastAPI 챗봇 응답에 Qdrant Vector Search가 사용되지 않았습니다.",
+            ),
+            "QDRANT_SEARCH_ENABLED",
+        ),
+        (
+            ChatServiceError(
+                status_code=503,
+                code=ChatErrorCode.CHAT_SERVER_001,
+                message="FastAPI 문서 삭제 API 호출에 실패했습니다.",
+            ),
+            "FastAPI base URL",
+        ),
+    ],
+)
+def test_rag_end_to_end_builds_failure_actions_by_error_type(
+    error: ChatServiceError,
+    expected_action_text: str,
+) -> None:
+    actions = (
+        check_rag_end_to_end.rag_end_to_end_failure_actions
+        .build_rag_end_to_end_failure_actions(error)
+    )
+
+    assert expected_action_text in actions[0]

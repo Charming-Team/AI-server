@@ -766,6 +766,61 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
     }
 
 
+def test_check_chat_runtime_network_reports_rag_end_to_end_document_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings()
+    args = _build_args(network=True, include_rag_end_to_end_smoke=True)
+
+    async def fake_rag_end_to_end(**kwargs):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_DOCUMENT_003,
+            message="FastAPI 문서 인덱싱 API indexedCount가 기준보다 적습니다.",
+        )
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_rag_end_to_end,
+        "check_rag_end_to_end",
+        fake_rag_end_to_end,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "ragEndToEndSmoke"
+    assert any("EMBEDDING_ENABLED" in action for action in result["summary"]["nextActions"])
+
+
+def test_check_chat_runtime_network_reports_rag_end_to_end_answer_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings()
+    args = _build_args(network=True, include_rag_end_to_end_smoke=True)
+
+    async def fake_rag_end_to_end(**kwargs):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message="FastAPI 챗봇 응답에 Qdrant Vector Search가 사용되지 않았습니다.",
+        )
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_rag_end_to_end,
+        "check_rag_end_to_end",
+        fake_rag_end_to_end,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["steps"][-1]["name"] == "ragEndToEndSmoke"
+    assert any(
+        "QDRANT_SEARCH_ENABLED" in action
+        for action in result["summary"]["nextActions"]
+    )
+
+
 def test_check_chat_runtime_fails_when_answer_output_policy_smoke_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1800,6 +1855,59 @@ def test_check_chat_runtime_builds_recommendation_api_failure_action_from_error(
     steps = [
         {
             "name": "recommendationApiSmoke",
+            "status": "FAIL",
+            "error": {
+                "code": code,
+                "message": message,
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["failedSteps"][0]["code"] == code
+    assert expected_action_text in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "expected_action_text"),
+    [
+        (
+            "CHAT_SECURITY_003",
+            "FastAPI chat answer internal token이 설정되지 않았습니다.",
+            "CHAT_ANSWER_INTERNAL_TOKEN",
+        ),
+        (
+            "CHAT_SECURITY_003",
+            "FastAPI document index internal token이 설정되지 않았습니다.",
+            "DOCUMENT_INDEX_INTERNAL_TOKEN",
+        ),
+        (
+            "CHAT_DOCUMENT_003",
+            "FastAPI 문서 인덱싱 API indexedCount가 기준보다 적습니다.",
+            "EMBEDDING_ENABLED",
+        ),
+        (
+            "CHAT_EVIDENCE_001",
+            "FastAPI 챗봇 응답에 Qdrant Vector Search가 사용되지 않았습니다.",
+            "QDRANT_SEARCH_ENABLED",
+        ),
+        (
+            "CHAT_SERVER_001",
+            "FastAPI 챗봇 답변 API 호출에 실패했습니다.",
+            "FastAPI base URL",
+        ),
+    ],
+)
+def test_check_chat_runtime_builds_rag_end_to_end_failure_action_from_error(
+    code: str,
+    message: str,
+    expected_action_text: str,
+) -> None:
+    steps = [
+        {
+            "name": "ragEndToEndSmoke",
             "status": "FAIL",
             "error": {
                 "code": code,

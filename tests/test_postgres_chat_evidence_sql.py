@@ -36,6 +36,12 @@ def test_chat_evidence_views_do_not_expose_sensitive_or_write_only_columns() -> 
         assert blocked_term not in sql
 
 
+def test_chat_evidence_views_do_not_depend_on_removed_line_type_column() -> None:
+    sql = _read_sql(CREATE_VIEWS_SQL)
+
+    assert "line_type" not in sql
+
+
 def test_chat_evidence_views_do_not_use_select_star() -> None:
     sql = _read_sql(CREATE_VIEWS_SQL)
 

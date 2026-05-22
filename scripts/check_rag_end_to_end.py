@@ -15,6 +15,7 @@ from scripts import (
     check_document_delete_api,
     check_document_index_api,
     check_qdrant_vector_search,
+    rag_end_to_end_failure_actions,
 )
 
 
@@ -346,6 +347,10 @@ def main(
     except ChatServiceError as exc:
         print(f"RAG end-to-end 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
+        for next_action in rag_end_to_end_failure_actions.build_rag_end_to_end_failure_actions(
+            exc
+        ):
+            print(f"nextAction={next_action}", file=error_output)
         return 1
     except Exception as exc:
         print(f"RAG end-to-end 점검 실패: {exc}", file=error_output)

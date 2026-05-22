@@ -59,6 +59,17 @@ def test_rdb_evidence_view_definitions_do_not_select_restricted_columns() -> Non
         assert selected_columns.isdisjoint(definition.restricted_columns)
 
 
+def test_rdb_evidence_view_definitions_do_not_expect_removed_line_type_column() -> None:
+    for definition in RDB_EVIDENCE_VIEW_DEFINITIONS:
+        selected_columns = (
+            set(definition.title_columns)
+            | set(definition.summary_columns)
+            | set(definition.data_columns)
+        )
+
+        assert "line_type" not in selected_columns
+
+
 def test_rdb_evidence_view_definitions_define_selected_date_filter_columns() -> None:
     for definition in RDB_EVIDENCE_VIEW_DEFINITIONS:
         selected_columns = (

@@ -26,6 +26,7 @@ from scripts import (
     check_rdb_chat_scenarios,
     check_rdb_evidence_views,
     document_api_failure_actions,
+    rag_end_to_end_failure_actions,
 )
 
 StepRunner = Callable[[], Awaitable[dict[str, Any]] | dict[str, Any]]
@@ -650,6 +651,10 @@ def extract_failure_action(step: dict[str, Any]) -> str:
         recommendation_action = build_recommendation_api_failure_action(error)
         if recommendation_action:
             return recommendation_action
+    if isinstance(error, dict) and step.get("name") == "ragEndToEndSmoke":
+        rag_end_to_end_action = build_rag_end_to_end_failure_action(error)
+        if rag_end_to_end_action:
+            return rag_end_to_end_action
     return STEP_ACTION_GUIDE.get(step["name"], DEFAULT_STEP_ACTION)
 
 
@@ -749,6 +754,27 @@ def build_recommendation_api_failure_action(error: dict[str, Any]) -> str | None
         return None
 
     actions = chat_api_failure_actions.build_recommendation_api_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        )
+    )
+    return actions[0] if actions else None
+
+
+def build_rag_end_to_end_failure_action(error: dict[str, Any]) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = rag_end_to_end_failure_actions.build_rag_end_to_end_failure_actions(
         ChatServiceError(
             status_code=500,
             code=error_code,
