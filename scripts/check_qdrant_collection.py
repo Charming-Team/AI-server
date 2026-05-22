@@ -17,6 +17,29 @@ from app.features.chat.schemas import ChatErrorCode, ErrorResponse
 DIMENSION_MISMATCH_MESSAGE = (
     "Qdrant 컬렉션 vector dimension이 FastAPI 임베딩 설정과 일치하지 않습니다."
 )
+QDRANT_NETWORK_FAILURE_ACTIONS = (
+    "QDRANT_URL이 현재 실행 환경에서 접근 가능한 주소인지 확인하세요.",
+    (
+        "로컬 점검이면 kubectl port-forward로 Qdrant 6333 포트를 열고 "
+        "http://localhost:6333을 사용하세요."
+    ),
+    "컬렉션이 없으면 scripts.create_qdrant_collection으로 먼저 생성하세요.",
+)
+QDRANT_COLLECTION_NOT_FOUND_ACTIONS = (
+    "QDRANT_COLLECTION 값이 실제 Qdrant 컬렉션명과 일치하는지 확인하세요.",
+    "컬렉션이 아직 없다면 scripts.create_qdrant_collection으로 생성하세요.",
+)
+QDRANT_SETTINGS_FAILURE_ACTIONS = (
+    "QDRANT_URL과 QDRANT_COLLECTION 설정을 확인하세요.",
+)
+QDRANT_RESPONSE_FAILURE_ACTIONS = (
+    "Qdrant 호환 API를 호출 중인지 확인하세요.",
+    "프록시나 Ingress가 Qdrant JSON 응답을 HTML/오류 페이지로 바꾸지 않는지 확인하세요.",
+)
+QDRANT_DIMENSION_FAILURE_ACTIONS = (
+    "EMBEDDING_DIMENSION과 Qdrant collection vector size를 같은 값으로 맞추세요.",
+    "임베딩 모델을 바꿨다면 컬렉션 재생성 또는 별도 컬렉션 사용을 검토하세요.",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -105,6 +128,26 @@ def build_dimension_mismatch_error(
     )
 
 
+def build_dimension_mismatch_actions(
+    result: QdrantCollectionCheckResult,
+) -> list[str]:
+    if result.is_dimension_matched:
+        return []
+    return list(QDRANT_DIMENSION_FAILURE_ACTIONS)
+
+
+def build_collection_failure_actions(exc: ChatServiceError) -> list[str]:
+    if exc.code == ChatErrorCode.CHAT_QDRANT_001:
+        return list(QDRANT_SETTINGS_FAILURE_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_003:
+        return list(QDRANT_RESPONSE_FAILURE_ACTIONS)
+    if exc.status_code == 404:
+        return list(QDRANT_COLLECTION_NOT_FOUND_ACTIONS)
+    if exc.code == ChatErrorCode.CHAT_QDRANT_002:
+        return list(QDRANT_NETWORK_FAILURE_ACTIONS)
+    return ["Qdrant 설정, 네트워크 연결, 컬렉션 상태를 확인하세요."]
+
+
 def format_text_result(result: QdrantCollectionCheckResult) -> str:
     check_status = "PASS" if result.is_dimension_matched else "FAIL"
     lines = [
@@ -123,6 +166,10 @@ def format_text_result(result: QdrantCollectionCheckResult) -> str:
                 f"message={error.message}",
             ]
         )
+        lines.extend(
+            f"nextAction={action}"
+            for action in build_dimension_mismatch_actions(result)
+        )
     return "\n".join(lines)
 
 
@@ -133,6 +180,7 @@ def format_json_result(result: QdrantCollectionCheckResult) -> str:
             "checkStatus": "PASS" if result.is_dimension_matched else "FAIL",
             **asdict(result),
             "error": error.model_dump(mode="json") if error is not None else None,
+            "nextActions": build_dimension_mismatch_actions(result),
         },
         ensure_ascii=False,
         indent=2,
@@ -180,6 +228,8 @@ def main(
     except ChatServiceError as exc:
         print(f"Qdrant 컬렉션 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
+        for action in build_collection_failure_actions(exc):
+            print(f"nextAction={action}", file=error_output)
         return 1
 
     if args.json:

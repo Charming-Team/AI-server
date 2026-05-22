@@ -166,6 +166,7 @@ def test_check_qdrant_collection_script_returns_two_on_dimension_mismatch(
     assert "status=FAIL" in stdout.getvalue()
     assert "actualDimension=384" in stdout.getvalue()
     assert "code=CHAT_QDRANT_004" in stdout.getvalue()
+    assert "nextAction=EMBEDDING_DIMENSION" in stdout.getvalue()
 
 
 def test_check_qdrant_collection_script_prints_json(
@@ -281,6 +282,7 @@ def test_check_qdrant_collection_script_prints_json_error_on_dimension_mismatch(
     assert exit_code == 2
     assert '"checkStatus": "FAIL"' in stdout.getvalue()
     assert '"code": "CHAT_QDRANT_004"' in stdout.getvalue()
+    assert '"nextActions": [' in stdout.getvalue()
     assert "FastAPI 임베딩 설정과 일치하지 않습니다" in stdout.getvalue()
 
 
@@ -302,3 +304,46 @@ def test_check_qdrant_collection_script_returns_one_on_external_error(
     assert exit_code == 1
     assert "Qdrant 컬렉션 점검 실패" in stderr.getvalue()
     assert "CHAT_QDRANT_002" in stderr.getvalue()
+    assert "nextAction=QDRANT_URL" in stderr.getvalue()
+    assert "kubectl port-forward" in stderr.getvalue()
+
+
+def test_check_qdrant_collection_script_guides_collection_creation_on_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_collection(settings):
+        raise ChatExternalServiceError(
+            status_code=404,
+            code=ChatErrorCode.CHAT_QDRANT_002,
+            message="Qdrant 컬렉션 조회에 실패했습니다.",
+        )
+
+    monkeypatch.setattr(check_qdrant_collection, "check_collection", fake_check_collection)
+    stderr = StringIO()
+
+    exit_code = check_qdrant_collection.main([], stderr=stderr)
+
+    assert exit_code == 1
+    assert "nextAction=QDRANT_COLLECTION" in stderr.getvalue()
+    assert "scripts.create_qdrant_collection" in stderr.getvalue()
+
+
+def test_check_qdrant_collection_script_builds_actions_by_error_code() -> None:
+    assert check_qdrant_collection.build_collection_failure_actions(
+        ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_QDRANT_001,
+            message="missing",
+        )
+    ) == ["QDRANT_URL과 QDRANT_COLLECTION 설정을 확인하세요."]
+
+    assert check_qdrant_collection.build_collection_failure_actions(
+        ChatExternalServiceError(
+            status_code=502,
+            code=ChatErrorCode.CHAT_QDRANT_003,
+            message="invalid",
+        )
+    ) == [
+        "Qdrant 호환 API를 호출 중인지 확인하세요.",
+        "프록시나 Ingress가 Qdrant JSON 응답을 HTML/오류 페이지로 바꾸지 않는지 확인하세요.",
+    ]
