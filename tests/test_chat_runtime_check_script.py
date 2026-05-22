@@ -109,6 +109,59 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.answer_api_min_document_source_count == 1
 
 
+def test_check_chat_runtime_llm_preset_runs_only_llm_checks() -> None:
+    settings = Settings(
+        llm_enabled=True,
+        llm_base_url="http://llm.local/v1",
+        llm_model="local-open-source-model",
+    )
+    args = _build_args(preset="llm")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert result["requiredComponents"] == ["llm"]
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "answerOutputPolicySmoke",
+        "llmCompletionSmoke",
+    ]
+    assert result["steps"][0]["result"]["status"] == "not_ready"
+    assert result["steps"][0]["result"]["requirementFailures"] == []
+    assert result["steps"][1]["result"]["checkStatus"] == "PASS"
+    assert result["steps"][2]["result"] == {
+        "checkStatus": "VALIDATED",
+        "mode": "VALIDATE_ONLY",
+        "networkChecked": False,
+        "llmEnabled": True,
+        "baseUrlConfigured": True,
+        "modelConfigured": True,
+        "apiKeyConfigured": False,
+    }
+
+
+def test_check_chat_runtime_llm_preset_fails_when_llm_is_not_ready() -> None:
+    settings = Settings(llm_enabled=False)
+    args = _build_args(preset="llm")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "FAIL"
+    assert result["requiredComponents"] == ["llm"]
+    assert result["steps"][0]["status"] == "FAIL"
+    assert result["steps"][0]["result"]["requirementFailures"] == [
+        {
+            "name": "llm",
+            "code": "CHAT_LLM_001",
+            "reason": "비활성화되어 있습니다.",
+        }
+    ]
+    assert result["steps"][2]["name"] == "llmCompletionSmoke"
+    assert result["steps"][2]["status"] == "FAIL"
+    assert result["steps"][2]["error"]["code"] == "CHAT_LLM_001"
+
+
 def test_check_chat_runtime_qdrant_preset_runs_only_qdrant_checks() -> None:
     settings = _base_ready_settings(
         rdb_evidence_enabled=True,

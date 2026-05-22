@@ -90,11 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--preset",
-        choices=("none", "rdb", "qdrant", "rag", "full"),
+        choices=("none", "rdb", "qdrant", "llm", "rag", "full"),
         default="none",
         help=(
             "자주 쓰는 점검 옵션 묶음. rdb는 RDB Evidence와 답변/추천 API, "
             "qdrant는 Qdrant 컬렉션/페이로드/벡터 smoke, "
+            "llm은 LLM 연결과 출력 보안 정책, "
             "rag는 Qdrant/문서/답변/추천 API, full은 전체 경로를 점검합니다."
         ),
     )
@@ -371,11 +372,15 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.include_answer_api_smoke = True
         args.include_recommendation_api_smoke = True
         args.include_answer_output_policy_smoke = True
+    if preset in {"llm", "full"}:
+        args.include_llm_smoke = True
+    if preset == "llm":
+        args.require_llm_generation = True
+        args.include_answer_output_policy_smoke = True
     if preset in {"rdb", "full"}:
         args.include_rdb_chat_scenarios = True
     if preset == "full":
         args.require_llm_generation = True
-        args.include_llm_smoke = True
     args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
     return args
 
@@ -564,7 +569,7 @@ def should_check_qdrant(settings: Settings, args: argparse.Namespace) -> bool:
 
 
 def should_fail_readiness(result: dict[str, Any], args: argparse.Namespace) -> bool:
-    if getattr(args, "preset", "none") == "qdrant":
+    if getattr(args, "preset", "none") in {"qdrant", "llm"}:
         return bool(result.get("requirementFailures"))
     return result["status"] != "ready"
 
