@@ -32,7 +32,8 @@ QDRANT_PAYLOAD_MIN_POINTS_FAILURE_ACTIONS = (
 QDRANT_PAYLOAD_CONTRACT_FAILURE_ACTIONS = (
     "Qdrant payload의 documentId, documentType, title, chunkText를 확인하세요.",
     "allowedRoles에는 OPERATOR, EXECUTIVE, MANUFACTURING_MANAGER 중 허용 역할만 넣으세요.",
-    "intentTags에는 챗봇이 지원하는 intent 값을 넣고, url은 내부 relative path로 저장하세요.",
+    "intentTags에는 챗봇이 지원하는 intent 값을 넣으세요.",
+    "화면 이동을 위해 내부 relative url 또는 referenceType/referenceId를 저장하세요.",
     "OPERATOR 허용 문서에는 계약 금액, 패널티, 비용 등 금액성 정보를 넣지 마세요.",
 )
 QDRANT_PAYLOAD_RESPONSE_FAILURE_ACTIONS = (
@@ -201,10 +202,23 @@ def validate_point(point: dict, access_policy: DocumentAccessPolicy) -> list[str
     if document.url and normalize_internal_url(document.url) is None:
         errors.append("url must be internal relative path")
 
+    if _is_missing_navigation_target(document):
+        errors.append("url or reference metadata is required")
+
     if not access_policy.allows_point(point, "OPERATOR"):
         errors.append("OPERATOR document contains restricted business terms")
 
     return errors
+
+
+def _is_missing_navigation_target(document: InternalDocumentPayload) -> bool:
+    if normalize_internal_url(document.url) is not None:
+        return False
+
+    if not document.reference_type or document.reference_id is None:
+        return True
+
+    return not document.reference_type.strip()
 
 
 def build_payload_failure_actions(exc: ChatServiceError) -> list[str]:
