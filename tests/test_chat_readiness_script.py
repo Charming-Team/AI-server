@@ -74,9 +74,48 @@ def test_check_chat_readiness_script_builds_ready_result() -> None:
 
     components = {component["name"]: component for component in result["components"]}
     assert result["status"] == "ready"
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/api/v1",
+        "groundingMode": "SPRING_EVIDENCE_ONLY",
+        "answerMode": "LLM",
+        "ragSearchMode": "DISABLED",
+        "enabledGroundingSources": ["SPRING_EVIDENCE"],
+        "expectedLlmSkippedReason": None,
+    }
     assert result["requirementFailures"] == []
     assert components["chatGroundingPipeline"]["configured"] is True
     assert components["answerGenerationPipeline"]["configured"] is True
+
+
+def test_check_chat_readiness_script_summarizes_k8s_configmap_chat_mode() -> None:
+    result = check_chat_readiness.build_readiness_result(
+        Settings(
+            api_v1_prefix="/ai/api/v1",
+            chat_answer_internal_token="answer-token",
+            chat_recommendation_internal_token="recommendation-token",
+            rdb_evidence_enabled=True,
+            rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+            qdrant_search_enabled=True,
+            qdrant_url="http://qdrant.qdrant.svc.cluster.local:6333",
+            qdrant_collection="smap_internal_documents",
+            embedding_enabled=True,
+            embedding_base_url="http://embedding-service:8002",
+            embedding_model="BAAI/bge-m3",
+            llm_enabled=False,
+        ),
+        required_components=["rdbEvidence", "qdrantSearch", "ragSearchPipeline"],
+    )
+
+    assert result["status"] == "ready"
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/ai/api/v1",
+        "groundingMode": "RDB_QDRANT",
+        "answerMode": "FALLBACK",
+        "ragSearchMode": "ENABLED",
+        "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+        "expectedLlmSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+    }
+    assert result["requirementFailures"] == []
 
 
 def test_check_chat_readiness_script_builds_required_components() -> None:
@@ -100,6 +139,8 @@ def test_check_chat_readiness_script_formats_text_result() -> None:
     output = check_chat_readiness.format_text_result(result)
 
     assert "status=not_ready" in output
+    assert "groundingMode=NONE" in output
+    assert "answerMode=FALLBACK" in output
     assert "chatAnswerInternalToken: enabled=True configured=False" in output
     assert "code=CHAT_SECURITY_003" in output
 

@@ -83,9 +83,59 @@ def build_readiness_result(
     )
     return {
         "status": "ready" if is_ready else "not_ready",
+        "runtimeMode": build_runtime_mode(settings),
         "components": component_items,
         "requirementFailures": requirement_failures,
     }
+
+
+def build_runtime_mode(settings: Settings) -> dict:
+    grounding_sources = build_enabled_grounding_sources(settings)
+    return {
+        "apiPrefix": settings.api_v1_prefix,
+        "groundingMode": build_grounding_mode(grounding_sources),
+        "answerMode": "LLM" if settings.llm_enabled else "FALLBACK",
+        "ragSearchMode": build_rag_search_mode(settings),
+        "enabledGroundingSources": grounding_sources,
+        "expectedLlmSkippedReason": (
+            None
+            if settings.llm_enabled
+            else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+        ),
+    }
+
+
+def build_enabled_grounding_sources(settings: Settings) -> list[str]:
+    sources: list[str] = []
+    if settings.rdb_evidence_enabled:
+        sources.append("RDB_EVIDENCE")
+    if settings.qdrant_search_enabled:
+        sources.append("QDRANT")
+    if settings.evidence_lookup_enabled:
+        sources.append("SPRING_EVIDENCE")
+    return sources
+
+
+def build_grounding_mode(grounding_sources: list[str]) -> str:
+    if not grounding_sources:
+        return "NONE"
+    if grounding_sources == ["RDB_EVIDENCE"]:
+        return "RDB_ONLY"
+    if grounding_sources == ["QDRANT"]:
+        return "QDRANT_ONLY"
+    if grounding_sources == ["SPRING_EVIDENCE"]:
+        return "SPRING_EVIDENCE_ONLY"
+    if grounding_sources == ["RDB_EVIDENCE", "QDRANT"]:
+        return "RDB_QDRANT"
+    return "HYBRID"
+
+
+def build_rag_search_mode(settings: Settings) -> str:
+    if not settings.qdrant_search_enabled:
+        return "DISABLED"
+    if not settings.embedding_enabled:
+        return "MISSING_EMBEDDING"
+    return "ENABLED"
 
 
 def build_required_components(args: argparse.Namespace) -> list[str]:
@@ -136,7 +186,20 @@ def _build_requirement_failure(
 
 
 def format_text_result(result: dict) -> str:
-    lines = [f"status={result['status']}"]
+    runtime_mode = result["runtimeMode"]
+    lines = [
+        f"status={result['status']}",
+        f"apiPrefix={runtime_mode['apiPrefix']}",
+        f"groundingMode={runtime_mode['groundingMode']}",
+        f"answerMode={runtime_mode['answerMode']}",
+        f"ragSearchMode={runtime_mode['ragSearchMode']}",
+        "enabledGroundingSources="
+        f"{','.join(runtime_mode['enabledGroundingSources'])}",
+        (
+            "expectedLlmSkippedReason="
+            f"{runtime_mode['expectedLlmSkippedReason']}"
+        ),
+    ]
     for component in result["components"]:
         line = (
             f"{component['name']}: "
