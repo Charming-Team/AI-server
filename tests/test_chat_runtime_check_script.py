@@ -21,6 +21,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "require_document_index": False,
         "require_llm_generation": False,
         "include_vector_smoke": False,
+        "include_qdrant_readonly_search": False,
         "include_document_api_smoke": False,
         "include_answer_api_smoke": False,
         "include_recommendation_api_smoke": False,
@@ -52,6 +53,10 @@ def _build_args(**overrides: Any) -> Namespace:
         "document_api_timeout_seconds": 10.0,
         "skip_rdb_privilege_check": False,
         "qdrant_min_points": 0,
+        "qdrant_readonly_search_question": "LINE-A01 병목 대응 기준 알려줘",
+        "qdrant_readonly_search_intent": "LINE_BOTTLENECK",
+        "qdrant_readonly_search_role": "MANUFACTURING_MANAGER",
+        "qdrant_readonly_search_min_source_count": 1,
         "json": False,
     }
     values.update(overrides)
@@ -99,7 +104,8 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.include_answer_api_smoke is True
     assert args.include_recommendation_api_smoke is True
     assert args.include_document_api_smoke is False
-    assert args.include_vector_smoke is True
+    assert args.include_vector_smoke is False
+    assert args.include_qdrant_readonly_search is True
     assert args.include_answer_output_policy_smoke is True
     assert args.include_llm_smoke is True
     assert args.include_rdb_chat_scenarios is True
@@ -192,17 +198,18 @@ def test_check_chat_runtime_qdrant_preset_runs_only_qdrant_checks() -> None:
         "readiness",
         "qdrantCollection",
         "qdrantDocumentPayloads",
-        "qdrantVectorSmoke",
+        "qdrantReadOnlySearch",
     ]
     assert result["steps"][0]["status"] == "PASS"
     assert result["steps"][0]["result"]["status"] in {"ready", "not_ready"}
     assert result["steps"][1]["result"]["checkStatus"] == "VALIDATED"
     assert result["steps"][2]["result"]["checkStatus"] == "VALIDATED"
     assert result["steps"][3]["result"]["checkStatus"] == "VALIDATED"
-    assert result["steps"][3]["result"]["documentId"] == "smoke-company-line-bottleneck"
+    assert result["steps"][3]["result"]["intent"] == "LINE_BOTTLENECK"
+    assert result["steps"][3]["result"]["role"] == "MANUFACTURING_MANAGER"
 
 
-def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
+def test_check_chat_runtime_qdrant_preset_network_runs_readonly_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = _base_ready_settings(qdrant_collection="smap_internal_documents")
@@ -217,9 +224,9 @@ def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
         calls.append("payload")
         return {"checkStatus": "PASS", "pointCount": 0}
 
-    async def fake_vector_smoke(settings_arg, args_arg):
-        calls.append("vector")
-        return {"checkStatus": "PASS", "matchedSourceCount": 1}
+    async def fake_readonly_search(settings_arg, args_arg):
+        calls.append("readonly")
+        return {"checkStatus": "PASS", "sourceCount": 1}
 
     monkeypatch.setattr(
         check_chat_runtime,
@@ -231,13 +238,17 @@ def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
         "run_qdrant_payload_check",
         fake_qdrant_payload_check,
     )
-    monkeypatch.setattr(check_chat_runtime, "run_qdrant_vector_smoke", fake_vector_smoke)
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_readonly_search",
+        fake_readonly_search,
+    )
 
     result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
 
     assert result["checkStatus"] == "PASS"
     assert result["mode"] == "NETWORK"
-    assert calls == ["collection", "payload", "vector"]
+    assert calls == ["collection", "payload", "readonly"]
 
 
 def test_check_chat_runtime_fails_when_qdrant_collection_result_fails(
@@ -262,8 +273,8 @@ def test_check_chat_runtime_fails_when_qdrant_collection_result_fails(
     async def fake_qdrant_payload_check(settings_arg, args_arg):
         return {"checkStatus": "PASS", "pointCount": 0}
 
-    async def fake_vector_smoke(settings_arg, args_arg):
-        return {"checkStatus": "PASS", "matchedSourceCount": 1}
+    async def fake_readonly_search(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "sourceCount": 1}
 
     monkeypatch.setattr(
         check_chat_runtime,
@@ -275,7 +286,11 @@ def test_check_chat_runtime_fails_when_qdrant_collection_result_fails(
         "run_qdrant_payload_check",
         fake_qdrant_payload_check,
     )
-    monkeypatch.setattr(check_chat_runtime, "run_qdrant_vector_smoke", fake_vector_smoke)
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_readonly_search",
+        fake_readonly_search,
+    )
 
     result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
 
@@ -520,7 +535,7 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
         "ragChatScenarios",
         "qdrantCollection",
         "qdrantDocumentPayloads",
-        "qdrantVectorSmoke",
+        "qdrantReadOnlySearch",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
@@ -554,7 +569,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "ragChatScenarios",
         "qdrantCollection",
         "qdrantDocumentPayloads",
-        "qdrantVectorSmoke",
+        "qdrantReadOnlySearch",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
@@ -1722,6 +1737,25 @@ def test_check_chat_runtime_builds_vector_failure_action_from_error() -> None:
 
     assert summary["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
     assert "Smoke 문서가 Qdrant에 저장" in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+def test_check_chat_runtime_builds_readonly_search_failure_action_from_error() -> None:
+    steps = [
+        {
+            "name": "qdrantReadOnlySearch",
+            "status": "FAIL",
+            "error": {
+                "code": "CHAT_QDRANT_004",
+                "message": "Qdrant read-only 검색 결과가 기준보다 적습니다.",
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
+    assert "Qdrant에 질문과 관련된 보고서" in summary["failedSteps"][0]["action"]
     assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
 
 

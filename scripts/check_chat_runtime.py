@@ -20,6 +20,7 @@ from scripts import (
     check_llm_completion,
     check_qdrant_collection,
     check_qdrant_document_payloads,
+    check_qdrant_readonly_search,
     check_qdrant_vector_search,
     check_rag_chat_scenarios,
     check_rag_end_to_end,
@@ -68,6 +69,9 @@ STEP_ACTION_GUIDE = {
         "Qdrant payload의 documentId, allowedRoles, intentTags, url 메타데이터를 "
         "확인하세요."
     ),
+    "qdrantReadOnlySearch": (
+        "이미 Qdrant에 저장된 문서가 질문 role/intent로 검색되는지 확인하세요."
+    ),
     "qdrantVectorSmoke": (
         "Embedding/Qdrant 연결과 smoke 문서 저장, 검색, 삭제 경로를 확인하세요."
     ),
@@ -97,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="none",
         help=(
             "자주 쓰는 점검 옵션 묶음. rdb는 RDB Evidence와 답변/추천 API, "
-            "qdrant는 Qdrant 컬렉션/페이로드/벡터 smoke, "
+            "qdrant는 Qdrant 컬렉션/페이로드/read-only 검색 smoke, "
             "llm은 LLM 연결과 출력 보안 정책, "
             "rag는 이미 Qdrant에 저장된 문서 검색 기반 챗봇 경로, "
             "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로를 점검합니다."
@@ -139,6 +143,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-vector-smoke",
         action="store_true",
         help="Qdrant에 임시 문서를 저장/검색/삭제하는 Vector smoke check를 수행합니다.",
+    )
+    parser.add_argument(
+        "--include-qdrant-readonly-search",
+        action="store_true",
+        help=(
+            "Qdrant에 이미 저장된 문서를 수정하지 않고 Embedding + Vector 검색 "
+            "경로를 점검합니다."
+        ),
     )
     parser.add_argument(
         "--include-document-api-smoke",
@@ -347,6 +359,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Qdrant payload 점검에서 요구하는 최소 point 개수",
     )
     parser.add_argument(
+        "--qdrant-readonly-search-question",
+        default=check_qdrant_readonly_search.DEFAULT_QUESTION,
+        help="Qdrant read-only 검색 smoke 질문",
+    )
+    parser.add_argument(
+        "--qdrant-readonly-search-intent",
+        choices=[intent.value for intent in ChatIntent if intent != ChatIntent.UNKNOWN],
+        default=check_qdrant_readonly_search.DEFAULT_INTENT,
+        help="Qdrant read-only 검색 smoke intent",
+    )
+    parser.add_argument(
+        "--qdrant-readonly-search-role",
+        default=check_qdrant_readonly_search.DEFAULT_ROLE,
+        help="Qdrant read-only 검색 smoke 사용자 Role",
+    )
+    parser.add_argument(
+        "--qdrant-readonly-search-min-source-count",
+        type=int,
+        default=check_qdrant_readonly_search.DEFAULT_MIN_SOURCE_COUNT,
+        help="Qdrant read-only 검색 smoke 최소 문서 출처 개수",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print result as JSON",
@@ -369,7 +403,7 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.require_rdb_evidence = True
 
     if preset in {"qdrant", "rag", "full"}:
-        args.include_vector_smoke = True
+        args.include_qdrant_readonly_search = True
 
     if preset in {"rag", "full"}:
         args.require_vector_search = True
@@ -477,6 +511,15 @@ async def check_chat_runtime(
             )
         )
 
+    if args.include_qdrant_readonly_search:
+        steps.append(
+            await run_step(
+                "qdrantReadOnlySearch",
+                lambda: run_qdrant_readonly_search(settings, args),
+                fail_when=has_failed_check_status,
+            )
+        )
+
     if args.include_vector_smoke:
         steps.append(
             await run_step(
@@ -579,6 +622,7 @@ def should_check_qdrant(settings: Settings, args: argparse.Namespace) -> bool:
         or settings.embedding_enabled
         or args.require_vector_search
         or args.require_document_index
+        or args.include_qdrant_readonly_search
         or args.include_vector_smoke
     )
 
@@ -640,6 +684,10 @@ def extract_failure_action(step: dict[str, Any]) -> str:
         vector_action = build_qdrant_vector_failure_action(error)
         if vector_action:
             return vector_action
+    if isinstance(error, dict) and step.get("name") == "qdrantReadOnlySearch":
+        readonly_action = build_qdrant_readonly_failure_action(error)
+        if readonly_action:
+            return readonly_action
     if isinstance(error, dict) and step.get("name") == "documentApiSmoke":
         document_action = build_document_api_failure_action(error)
         if document_action:
@@ -692,6 +740,27 @@ def build_qdrant_vector_failure_action(error: dict[str, Any]) -> str | None:
         return None
 
     actions = check_qdrant_vector_search.build_vector_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        )
+    )
+    return actions[0] if actions else None
+
+
+def build_qdrant_readonly_failure_action(error: dict[str, Any]) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = check_qdrant_readonly_search.build_readonly_failure_actions(
         ChatServiceError(
             status_code=500,
             code=error_code,
@@ -962,6 +1031,38 @@ async def run_qdrant_payload_check(
         settings,
         limit=20,
         min_points=args.qdrant_min_points,
+    )
+
+
+async def run_qdrant_readonly_search(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    smoke_args = argparse.Namespace(
+        question=args.qdrant_readonly_search_question,
+        role=args.qdrant_readonly_search_role,
+        user_id=1,
+        company_name="S-MAP",
+        session_id=1,
+        message_id=1,
+        requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
+    )
+    request = chat_check_common.build_chat_answer_request(smoke_args)
+    intent = ChatIntent(args.qdrant_readonly_search_intent)
+    min_source_count = args.qdrant_readonly_search_min_source_count
+    if not args.network:
+        return check_qdrant_readonly_search.build_validate_only_result(
+            settings,
+            request,
+            intent,
+            min_source_count,
+        )
+
+    return await check_qdrant_readonly_search.check_qdrant_readonly_search(
+        settings,
+        request,
+        intent,
+        min_source_count=min_source_count,
     )
 
 
