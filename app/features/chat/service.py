@@ -5,6 +5,7 @@ from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_search_service import DocumentSearchService
 from app.features.chat.evidence_access_policy import EvidenceAccessPolicy
 from app.features.chat.evidence_service import EvidenceService
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.intent_classifier import IntentClassifier
 from app.features.chat.question_validator import QuestionValidator
 from app.features.chat.response_builder import ChatResponseBuilder
@@ -81,7 +82,10 @@ class ChatService:
             request.user,
             evidence_result,
         )
-        document_result = await self.document_search_service.search(request, evidence_result.intent)
+        document_result = await self._search_documents_safely(
+            request,
+            evidence_result.intent,
+        )
         document_result = self.document_access_policy.sanitize_search_result(
             document_result,
             request.user.role,
@@ -181,6 +185,22 @@ class ChatService:
             vector_search_skipped_reason=document_result.skipped_reason,
             llm_generation_skipped_reason=answer_result.skipped_reason,
         )
+
+    async def _search_documents_safely(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> DocumentSearchResult:
+        try:
+            return await self.document_search_service.search(request, intent)
+        except ChatExternalServiceError as exc:
+            return DocumentSearchResult(
+                was_searched=self._did_vector_search_start(exc),
+                skipped_reason=exc.message,
+            )
+
+    def _did_vector_search_start(self, exc: ChatExternalServiceError) -> bool:
+        return not exc.code.value.startswith("CHAT_EMBEDDING_")
 
     def _build_restricted_answer(self, security_result: SecurityResult) -> str:
         if security_result.status == SecurityStatus.INVALID_REQUEST:

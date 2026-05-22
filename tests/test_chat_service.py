@@ -3,10 +3,12 @@ from datetime import datetime
 import anyio
 
 from app.core.config import Settings
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
     ChatAnswerResponse,
+    ChatErrorCode,
     ChatIntent,
     ChatSource,
     ChatUserContext,
@@ -67,6 +69,23 @@ class FakeDocumentSearchService:
             was_searched=self.was_searched,
             sources=self.sources,
             skipped_reason=self.skipped_reason,
+        )
+
+
+class FakeFailingDocumentSearchService:
+    def __init__(self, code: ChatErrorCode, message: str) -> None:
+        self.code = code
+        self.message = message
+
+    async def search(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> DocumentSearchResult:
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=self.code,
+            message=self.message,
         )
 
 
@@ -437,4 +456,49 @@ def test_chat_service_builds_model_result_skipped_reasons() -> None:
     assert (
         response.model_result.llm_generation_skipped_reason
         == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
+    )
+
+
+def test_chat_service_degrades_to_rdb_evidence_when_qdrant_search_fails() -> None:
+    service = ChatService(Settings())
+    answer_generation_service = FakeCapturingAnswerGenerationService()
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeFailingDocumentSearchService(
+        code=ChatErrorCode.CHAT_QDRANT_004,
+        message="Qdrant 검색에 실패했습니다.",
+    )
+    service.answer_generation_service = answer_generation_service
+
+    response = anyio.run(service.create_answer, _build_request())
+
+    assert response.answer == "근거에 따르면 납기 위험이 있습니다."
+    assert response.security_result.status == SecurityStatus.PASSED
+    assert response.model_result.used_rdb_evidence is True
+    assert response.model_result.used_vector_search is True
+    assert response.model_result.document_source_count == 0
+    assert response.model_result.evidence_count == 1
+    assert response.model_result.vector_search_skipped_reason == "Qdrant 검색에 실패했습니다."
+    assert answer_generation_service.document_result == DocumentSearchResult(
+        was_searched=True,
+        skipped_reason="Qdrant 검색에 실패했습니다.",
+    )
+
+
+def test_chat_service_marks_embedding_failure_without_vector_search() -> None:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeFailingDocumentSearchService(
+        code=ChatErrorCode.CHAT_EMBEDDING_004,
+        message="임베딩 서버 호출에 실패했습니다.",
+    )
+    service.answer_generation_service = FakeGeneratedAnswerGenerationService()
+
+    response = anyio.run(service.create_answer, _build_request())
+
+    assert response.security_result.status == SecurityStatus.PASSED
+    assert response.model_result.used_rdb_evidence is True
+    assert response.model_result.used_vector_search is False
+    assert (
+        response.model_result.vector_search_skipped_reason
+        == "임베딩 서버 호출에 실패했습니다."
     )
