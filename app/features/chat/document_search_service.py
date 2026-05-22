@@ -19,12 +19,14 @@ from app.features.chat.skip_reasons import (
     QDRANT_DOCUMENT_TYPE_NOT_ALLOWED,
     QDRANT_GROUNDING_SECURITY_BLOCKED,
     QDRANT_INTENT_NOT_ALLOWED,
+    QDRANT_NAVIGATION_TARGET_MISSING,
     QDRANT_NO_RESULTS,
     QDRANT_OPERATOR_RESTRICTED_CONTENT,
     QDRANT_ROLE_NOT_ALLOWED,
     QDRANT_SCORE_THRESHOLD_NOT_MET,
     QDRANT_UNKNOWN_INTENT,
 )
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 class DocumentSearchService:
@@ -82,8 +84,11 @@ class DocumentSearchService:
         security_filtered_points = self._filter_points_by_grounding_security(
             access_filtered_points
         )
-        filtered_points = self._filter_points_by_score(security_filtered_points)
-        if not filtered_points:
+        score_filtered_points = self._filter_points_by_score(security_filtered_points)
+        navigation_filtered_points = self._filter_points_by_navigation_target(
+            score_filtered_points
+        )
+        if not navigation_filtered_points:
             return DocumentSearchResult(
                 was_searched=True,
                 skipped_reason=self._build_no_result_reason(
@@ -93,12 +98,14 @@ class DocumentSearchService:
                     document_type_filtered_points,
                     access_filtered_points,
                     security_filtered_points,
+                    score_filtered_points,
+                    navigation_filtered_points,
                 ),
             )
 
         return DocumentSearchResult(
             was_searched=True,
-            sources=self._build_sources(filtered_points),
+            sources=self._build_sources(navigation_filtered_points),
         )
 
     def _build_search_payload(
@@ -192,6 +199,39 @@ class DocumentSearchService:
             if self._is_score_above_threshold(point, threshold)
         ]
 
+    def _filter_points_by_navigation_target(self, points: list[dict]) -> list[dict]:
+        return [
+            point
+            for point in points
+            if self._has_navigation_target(point)
+        ]
+
+    def _has_navigation_target(self, point: dict) -> bool:
+        payload = point.get("payload")
+        if not isinstance(payload, dict):
+            return False
+
+        url = payload.get("url")
+        if isinstance(url, str) and normalize_internal_url(url) is not None:
+            return True
+
+        reference_type = payload.get("referenceType")
+        reference_id = payload.get("referenceId")
+        return (
+            isinstance(reference_type, str)
+            and bool(reference_type.strip())
+            and self._is_reference_id_present(reference_id)
+        )
+
+    def _is_reference_id_present(self, value: object) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return True
+        if isinstance(value, str):
+            return value.strip().isdigit()
+        return False
+
     def _filter_points_by_document_type(self, points: list[dict]) -> list[dict]:
         return [
             point
@@ -236,6 +276,8 @@ class DocumentSearchService:
         document_type_filtered_points: list[dict],
         access_filtered_points: list[dict],
         security_filtered_points: list[dict],
+        score_filtered_points: list[dict],
+        navigation_filtered_points: list[dict],
     ) -> str:
         if points and not role_filtered_points:
             return QDRANT_ROLE_NOT_ALLOWED
@@ -247,8 +289,14 @@ class DocumentSearchService:
             return QDRANT_OPERATOR_RESTRICTED_CONTENT
         if access_filtered_points and not security_filtered_points:
             return QDRANT_GROUNDING_SECURITY_BLOCKED
-        if security_filtered_points and self.settings.qdrant_score_threshold > 0:
+        if (
+            security_filtered_points
+            and not score_filtered_points
+            and self.settings.qdrant_score_threshold > 0
+        ):
             return QDRANT_SCORE_THRESHOLD_NOT_MET
+        if score_filtered_points and not navigation_filtered_points:
+            return QDRANT_NAVIGATION_TARGET_MISSING
         return QDRANT_NO_RESULTS
 
     def _build_sources(self, points: list[dict]) -> list[ChatSource]:

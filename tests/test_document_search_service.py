@@ -95,6 +95,7 @@ class FakeLowScoreQdrantClient:
                     "documentType": "REPORT",
                     "title": "높은 유사도 보고서",
                     "chunkText": "질문과 관련성이 높은 보고서입니다.",
+                    "url": "/reports/high",
                     "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["REPORT_LOOKUP"],
                 },
@@ -118,6 +119,54 @@ class FakeOnlyLowScoreQdrantClient:
                     "documentType": "REPORT",
                     "title": "낮은 유사도 보고서",
                     "chunkText": "질문과 관련성이 낮은 보고서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
+class FakeMissingNavigationQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "missing-navigation-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "report-without-navigation",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "이동 정보 없는 보고서",
+                    "chunkText": "출처는 있지만 화면 이동 정보가 없는 보고서입니다.",
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
+class FakeReferenceOnlyQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "reference-only-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "report-reference-only",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "참조 메타데이터 보고서",
+                    "chunkText": "URL 대신 참조 메타데이터가 있는 보고서입니다.",
+                    "referenceType": "REPORT",
+                    "referenceId": 20,
                     "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["REPORT_LOOKUP"],
                 },
@@ -163,6 +212,7 @@ class FakeMixedRoleQdrantClient:
                     "documentType": "REPORT",
                     "title": "경영진 생산 리스크 보고서",
                     "chunkText": "경영진에게 허용되는 문서입니다.",
+                    "url": "/reports/executive",
                     "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["REPORT_LOOKUP"],
                 },
@@ -199,6 +249,7 @@ class FakeMixedIntentQdrantClient:
                     "documentType": "REPORT",
                     "title": "월간 생산 리스크 보고서",
                     "chunkText": "월간 보고서 요약 문서입니다.",
+                    "url": "/reports/monthly",
                     "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["REPORT_LOOKUP"],
                 },
@@ -235,6 +286,7 @@ class FakeMixedDocumentTypeQdrantClient:
                     "documentType": "COMPANY_INFO",
                     "title": "회사 생산 우선순위 기준",
                     "chunkText": "납기 위험 상황에서는 긴급 주문과 라인 병목을 함께 봅니다.",
+                    "url": "/company-info/priority",
                     "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["REPORT_LOOKUP"],
                 },
@@ -340,6 +392,7 @@ class FakeOperatorRestrictedContentQdrantClient:
                     "documentType": "COMPANY_INFO",
                     "title": "LINE-A01 현장 확인 기준",
                     "chunkText": "대기시간이 증가하면 현장 상태와 작업 순서를 확인합니다.",
+                    "url": "/lines/line-a01",
                     "allowedRoles": ["OPERATOR"],
                     "intentTags": ["DELIVERY_RISK"],
                 },
@@ -461,6 +514,7 @@ class FakeUnsafeGroundingQdrantClient:
                     "documentType": "REPORT",
                     "title": "정상 생산 리스크 보고서",
                     "chunkText": "자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+                    "url": "/reports/safe",
                     "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["REPORT_LOOKUP"],
                 },
@@ -714,6 +768,40 @@ def test_document_search_service_filters_points_below_score_threshold() -> None:
     assert len(result.sources) == 1
     assert result.sources[0].title == "높은 유사도 보고서"
     assert result.sources[0].relevance_score == 0.82
+
+
+def test_document_search_service_filters_points_without_navigation_target() -> None:
+    qdrant_client = FakeMissingNavigationQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert result.skipped_reason == "Qdrant 검색 결과에 화면 이동 정보가 없어 제외되었습니다."
+
+
+def test_document_search_service_accepts_reference_metadata_without_url() -> None:
+    qdrant_client = FakeReferenceOnlyQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert len(result.sources) == 1
+    assert result.sources[0].title == "참조 메타데이터 보고서"
+    assert result.sources[0].url is None
+    assert result.sources[0].reference_id == 20
 
 
 def test_document_search_service_filters_sources_outside_user_role() -> None:
