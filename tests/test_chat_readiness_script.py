@@ -11,7 +11,6 @@ def _ready_settings() -> Settings:
     return Settings(
         chat_answer_internal_token="answer-token",
         chat_recommendation_internal_token="recommendation-token",
-        document_index_internal_token="document-token",
         evidence_lookup_enabled=True,
         evidence_lookup_internal_token="evidence-token",
         llm_enabled=True,
@@ -22,7 +21,6 @@ def _rdb_ready_settings() -> Settings:
     return Settings(
         chat_answer_internal_token="answer-token",
         chat_recommendation_internal_token="recommendation-token",
-        document_index_internal_token="document-token",
         rdb_evidence_enabled=True,
         rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
         llm_enabled=True,
@@ -33,7 +31,6 @@ def _vector_ready_settings() -> Settings:
     return Settings(
         chat_answer_internal_token="answer-token",
         chat_recommendation_internal_token="recommendation-token",
-        document_index_internal_token="document-token",
         qdrant_search_enabled=True,
         qdrant_url="http://qdrant.local:6333",
         qdrant_collection="smap_internal_documents",
@@ -55,7 +52,6 @@ def test_check_chat_readiness_script_builds_settings_from_env_file(
                 "APP_NAME=S-MAP Test AI Server",
                 "CHAT_ANSWER_INTERNAL_TOKEN=answer-token",
                 "CHAT_RECOMMENDATION_INTERNAL_TOKEN=recommendation-token",
-                "DOCUMENT_INDEX_INTERNAL_TOKEN=document-token",
                 "EVIDENCE_LOOKUP_ENABLED=true",
                 "EVIDENCE_LOOKUP_INTERNAL_TOKEN=evidence-token",
                 "LLM_ENABLED=true",
@@ -87,7 +83,6 @@ def test_check_chat_readiness_script_builds_required_components() -> None:
     args = Namespace(
         require_rdb_evidence=True,
         require_vector_search=True,
-        require_document_index=True,
         require_llm_generation=True,
     )
 
@@ -95,7 +90,6 @@ def test_check_chat_readiness_script_builds_required_components() -> None:
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
         "llm",
     ]
 
@@ -172,7 +166,6 @@ def test_check_chat_readiness_script_marks_required_llm_generation_failure() -> 
         Settings(
             chat_answer_internal_token="answer-token",
             chat_recommendation_internal_token="recommendation-token",
-            document_index_internal_token="document-token",
             evidence_lookup_enabled=True,
             evidence_lookup_internal_token="evidence-token",
             llm_enabled=False,
@@ -278,7 +271,6 @@ def test_check_chat_readiness_script_does_not_expose_secret_values(
     assert exit_code == 0
     assert "answer-token" not in output
     assert "recommendation-token" not in output
-    assert "document-token" not in output
     assert "evidence-token" not in output
     assert "reader:secret" not in output
 

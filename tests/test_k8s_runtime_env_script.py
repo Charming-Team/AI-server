@@ -9,7 +9,6 @@ def _valid_env_values() -> dict[str, str]:
         "ENVIRONMENT": "kubernetes",
         "CHAT_ANSWER_INTERNAL_TOKEN": "answer-token",
         "CHAT_RECOMMENDATION_INTERNAL_TOKEN": "recommendation-token",
-        "DOCUMENT_INDEX_INTERNAL_TOKEN": "document-token",
         "EVIDENCE_LOOKUP_ENABLED": "false",
         "RDB_EVIDENCE_ENABLED": "true",
         "RDB_EVIDENCE_DSN": "postgresql://reader:secret@postgres.local:5432/smap",
@@ -37,7 +36,6 @@ def test_check_k8s_runtime_env_allows_placeholders_for_example_file() -> None:
     values = _valid_env_values()
     values["CHAT_ANSWER_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
     values["CHAT_RECOMMENDATION_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
-    values["DOCUMENT_INDEX_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
     values["RDB_EVIDENCE_DSN"] = "__SET_BY_SECRET__"
 
     result = check_k8s_runtime_env.check_k8s_runtime_env(
@@ -50,13 +48,13 @@ def test_check_k8s_runtime_env_allows_placeholders_for_example_file() -> None:
 
 def test_check_k8s_runtime_env_rejects_placeholders_for_actual_runtime() -> None:
     values = _valid_env_values()
-    values["DOCUMENT_INDEX_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
+    values["CHAT_ANSWER_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
 
     result = check_k8s_runtime_env.check_k8s_runtime_env(values)
 
     assert result["checkStatus"] == "FAIL"
     assert any(
-        check["name"] == "DOCUMENT_INDEX_INTERNAL_TOKEN"
+        check["name"] == "CHAT_ANSWER_INTERNAL_TOKEN"
         and "placeholder" in check["reason"]
         for check in result["checks"]
     )

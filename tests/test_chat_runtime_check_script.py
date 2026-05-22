@@ -83,7 +83,6 @@ def test_check_chat_runtime_builds_required_components() -> None:
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
         "llm",
     ]
 
@@ -95,18 +94,17 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
         "llm",
     ]
     assert args.include_answer_api_smoke is True
     assert args.include_recommendation_api_smoke is True
-    assert args.include_document_api_smoke is True
+    assert args.include_document_api_smoke is False
     assert args.include_vector_smoke is True
     assert args.include_answer_output_policy_smoke is True
     assert args.include_llm_smoke is True
     assert args.include_rdb_chat_scenarios is True
     assert args.include_rag_chat_scenarios is True
-    assert args.include_rag_end_to_end_smoke is True
+    assert args.include_rag_end_to_end_smoke is False
     assert args.require_llm_generation is True
     assert args.answer_api_min_evidence_count == 1
     assert args.answer_api_min_document_source_count == 1
@@ -502,7 +500,6 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
     ]
     assert [step["name"] for step in result["steps"]] == [
         "readiness",
@@ -512,16 +509,14 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
         "qdrantCollection",
         "qdrantDocumentPayloads",
         "qdrantVectorSmoke",
-        "documentApiSmoke",
-        "ragEndToEndSmoke",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
     assert result["steps"][3]["result"]["scenarioGroups"] == ["core"]
     assert result["steps"][3]["result"]["scenarioCount"] == 3
-    assert result["steps"][8]["result"]["minDocumentSourceCount"] == 1
-    assert result["steps"][9]["result"]["requireRdbEvidence"] is True
-    assert result["steps"][9]["result"]["requireVectorSearch"] is True
+    assert result["steps"][7]["result"]["minDocumentSourceCount"] == 1
+    assert result["steps"][7]["result"]["requireRdbEvidence"] is True
+    assert result["steps"][7]["result"]["requireVectorSearch"] is True
 
 
 def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
@@ -548,8 +543,6 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "qdrantCollection",
         "qdrantDocumentPayloads",
         "qdrantVectorSmoke",
-        "documentApiSmoke",
-        "ragEndToEndSmoke",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
@@ -557,12 +550,11 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
         "llm",
     ]
     assert result["summary"] == {
-        "totalStepCount": 13,
-        "passedStepCount": 13,
+        "totalStepCount": 11,
+        "passedStepCount": 11,
         "failedStepCount": 0,
         "failedSteps": [],
         "nextActions": [],

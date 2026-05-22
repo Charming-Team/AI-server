@@ -57,8 +57,8 @@ STEP_ACTION_GUIDE = {
         "확인하세요."
     ),
     "ragEndToEndSmoke": (
-        "FastAPI 문서 등록, 챗봇 답변, 문서 삭제 API가 같은 설정과 토큰으로 "
-        "연결되는지 확인하세요."
+        "명시적으로 임시 문서를 등록/검색/삭제하는 E2E smoke가 필요한 경우에만 "
+        "문서 인덱싱 토큰과 Qdrant/Embedding 설정을 확인하세요."
     ),
     "qdrantCollection": (
         "Qdrant URL, collection 이름, embedding dimension 설정이 일치하는지 "
@@ -124,7 +124,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-document-index",
         action="store_true",
-        help="문서 인덱싱 파이프라인이 준비되어 있어야 합니다.",
+        help=(
+            "문서 API smoke 실행 시 실제 인덱싱 성공을 요구합니다. "
+            "챗봇 런타임 readiness 필수 조건에는 포함되지 않습니다."
+        ),
     )
     parser.add_argument(
         "--require-llm-generation",
@@ -369,10 +372,7 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
 
     if preset in {"rag", "full"}:
         args.require_vector_search = True
-        args.require_document_index = True
-        args.include_document_api_smoke = True
         args.include_rag_chat_scenarios = True
-        args.include_rag_end_to_end_smoke = True
         args.answer_api_min_document_source_count = max(
             args.answer_api_min_document_source_count,
             1,

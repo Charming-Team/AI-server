@@ -42,14 +42,8 @@ def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() ->
     assert components["chatAnswerInternalToken"]["code"] == "CHAT_SECURITY_003"
     assert components["chatRecommendationInternalToken"]["configured"] is False
     assert components["chatRecommendationInternalToken"]["code"] == "CHAT_SECURITY_003"
-    assert components["documentIndexInternalToken"]["configured"] is False
-    assert components["documentIndexInternalToken"]["code"] == "CHAT_SECURITY_003"
-    assert components["documentIndexPipeline"] == {
-        "name": "documentIndexPipeline",
-        "enabled": False,
-        "configured": True,
-        "reason": "임베딩 기능이 비활성화되어 문서 인덱싱 저장이 비활성화되어 있습니다.",
-    }
+    assert "documentIndexInternalToken" not in components
+    assert "documentIndexPipeline" not in components
     assert components["qdrantSearch"] == {
         "name": "qdrantSearch",
         "enabled": False,
@@ -85,7 +79,6 @@ def test_readiness_check_returns_ready_without_exposing_secret_values() -> None:
         Settings(
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
-            document_index_internal_token="document-secret",
             evidence_lookup_enabled=True,
             evidence_lookup_base_url="http://spring.local",
             evidence_lookup_path="/internal/chat/evidence",
@@ -114,7 +107,6 @@ def test_readiness_check_returns_ready_without_exposing_secret_values() -> None:
     response_text = response.text
     assert "answer-secret" not in response_text
     assert "recommendation-secret" not in response_text
-    assert "document-secret" not in response_text
     assert "evidence-secret" not in response_text
 
 
@@ -123,7 +115,6 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
         Settings(
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
-            document_index_internal_token="document-secret",
             evidence_lookup_enabled=True,
             evidence_lookup_base_url=" ",
             evidence_lookup_internal_token="evidence-secret",
@@ -175,7 +166,6 @@ def test_readiness_check_requires_at_least_one_grounding_source() -> None:
         Settings(
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
-            document_index_internal_token="document-secret",
             evidence_lookup_enabled=False,
             rdb_evidence_enabled=False,
             qdrant_search_enabled=False,
@@ -210,7 +200,6 @@ def test_readiness_check_accepts_rdb_evidence_view_as_grounding_source() -> None
         Settings(
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
-            document_index_internal_token="document-secret",
             evidence_lookup_enabled=False,
             rdb_evidence_enabled=True,
             rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
@@ -250,7 +239,6 @@ def test_readiness_check_accepts_fallback_answer_generation_when_llm_is_disabled
         Settings(
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
-            document_index_internal_token="document-secret",
             evidence_lookup_enabled=True,
             evidence_lookup_internal_token="evidence-secret",
             llm_enabled=False,
@@ -280,15 +268,13 @@ def test_readiness_check_accepts_fallback_answer_generation_when_llm_is_disabled
     }
 
 
-def test_readiness_check_requires_qdrant_when_document_index_pipeline_is_enabled() -> None:
+def test_readiness_check_does_not_require_document_index_token_for_chat_runtime() -> None:
     previous_override = _override_settings(
         Settings(
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
-            document_index_internal_token="document-secret",
-            qdrant_search_enabled=False,
-            qdrant_collection=" ",
-            embedding_enabled=True,
+            rdb_evidence_enabled=True,
+            rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
         )
     )
     try:
@@ -296,24 +282,13 @@ def test_readiness_check_requires_qdrant_when_document_index_pipeline_is_enabled
     finally:
         _restore_settings(previous_override)
 
-    assert response.status_code == 503
+    assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "not_ready"
+    assert body["status"] == "ready"
     components = {component["name"]: component for component in body["components"]}
-    assert components["qdrantSearch"] == {
-        "name": "qdrantSearch",
-        "enabled": False,
-        "configured": True,
-        "reason": "비활성화되어 있습니다.",
-    }
-    assert components["embedding"]["configured"] is True
-    assert components["documentIndexPipeline"] == {
-        "name": "documentIndexPipeline",
-        "enabled": True,
-        "configured": False,
-        "code": "CHAT_QDRANT_001",
-        "reason": "필수 설정이 누락되었습니다: qdrant_collection",
-    }
+    assert "documentIndexInternalToken" not in components
+    assert "documentIndexPipeline" not in components
+    assert components["chatGroundingPipeline"]["configured"] is True
 
 
 def test_readiness_check_requires_embedding_when_qdrant_search_is_enabled() -> None:
@@ -321,7 +296,6 @@ def test_readiness_check_requires_embedding_when_qdrant_search_is_enabled() -> N
         Settings(
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
-            document_index_internal_token="document-secret",
             qdrant_search_enabled=True,
             embedding_enabled=False,
         )
