@@ -84,6 +84,8 @@ def test_answer_generation_returns_insufficient_evidence_without_grounding() -> 
 
     assert result.was_generated is False
     assert "근거" in result.answer
+    assert "추측성 답변은 제공하지 않습니다." in result.answer
+    assert "아직 연결되지 않았습니다" not in result.answer
     assert result.skipped_reason == "RDB Evidence와 문서 검색 근거가 없습니다."
 
 
