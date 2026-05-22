@@ -99,7 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
             "자주 쓰는 점검 옵션 묶음. rdb는 RDB Evidence와 답변/추천 API, "
             "qdrant는 Qdrant 컬렉션/페이로드/벡터 smoke, "
             "llm은 LLM 연결과 출력 보안 정책, "
-            "rag는 Qdrant/문서/답변/추천 API, full은 전체 경로를 점검합니다."
+            "rag는 이미 Qdrant에 저장된 문서 검색 기반 챗봇 경로, "
+            "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로를 점검합니다."
         ),
     )
     parser.add_argument(

@@ -110,6 +110,18 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
     assert args.answer_api_min_document_source_count == 1
 
 
+def test_check_chat_runtime_preset_help_matches_chat_runtime_scope() -> None:
+    parser = check_chat_runtime.build_parser()
+    preset_action = next(
+        action for action in parser._actions if action.dest == "preset"
+    )
+    help_text = preset_action.help or ""
+
+    assert "rag는 이미 Qdrant에 저장된 문서 검색 기반 챗봇 경로" in help_text
+    assert "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로" in help_text
+    assert "rag는 Qdrant/문서/답변/추천 API" not in help_text
+
+
 def test_check_chat_runtime_llm_preset_runs_only_llm_checks() -> None:
     settings = Settings(
         llm_enabled=True,
