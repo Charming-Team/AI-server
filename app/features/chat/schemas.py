@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _normalize_upper_text(value: Any) -> Any:
@@ -85,6 +85,7 @@ class ChatErrorCode(StrEnum):
     CHAT_LLM_001 = "CHAT_LLM_001"
     CHAT_LLM_002 = "CHAT_LLM_002"
     CHAT_LLM_003 = "CHAT_LLM_003"
+    CHAT_LLM_004 = "CHAT_LLM_004"
     CHAT_RECOMMEND_001 = "CHAT_RECOMMEND_001"
     CHAT_RECOMMEND_002 = "CHAT_RECOMMEND_002"
     CHAT_DOCUMENT_001 = "CHAT_DOCUMENT_001"
@@ -201,6 +202,31 @@ class EvidenceLookupFilters(BaseModel):
     to_date: str | None = Field(default=None, alias="toDate")
     target_type: str | None = Field(default=None, alias="targetType")
     target_code: str | None = Field(default=None, alias="targetCode")
+
+    @field_validator("from_date", "to_date", mode="before")
+    @classmethod
+    def normalize_date_text(cls, value: Any) -> Any:
+        value = _strip_optional_text(value)
+        if value is None or not isinstance(value, str):
+            return value
+        try:
+            return date.fromisoformat(value).isoformat()
+        except ValueError as exc:
+            raise ValueError("Evidence 날짜 필터는 YYYY-MM-DD 형식이어야 합니다.") from exc
+
+    @field_validator("target_type", "target_code", mode="before")
+    @classmethod
+    def normalize_target_text(cls, value: Any) -> Any:
+        return _normalize_upper_text(_strip_optional_text(value))
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "EvidenceLookupFilters":
+        if self.from_date and self.to_date:
+            from_date = date.fromisoformat(self.from_date)
+            to_date = date.fromisoformat(self.to_date)
+            if from_date > to_date:
+                raise ValueError("Evidence 날짜 필터의 fromDate는 toDate보다 늦을 수 없습니다.")
+        return self
 
 
 class EvidenceLookupRequest(BaseModel):

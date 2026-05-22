@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 
-from app.features.chat.access_control import BUSINESS_ROLES
+from app.features.chat.access_control import (
+    BUSINESS_ROLES,
+    OPERATOR_RESTRICTED_TERMS,
+    OPERATOR_ROLE,
+    ROLE_INTENT_MATRIX,
+)
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import (
     ChatErrorCode,
@@ -9,6 +14,8 @@ from app.features.chat.schemas import (
     ChatRecommendationResponse,
     ChatRecommendedQuestion,
 )
+from app.features.chat.security_policy import SecurityPolicy
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 @dataclass(frozen=True)
@@ -115,11 +122,11 @@ class RecommendationService:
             allowed_roles=("OPERATOR",),
         ),
         RecommendedQuestionRule(
-            question_id="operator-production-result-read",
-            question="오늘 처리 수량과 불량 수량을 조회해줘",
-            intent=ChatIntent.PRODUCTION_PLAN,
-            category="생산 실적",
-            url="/production-results?mode=read",
+            question_id="operator-report-summary-read",
+            question="최근 생산 리스크 보고서를 조회해줘",
+            intent=ChatIntent.REPORT_LOOKUP,
+            category="보고서 조회",
+            url="/reports?mode=read",
             allowed_roles=("OPERATOR",),
         ),
         RecommendedQuestionRule(
@@ -127,8 +134,16 @@ class RecommendationService:
             question="긴급 주문이 전체 생산계획에 미치는 영향을 알려줘",
             intent=ChatIntent.URGENT_ORDER_IMPACT,
             category="긴급 주문 영향",
-            url="/schedule-simulations",
-            allowed_roles=("EXECUTIVE", "MANUFACTURING_MANAGER"),
+            url="/schedule-simulations?mode=read",
+            allowed_roles=("OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"),
+        ),
+        RecommendedQuestionRule(
+            question_id="operator-production-result-read",
+            question="오늘 처리 수량과 불량 수량을 조회해줘",
+            intent=ChatIntent.PRODUCTION_PLAN,
+            category="생산 실적",
+            url="/production-results?mode=read",
+            allowed_roles=("OPERATOR",),
         ),
         RecommendedQuestionRule(
             question_id="work-priority-today",
@@ -156,12 +171,16 @@ class RecommendationService:
         ),
     )
 
+    def __init__(self, security_policy: SecurityPolicy | None = None) -> None:
+        self.security_policy = security_policy or SecurityPolicy()
+
     def get_recommendations(
         self,
         request: ChatRecommendationRequest,
     ) -> ChatRecommendationResponse:
         self._validate_active_user(request.user.status)
         self._validate_business_role(request.user.role)
+        self._validate_keyword(request.keyword)
 
         role_rules = self._filter_by_role(request.user.role)
         keyword = self._normalize(request.keyword or "")
@@ -196,13 +215,72 @@ class RecommendationService:
             message="현재 역할 권한으로는 추천 질문을 조회할 수 없습니다.",
         )
 
+    def _validate_keyword(self, keyword: str | None) -> None:
+        if keyword is None or not keyword.strip():
+            return
+
+        security_result = self.security_policy.evaluate(keyword)
+        if security_result is None:
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=security_result.code or ChatErrorCode.CHAT_SECURITY_001,
+            message="추천 질문 키워드에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
+        )
+
     def _filter_by_role(self, role: str) -> list[RecommendedQuestionRule]:
         normalized_role = role.strip().upper()
         return [
             rule
             for rule in self._rules
-            if normalized_role in rule.allowed_roles
+            if self._is_rule_allowed_for_role(rule, normalized_role)
         ]
+
+    def _is_rule_allowed_for_role(
+        self,
+        rule: RecommendedQuestionRule,
+        role: str,
+    ) -> bool:
+        if self._safe_internal_url(rule.url) is None:
+            return False
+
+        if role not in rule.allowed_roles:
+            return False
+
+        if rule.intent not in ROLE_INTENT_MATRIX.get(role, frozenset()):
+            return False
+
+        if role != OPERATOR_ROLE:
+            return True
+
+        return (
+            self._is_operator_read_only_rule(rule)
+            and not self._has_operator_restricted_content(rule)
+        )
+
+    def _is_operator_read_only_rule(self, rule: RecommendedQuestionRule) -> bool:
+        safe_url = self._safe_internal_url(rule.url)
+        return safe_url is not None and "mode=read" in self._normalize(safe_url)
+
+    def _has_operator_restricted_content(
+        self,
+        rule: RecommendedQuestionRule,
+    ) -> bool:
+        target = self._normalize(
+            " ".join(
+                (
+                    rule.question,
+                    rule.category,
+                    rule.intent.value,
+                    rule.url,
+                )
+            )
+        )
+        return any(
+            self._normalize(term) in target
+            for term in OPERATOR_RESTRICTED_TERMS
+        )
 
     def _matches_keyword(
         self,
@@ -238,8 +316,11 @@ class RecommendationService:
             question=rule.question,
             intent=rule.intent,
             category=rule.category,
-            url=rule.url,
+            url=self._safe_internal_url(rule.url) or "",
         )
 
     def _normalize(self, value: str) -> str:
         return "".join(value.casefold().split())
+
+    def _safe_internal_url(self, url: str | None) -> str | None:
+        return normalize_internal_url(url)

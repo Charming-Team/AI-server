@@ -1,7 +1,44 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+
+
+def test_env_example_covers_all_settings_fields() -> None:
+    env_example = Path(".env.example").read_text(encoding="utf-8")
+    env_keys = {
+        line.split("=", maxsplit=1)[0]
+        for line in env_example.splitlines()
+        if line and not line.startswith("#") and "=" in line
+    }
+
+    expected_keys = {field_name.upper() for field_name in Settings.model_fields}
+
+    assert expected_keys - env_keys == set()
+
+
+def test_env_example_loads_as_valid_settings() -> None:
+    settings = Settings(_env_file=".env.example")
+
+    assert settings.app_name == "S-MAP AI Server"
+    assert settings.cors_origins == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    assert settings.evidence_lookup_enabled is False
+    assert settings.rdb_evidence_enabled is False
+    assert settings.qdrant_search_enabled is False
+    assert settings.embedding_enabled is False
+    assert settings.llm_enabled is False
+    assert settings.qdrant_top_k == 5
+    assert settings.document_chunk_size == 800
+    assert settings.document_chunk_overlap == 80
+    assert settings.embedding_dimension == 1024
+    assert settings.llm_max_tokens == 1024
+    assert settings.answer_max_chars == 2000
+    assert settings.rdb_evidence_max_limit == 20
 
 
 def test_settings_accepts_chat_cost_guardrail_limits() -> None:
@@ -16,6 +53,7 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
         answer_max_chars=5000,
         prompt_max_evidence_items=20,
         prompt_max_document_sources=20,
+        rdb_evidence_max_limit=100,
     )
 
     assert settings.qdrant_top_k == 20
@@ -28,6 +66,7 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     assert settings.answer_max_chars == 5000
     assert settings.prompt_max_evidence_items == 20
     assert settings.prompt_max_document_sources == 20
+    assert settings.rdb_evidence_max_limit == 100
 
 
 def test_settings_default_internal_tokens_are_optional() -> None:
@@ -61,6 +100,8 @@ def test_settings_default_internal_tokens_are_optional() -> None:
         ("prompt_max_evidence_items", 21),
         ("prompt_max_document_sources", -1),
         ("prompt_max_document_sources", 21),
+        ("rdb_evidence_max_limit", 0),
+        ("rdb_evidence_max_limit", 101),
     ],
 )
 def test_settings_rejects_chat_cost_guardrail_violations(

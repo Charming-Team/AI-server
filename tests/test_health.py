@@ -44,11 +44,39 @@ def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() ->
     assert components["chatRecommendationInternalToken"]["code"] == "CHAT_SECURITY_003"
     assert components["documentIndexInternalToken"]["configured"] is False
     assert components["documentIndexInternalToken"]["code"] == "CHAT_SECURITY_003"
+    assert components["documentIndexPipeline"] == {
+        "name": "documentIndexPipeline",
+        "enabled": False,
+        "configured": True,
+        "reason": "임베딩 기능이 비활성화되어 문서 인덱싱 저장이 비활성화되어 있습니다.",
+    }
     assert components["qdrantSearch"] == {
         "name": "qdrantSearch",
         "enabled": False,
         "configured": True,
         "reason": "비활성화되어 있습니다.",
+    }
+    assert components["rdbEvidence"] == {
+        "name": "rdbEvidence",
+        "enabled": False,
+        "configured": True,
+        "reason": "비활성화되어 있습니다.",
+    }
+    assert components["chatGroundingPipeline"] == {
+        "name": "chatGroundingPipeline",
+        "enabled": True,
+        "configured": False,
+        "code": "CHAT_EVIDENCE_001",
+        "reason": (
+            "챗봇 답변에는 RDB Evidence View, Spring Evidence 또는 "
+            "Qdrant 검색 중 하나가 필요합니다."
+        ),
+    }
+    assert components["answerGenerationPipeline"] == {
+        "name": "answerGenerationPipeline",
+        "enabled": True,
+        "configured": True,
+        "reason": "LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
     }
 
 
@@ -99,6 +127,8 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
             evidence_lookup_enabled=True,
             evidence_lookup_base_url=" ",
             evidence_lookup_internal_token="evidence-secret",
+            rdb_evidence_enabled=True,
+            rdb_evidence_dsn=" ",
             qdrant_search_enabled=True,
             qdrant_collection=" ",
             embedding_enabled=True,
@@ -121,6 +151,11 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
         components["evidenceLookup"]["reason"]
         == "필수 설정이 누락되었습니다: evidence_lookup_base_url"
     )
+    assert components["rdbEvidence"]["code"] == "CHAT_EVIDENCE_004"
+    assert (
+        components["rdbEvidence"]["reason"]
+        == "필수 설정이 누락되었습니다: rdb_evidence_dsn"
+    )
     assert components["qdrantSearch"]["code"] == "CHAT_QDRANT_001"
     assert (
         components["qdrantSearch"]["reason"]
@@ -133,6 +168,152 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
     )
     assert components["llm"]["code"] == "CHAT_LLM_001"
     assert components["llm"]["reason"] == "필수 설정이 누락되었습니다: llm_model"
+
+
+def test_readiness_check_requires_at_least_one_grounding_source() -> None:
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token="answer-secret",
+            chat_recommendation_internal_token="recommendation-secret",
+            document_index_internal_token="document-secret",
+            evidence_lookup_enabled=False,
+            rdb_evidence_enabled=False,
+            qdrant_search_enabled=False,
+        )
+    )
+    try:
+        response = client.get("/api/v1/health/ready")
+    finally:
+        _restore_settings(previous_override)
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "not_ready"
+    components = {component["name"]: component for component in body["components"]}
+    assert components["evidenceLookup"]["configured"] is True
+    assert components["rdbEvidence"]["configured"] is True
+    assert components["qdrantSearch"]["configured"] is True
+    assert components["chatGroundingPipeline"] == {
+        "name": "chatGroundingPipeline",
+        "enabled": True,
+        "configured": False,
+        "code": "CHAT_EVIDENCE_001",
+        "reason": (
+            "챗봇 답변에는 RDB Evidence View, Spring Evidence 또는 "
+            "Qdrant 검색 중 하나가 필요합니다."
+        ),
+    }
+
+
+def test_readiness_check_accepts_rdb_evidence_view_as_grounding_source() -> None:
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token="answer-secret",
+            chat_recommendation_internal_token="recommendation-secret",
+            document_index_internal_token="document-secret",
+            evidence_lookup_enabled=False,
+            rdb_evidence_enabled=True,
+            rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+            qdrant_search_enabled=False,
+            embedding_enabled=False,
+            llm_enabled=False,
+        )
+    )
+    try:
+        response = client.get("/api/v1/health/ready")
+    finally:
+        _restore_settings(previous_override)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    components = {component["name"]: component for component in body["components"]}
+    assert components["evidenceLookup"]["configured"] is True
+    assert components["rdbEvidence"]["configured"] is True
+    assert components["qdrantSearch"]["configured"] is True
+    assert components["chatGroundingPipeline"] == {
+        "name": "chatGroundingPipeline",
+        "enabled": True,
+        "configured": True,
+    }
+    assert components["answerGenerationPipeline"] == {
+        "name": "answerGenerationPipeline",
+        "enabled": True,
+        "configured": True,
+        "reason": "LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
+    }
+    assert "reader:secret" not in response.text
+
+
+def test_readiness_check_accepts_fallback_answer_generation_when_llm_is_disabled() -> None:
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token="answer-secret",
+            chat_recommendation_internal_token="recommendation-secret",
+            document_index_internal_token="document-secret",
+            evidence_lookup_enabled=True,
+            evidence_lookup_internal_token="evidence-secret",
+            llm_enabled=False,
+        )
+    )
+    try:
+        response = client.get("/api/v1/health/ready")
+    finally:
+        _restore_settings(previous_override)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    components = {component["name"]: component for component in body["components"]}
+    assert components["chatGroundingPipeline"]["configured"] is True
+    assert components["llm"] == {
+        "name": "llm",
+        "enabled": False,
+        "configured": True,
+        "reason": "비활성화되어 있습니다.",
+    }
+    assert components["answerGenerationPipeline"] == {
+        "name": "answerGenerationPipeline",
+        "enabled": True,
+        "configured": True,
+        "reason": "LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
+    }
+
+
+def test_readiness_check_requires_qdrant_when_document_index_pipeline_is_enabled() -> None:
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token="answer-secret",
+            chat_recommendation_internal_token="recommendation-secret",
+            document_index_internal_token="document-secret",
+            qdrant_search_enabled=False,
+            qdrant_collection=" ",
+            embedding_enabled=True,
+        )
+    )
+    try:
+        response = client.get("/api/v1/health/ready")
+    finally:
+        _restore_settings(previous_override)
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "not_ready"
+    components = {component["name"]: component for component in body["components"]}
+    assert components["qdrantSearch"] == {
+        "name": "qdrantSearch",
+        "enabled": False,
+        "configured": True,
+        "reason": "비활성화되어 있습니다.",
+    }
+    assert components["embedding"]["configured"] is True
+    assert components["documentIndexPipeline"] == {
+        "name": "documentIndexPipeline",
+        "enabled": True,
+        "configured": False,
+        "code": "CHAT_QDRANT_001",
+        "reason": "필수 설정이 누락되었습니다: qdrant_collection",
+    }
 
 
 def test_readiness_check_requires_embedding_when_qdrant_search_is_enabled() -> None:

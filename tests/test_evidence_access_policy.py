@@ -60,6 +60,44 @@ def test_operator_evidence_removes_financial_items_and_data() -> None:
     assert "latePenaltyAmount" not in item_data
 
 
+def test_operator_can_read_non_financial_report_evidence() -> None:
+    policy = EvidenceAccessPolicy()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="자재 부족과 라인 병목이 주요 리스크입니다.",
+                url="/reports/20",
+                source="chat_report_metadata_evidence_view",
+                referenceId=20,
+                allowedRoles=["OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"],
+                data={
+                    "reportTitle": "월간 생산 리스크 보고서",
+                    "riskLevel": "WARNING",
+                    "contractAmount": 12000000,
+                    "reportEvidence": {
+                        "lineCode": "LINE-A01",
+                        "costChangeAmount": 300000,
+                    },
+                },
+            )
+        ],
+    )
+
+    result = policy.sanitize("OPERATOR", evidence_result)
+
+    assert len(result.items) == 1
+    assert result.items[0].title == "월간 생산 리스크 보고서"
+    assert result.items[0].url == "/reports/20"
+    assert result.items[0].data["reportTitle"] == "월간 생산 리스크 보고서"
+    assert result.items[0].data["riskLevel"] == "WARNING"
+    assert result.items[0].data["reportEvidence"] == {"lineCode": "LINE-A01"}
+    assert "contractAmount" not in result.items[0].data
+
+
 def test_executive_evidence_keeps_financial_data() -> None:
     policy = EvidenceAccessPolicy()
 

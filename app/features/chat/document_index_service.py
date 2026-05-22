@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import Settings
 from app.features.chat.audit_logger import ChatAuditLogger
+from app.features.chat.document_id_policy import document_id_format_error
 from app.features.chat.document_index_builder import DocumentIndexBuilder
 from app.features.chat.document_index_policy import DocumentIndexPolicy
 from app.features.chat.document_payload import (
@@ -15,6 +16,7 @@ from app.features.chat.embedding_client import (
 from app.features.chat.exceptions import ChatExternalServiceError, ChatServiceError
 from app.features.chat.qdrant_client import QdrantDocumentIndexClient
 from app.features.chat.schemas import ChatErrorCode
+from app.features.chat.security_policy import SecurityPolicy
 from app.features.chat.skip_reasons import DOCUMENT_CONTENT_EMPTY, EMBEDDING_DISABLED
 
 
@@ -46,6 +48,7 @@ class DocumentIndexService:
         embedding_client: EmbeddingClient | None = None,
         qdrant_index_client: QdrantDocumentIndexClient | None = None,
         audit_logger: ChatAuditLogger | None = None,
+        security_policy: SecurityPolicy | None = None,
     ) -> None:
         self.settings = settings
         self.index_builder = index_builder or DocumentIndexBuilder(settings)
@@ -55,8 +58,16 @@ class DocumentIndexService:
         self.embedding_client = embedding_client or EmbeddingClient(settings)
         self.qdrant_index_client = qdrant_index_client or QdrantDocumentIndexClient(settings)
         self.audit_logger = audit_logger or ChatAuditLogger()
+        self.security_policy = security_policy or SecurityPolicy()
 
     async def index_document(self, document: InternalDocumentInput) -> DocumentIndexResult:
+        try:
+            return await self._index_document(document)
+        except ChatServiceError as exc:
+            self.audit_logger.log_document_index_failure(document, exc)
+            raise
+
+    async def _index_document(self, document: InternalDocumentInput) -> DocumentIndexResult:
         self.index_policy.validate(document)
 
         payloads = self.index_builder.build_payloads(document)
@@ -87,7 +98,10 @@ class DocumentIndexService:
             self.index_builder.build_point(payload, vector)
             for payload, vector in zip(payloads, vectors, strict=True)
         ]
-        await self.qdrant_index_client.delete_by_document_id(document.document_id)
+        delete_operation = await self.qdrant_index_client.delete_by_document_id(
+            document.document_id
+        )
+        self._sanitize_operation(delete_operation)
         operation = await self.qdrant_index_client.upsert(points)
 
         return self._finalize_index_result(
@@ -96,11 +110,21 @@ class DocumentIndexService:
                 document_id=document.document_id,
                 chunk_count=len(payloads),
                 indexed_count=len(points),
-                operation=operation,
+                operation=self._sanitize_operation(operation),
             ),
         )
 
     async def delete_document(
+        self,
+        request: InternalDocumentDeleteRequest,
+    ) -> DocumentDeleteResult:
+        try:
+            return await self._delete_document(request)
+        except ChatServiceError as exc:
+            self.audit_logger.log_document_delete_failure(request, exc)
+            raise
+
+    async def _delete_document(
         self,
         request: InternalDocumentDeleteRequest,
     ) -> DocumentDeleteResult:
@@ -112,7 +136,7 @@ class DocumentIndexService:
             request,
             DocumentDeleteResult(
                 document_id=request.document_id,
-                operation=operation,
+                operation=self._sanitize_operation(operation),
             ),
         )
 
@@ -137,13 +161,29 @@ class DocumentIndexService:
                 )
 
     def _validate_document_id(self, document_id: str) -> None:
-        if document_id.strip():
+        if not document_id.strip():
+            raise ChatServiceError(
+                status_code=400,
+                code=ChatErrorCode.CHAT_DOCUMENT_002,
+                message="문서 ID은(는) 필수입니다.",
+            )
+
+        security_result = self.security_policy.evaluate(document_id)
+        if security_result is not None:
+            raise ChatServiceError(
+                status_code=400,
+                code=security_result.code or ChatErrorCode.CHAT_SECURITY_002,
+                message="문서 ID에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다.",
+            )
+
+        format_error = document_id_format_error(document_id)
+        if format_error is None:
             return
 
         raise ChatServiceError(
             status_code=400,
             code=ChatErrorCode.CHAT_DOCUMENT_002,
-            message="문서 ID은(는) 필수입니다.",
+            message=format_error,
         )
 
     def _validate_chunk_count(self, chunk_count: int) -> None:
@@ -170,6 +210,26 @@ class DocumentIndexService:
             chunk_count=chunk_count,
             indexed_count=0,
             skipped_reason=skipped_reason,
+        )
+
+    def _sanitize_operation(self, operation: dict) -> dict:
+        operation_id = operation.get("operation_id")
+        status = operation.get("status")
+        if isinstance(operation_id, bool) or not isinstance(operation_id, int):
+            self._raise_invalid_qdrant_operation()
+        if not isinstance(status, str):
+            self._raise_invalid_qdrant_operation()
+
+        return {
+            "operation_id": operation_id,
+            "status": status,
+        }
+
+    def _raise_invalid_qdrant_operation(self) -> None:
+        raise ChatExternalServiceError(
+            status_code=502,
+            code=ChatErrorCode.CHAT_QDRANT_003,
+            message="Qdrant operation 응답 형식이 올바르지 않습니다.",
         )
 
     def _finalize_index_result(

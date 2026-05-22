@@ -178,6 +178,21 @@ def test_document_index_policy_allows_operator_operational_document() -> None:
     )
 
 
+def test_document_index_policy_allows_operator_non_financial_report() -> None:
+    policy = DocumentIndexPolicy()
+
+    policy.validate(
+        _build_document(
+            document_type="REPORT",
+            title="월간 생산 리스크 보고서",
+            content="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            url="/reports/20?mode=read",
+            allowed_roles=["OPERATOR"],
+            intent_tags=["REPORT_LOOKUP"],
+        )
+    )
+
+
 def test_document_index_policy_rejects_operator_financial_document() -> None:
     policy = DocumentIndexPolicy()
 
@@ -301,3 +316,28 @@ def test_document_index_policy_rejects_sensitive_pattern_metadata() -> None:
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == ChatErrorCode.CHAT_SECURITY_002
     assert exc_info.value.message == "문서에 보안 정책상 허용되지 않는 내용이 포함되어 있습니다."
+
+
+def test_document_index_policy_rejects_too_long_document_id() -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(_build_document(document_id="A" * 201))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert exc_info.value.message == "문서 ID는 최대 200자까지 허용됩니다."
+
+
+def test_document_index_policy_rejects_invalid_document_id_format() -> None:
+    policy = DocumentIndexPolicy()
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        policy.validate(_build_document(document_id="report 202605"))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == ChatErrorCode.CHAT_DOCUMENT_002
+    assert (
+        exc_info.value.message
+        == "문서 ID는 영문, 숫자, '.', '_', ':', '-'만 사용할 수 있습니다."
+    )

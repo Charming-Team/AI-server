@@ -1,6 +1,7 @@
 from app.core.config import Settings
 from app.features.chat.answer_generation_service import AnswerGenerationService
 from app.features.chat.audit_logger import ChatAuditLogger
+from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_search_service import DocumentSearchService
 from app.features.chat.evidence_access_policy import EvidenceAccessPolicy
 from app.features.chat.evidence_service import EvidenceService
@@ -31,6 +32,7 @@ class ChatService:
         self.intent_classifier = IntentClassifier()
         self.role_access_policy = RoleAccessPolicy()
         self.evidence_access_policy = EvidenceAccessPolicy()
+        self.document_access_policy = DocumentAccessPolicy()
         self.evidence_service = EvidenceService(settings)
         self.document_search_service = DocumentSearchService(settings)
         self.answer_generation_service = AnswerGenerationService(settings)
@@ -80,12 +82,20 @@ class ChatService:
             evidence_result,
         )
         document_result = await self.document_search_service.search(request, evidence_result.intent)
+        document_result = self.document_access_policy.sanitize_search_result(
+            document_result,
+            request.user.role,
+        )
         answer_result = await self.answer_generation_service.generate_answer(
             request,
             evidence_result,
             document_result,
         )
         sources = self.response_builder.build_sources(evidence_result, document_result)
+        basis_time = self.response_builder.build_basis_time(
+            sources,
+            fallback=evidence_result.basis_time,
+        )
 
         return self._finalize_response(
             request,
@@ -94,7 +104,7 @@ class ChatService:
                 message_id=request.message_id,
                 intent=evidence_result.intent,
                 answer=answer_result.answer,
-                basis_time=evidence_result.basis_time,
+                basis_time=basis_time,
                 urls=self.response_builder.build_urls(sources),
                 sources=sources,
                 security_result=(

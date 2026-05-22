@@ -28,7 +28,7 @@ async def readiness_check(
     response: Response,
     settings: SettingsDep,
 ) -> ReadinessResponse:
-    components = _build_readiness_components(settings)
+    components = build_readiness_components(settings)
     is_ready = all(component.configured for component in components)
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -41,7 +41,7 @@ async def readiness_check(
     )
 
 
-def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
+def build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
     return [
         _required_component(
             name="chatAnswerInternalToken",
@@ -75,6 +75,16 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
             },
         ),
         _integration_component(
+            name="rdbEvidence",
+            enabled=settings.rdb_evidence_enabled,
+            required_fields={
+                "rdb_evidence_dsn": settings.rdb_evidence_dsn,
+            },
+            field_error_codes={
+                "rdb_evidence_dsn": ChatErrorCode.CHAT_EVIDENCE_004,
+            },
+        ),
+        _integration_component(
             name="qdrantSearch",
             enabled=settings.qdrant_search_enabled,
             required_fields={
@@ -86,6 +96,7 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
                 "qdrant_collection": ChatErrorCode.CHAT_QDRANT_001,
             },
         ),
+        _chat_grounding_pipeline_component(settings),
         _integration_component(
             name="embedding",
             enabled=settings.embedding_enabled,
@@ -100,6 +111,7 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
                 "embedding_model": ChatErrorCode.CHAT_EMBEDDING_001,
             },
         ),
+        _document_index_pipeline_component(settings),
         _rag_search_pipeline_component(settings),
         _integration_component(
             name="llm",
@@ -113,7 +125,77 @@ def _build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
                 "llm_model": ChatErrorCode.CHAT_LLM_001,
             },
         ),
+        _answer_generation_pipeline_component(settings),
     ]
+
+
+def _chat_grounding_pipeline_component(settings: Settings) -> ReadinessComponent:
+    if (
+        settings.evidence_lookup_enabled
+        or settings.rdb_evidence_enabled
+        or settings.qdrant_search_enabled
+    ):
+        return ReadinessComponent(
+            name="chatGroundingPipeline",
+            enabled=True,
+            configured=True,
+        )
+
+    return ReadinessComponent(
+        name="chatGroundingPipeline",
+        enabled=True,
+        configured=False,
+        code=ChatErrorCode.CHAT_EVIDENCE_001,
+        reason=(
+            "챗봇 답변에는 RDB Evidence View, Spring Evidence 또는 "
+            "Qdrant 검색 중 하나가 필요합니다."
+        ),
+    )
+
+
+def _answer_generation_pipeline_component(settings: Settings) -> ReadinessComponent:
+    if settings.llm_enabled:
+        return ReadinessComponent(
+            name="answerGenerationPipeline",
+            enabled=True,
+            configured=True,
+        )
+
+    return ReadinessComponent(
+        name="answerGenerationPipeline",
+        enabled=True,
+        configured=True,
+        reason="LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
+    )
+
+
+def _document_index_pipeline_component(settings: Settings) -> ReadinessComponent:
+    if not settings.embedding_enabled:
+        return ReadinessComponent(
+            name="documentIndexPipeline",
+            enabled=False,
+            configured=True,
+            reason="임베딩 기능이 비활성화되어 문서 인덱싱 저장이 비활성화되어 있습니다.",
+        )
+
+    return _integration_component(
+        name="documentIndexPipeline",
+        enabled=True,
+        required_fields={
+            "embedding_base_url": settings.embedding_base_url,
+            "embedding_path": settings.embedding_path,
+            "embedding_model": settings.embedding_model,
+            "qdrant_url": settings.qdrant_url,
+            "qdrant_collection": settings.qdrant_collection,
+        },
+        field_error_codes={
+            "embedding_base_url": ChatErrorCode.CHAT_EMBEDDING_001,
+            "embedding_path": ChatErrorCode.CHAT_EMBEDDING_001,
+            "embedding_model": ChatErrorCode.CHAT_EMBEDDING_001,
+            "qdrant_url": ChatErrorCode.CHAT_QDRANT_001,
+            "qdrant_collection": ChatErrorCode.CHAT_QDRANT_001,
+        },
+    )
 
 
 def _rag_search_pipeline_component(settings: Settings) -> ReadinessComponent:

@@ -1,9 +1,12 @@
+from typing import Any
+
 import httpx
 from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.query_filter_extractor import QueryFilterExtractor
+from app.features.chat.rdb_evidence_service import RdbEvidenceService
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
@@ -48,16 +51,24 @@ class EvidenceService:
         settings: Settings,
         http_client: httpx.AsyncClient | None = None,
         query_filter_extractor: QueryFilterExtractor | None = None,
+        rdb_evidence_service: RdbEvidenceService | None = None,
     ) -> None:
         self.settings = settings
         self.http_client = http_client
         self.query_filter_extractor = query_filter_extractor or QueryFilterExtractor()
+        self.rdb_evidence_service = rdb_evidence_service or RdbEvidenceService(
+            settings,
+            query_filter_extractor=self.query_filter_extractor,
+        )
 
     async def get_evidence(
         self,
         request: ChatAnswerRequest,
         intent: ChatIntent,
     ) -> EvidenceResult:
+        if self.settings.rdb_evidence_enabled:
+            return await self.rdb_evidence_service.get_evidence(request, intent)
+
         if not self.settings.evidence_lookup_enabled:
             return self._empty_result(request, intent)
 
@@ -129,7 +140,10 @@ class EvidenceService:
                 company_name=request.user.company_name,
             ),
             filters=EvidenceLookupFilters.model_validate(
-                self.query_filter_extractor.extract_filters(request.question)
+                self.query_filter_extractor.extract_filters(
+                    request.question,
+                    request.requested_at,
+                )
             ),
         )
         return lookup_request.model_dump(mode="json", by_alias=True)
@@ -141,7 +155,9 @@ class EvidenceService:
     ) -> EvidenceResult:
         try:
             response.raise_for_status()
-            result = EvidenceResult.model_validate(response.json())
+            result = EvidenceResult.model_validate(
+                self._extract_evidence_payload(response.json())
+            )
         except httpx.HTTPStatusError as exc:
             raise ChatExternalServiceError(
                 status_code=503,
@@ -162,3 +178,15 @@ class EvidenceService:
                 message="RDB Evidence 응답 의도가 요청 의도와 일치하지 않습니다.",
             )
         return result
+
+    def _extract_evidence_payload(self, payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+
+        if "success" not in payload and "data" not in payload:
+            return payload
+
+        if payload.get("success") is not True or payload.get("data") is None:
+            raise ValueError("Spring BaseResponse data is missing.")
+
+        return payload["data"]

@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.features.chat.access_control import OPERATOR_ROLE
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatSource,
@@ -9,6 +10,8 @@ from app.features.chat.schemas import (
     EvidenceItem,
     EvidenceResult,
 )
+from app.features.chat.sensitive_pattern_policy import SensitivePatternPolicy
+from app.features.chat.source_url_policy import normalize_internal_url
 
 
 @dataclass(frozen=True)
@@ -18,6 +21,18 @@ class GroundedPrompt:
 
 
 class GroundedPromptBuilder:
+    _redacted_value = "[보안 제한]"
+    _sensitive_data_key_terms = (
+        "apikey",
+        "authorization",
+        "bearertoken",
+        "password",
+        "passwd",
+        "pwd",
+        "refreshtoken",
+        "secret",
+        "token",
+    )
     _system_prompt = """너는 사내 생산관리 챗봇 Agent다.
 반드시 제공된 내부 근거만 사용해서 답변한다.
 웹 검색, 일반 상식, 모델의 사전 지식으로 사실을 보완하지 않는다.
@@ -30,6 +45,7 @@ class GroundedPromptBuilder:
         self.max_document_sources = max(0, settings.prompt_max_document_sources) if settings else 5
         self.max_summary_chars = max(0, settings.prompt_max_summary_chars) if settings else 700
         self.max_data_chars = max(0, settings.prompt_max_data_chars) if settings else 1000
+        self.sensitive_pattern_policy = SensitivePatternPolicy()
 
     def build(
         self,
@@ -55,8 +71,10 @@ class GroundedPromptBuilder:
         return "\n\n".join(
             [
                 f"사용자 질문:\n{request.question}",
+                f"사용자 역할:\n{request.user.role}",
                 f"질문 의도:\n{evidence_result.intent}",
                 f"데이터 기준 시각:\n{evidence_result.basis_time.isoformat()}",
+                f"역할별 응답 제한:\n{self._format_role_constraints(request.user.role)}",
                 f"RDB 근거:\n{self._format_evidence_items(evidence_result.items)}",
                 f"문서 검색 근거:\n{self._format_document_sources(document_result.sources)}",
                 "응답 규칙:\n"
@@ -66,6 +84,32 @@ class GroundedPromptBuilder:
                 "- 근거가 부족한 항목은 확인 필요라고 명시한다.",
             ]
         )
+
+    def _format_role_constraints(self, role: str) -> str:
+        normalized_role = role.strip().upper()
+        lines = [
+            "- 요청자의 역할 권한 범위 안에서만 답변한다.",
+            (
+                "- 근거에 포함되지 않거나 권한 밖으로 판단되는 내용은 "
+                "확인 필요 또는 답변 불가로 처리한다."
+            ),
+        ]
+        if normalized_role == OPERATOR_ROLE:
+            lines.extend(
+                [
+                    (
+                        "- OPERATOR에게는 금액, 계약, 패널티, 비용, 매출, 수익 등 "
+                        "경영/재무성 정보를 답변하지 않는다."
+                    ),
+                    (
+                        "- OPERATOR에게는 조회 가능한 생산계획, 자재현황, "
+                        "라인/설비 상태, 비금액성 보고서 근거만 요약한다."
+                    ),
+                ]
+            )
+        else:
+            lines.append("- 제공된 근거에 포함된 업무 범위 내에서만 요약한다.")
+        return "\n".join(lines)
 
     def _format_evidence_items(self, items: list[EvidenceItem]) -> str:
         if not items:
@@ -89,8 +133,8 @@ class GroundedPromptBuilder:
             f"   요약: {self._truncate(item.summary, self.max_summary_chars)}",
             f"   출처: {item.source}",
         ]
-        if item.url:
-            lines.append(f"   URL: {item.url}")
+        if safe_url := self._safe_internal_url(item.url):
+            lines.append(f"   URL: {safe_url}")
         if item.reference_id is not None:
             lines.append(f"   참조 ID: {item.reference_id}")
         if item.data:
@@ -126,8 +170,8 @@ class GroundedPromptBuilder:
             lines.append(f"   근거 원천: {source.source_origin}")
         if source.relevance_score is not None:
             lines.append(f"   관련도 점수: {source.relevance_score:.4f}")
-        if source.url:
-            lines.append(f"   URL: {source.url}")
+        if safe_url := self._safe_internal_url(source.url):
+            lines.append(f"   URL: {safe_url}")
         if source.reference_id is not None:
             lines.append(f"   참조 ID: {source.reference_id}")
         if source.source:
@@ -137,7 +181,42 @@ class GroundedPromptBuilder:
         return "\n".join(lines)
 
     def _format_data(self, data: dict) -> str:
-        return json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+        return json.dumps(
+            self._sanitize_data_for_prompt(data),
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+
+    def _safe_internal_url(self, url: str | None) -> str | None:
+        return normalize_internal_url(url)
+
+    def _sanitize_data_for_prompt(self, value: object, key: str | None = None) -> object:
+        if self._is_sensitive_key(key):
+            return self._redacted_value
+        if isinstance(value, dict):
+            return {
+                item_key: self._sanitize_data_for_prompt(item_value, str(item_key))
+                for item_key, item_value in value.items()
+            }
+        if isinstance(value, list):
+            return [self._sanitize_data_for_prompt(item, key) for item in value]
+        if isinstance(value, str) and self._is_url_key(key):
+            return self._safe_internal_url(value)
+        if isinstance(value, str) and self.sensitive_pattern_policy.contains_sensitive_pattern(
+            value
+        ):
+            return self._redacted_value
+        return value
+
+    def _is_url_key(self, key: str | None) -> bool:
+        return key is not None and "url" in key.casefold()
+
+    def _is_sensitive_key(self, key: str | None) -> bool:
+        if key is None:
+            return False
+        normalized_key = self._compact(key.casefold())
+        return any(term in normalized_key for term in self._sensitive_data_key_terms)
 
     def _truncate(self, text: str, max_chars: int) -> str:
         if max_chars <= 0:
@@ -147,3 +226,6 @@ class GroundedPromptBuilder:
         if max_chars <= 3:
             return "." * max_chars
         return f"{text[: max_chars - 3]}..."
+
+    def _compact(self, text: str) -> str:
+        return "".join(text.split()).replace("_", "").replace("-", "")

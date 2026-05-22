@@ -370,6 +370,68 @@ class FakeOnlyOperatorRestrictedContentQdrantClient:
         ]
 
 
+class FakeOperatorReportQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "operator-financial-report-point",
+                "score": 0.93,
+                "payload": {
+                    "documentId": "operator-financial-report",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "납기 지연 패널티 보고서",
+                    "chunkText": "계약 금액과 패널티 금액을 함께 검토합니다.",
+                    "url": "/reports/finance?mode=read",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+            {
+                "id": "operator-production-report-point",
+                "score": 0.86,
+                "payload": {
+                    "documentId": "operator-production-report",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "월간 생산 리스크 보고서",
+                    "chunkText": "자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+                    "url": "/reports/20?mode=read",
+                    "referenceId": 20,
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            },
+        ]
+
+
+class FakeOnlyOperatorFinancialReportQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "operator-financial-report-point",
+                "score": 0.93,
+                "payload": {
+                    "documentId": "operator-financial-report",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "납기 지연 패널티 보고서",
+                    "chunkText": "계약 금액과 패널티 금액을 함께 검토합니다.",
+                    "allowedRoles": ["OPERATOR"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
 class FakeUnsafeGroundingQdrantClient:
     def __init__(self) -> None:
         self.search_payload: dict | None = None
@@ -770,6 +832,30 @@ def test_document_search_service_filters_operator_restricted_content() -> None:
     assert result.sources[0].title == "LINE-A01 현장 확인 기준"
 
 
+def test_document_search_service_allows_operator_non_financial_report() -> None:
+    qdrant_client = FakeOperatorReportQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request(role="OPERATOR")
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert qdrant_client.search_payload is not None
+    assert qdrant_client.search_payload["filter"] == {
+        "must": [
+            {"key": "allowedRoles", "match": {"any": ["OPERATOR"]}},
+            {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
+        ]
+    }
+    assert len(result.sources) == 1
+    assert result.sources[0].source_type == "REPORT"
+    assert result.sources[0].title == "월간 생산 리스크 보고서"
+    assert result.sources[0].url == "/reports/20?mode=read"
+
+
 def test_document_search_service_filters_unsafe_grounding_content() -> None:
     qdrant_client = FakeUnsafeGroundingQdrantClient()
     service = DocumentSearchService(
@@ -796,6 +882,25 @@ def test_document_search_service_marks_operator_restricted_content_reason() -> N
     request = _build_request(role="OPERATOR")
 
     result = anyio.run(service.search, request, ChatIntent.DELIVERY_RISK)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert (
+        result.skipped_reason
+        == "Qdrant 검색 결과가 OPERATOR 권한 제한 내용을 포함해 제외되었습니다."
+    )
+
+
+def test_document_search_service_marks_operator_financial_report_reason() -> None:
+    qdrant_client = FakeOnlyOperatorFinancialReportQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request(role="OPERATOR")
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
 
     assert result.was_searched is True
     assert result.sources == []

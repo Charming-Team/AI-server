@@ -18,6 +18,16 @@ from app.features.chat.schemas import ChatErrorCode, ChatIntent, SecurityStatus
             ChatIntent.DELIVERY_RISK,
         ),
         (
+            "OPERATOR",
+            "이번 달 월간 리포트 요약해줘",
+            ChatIntent.REPORT_LOOKUP,
+        ),
+        (
+            "OPERATOR",
+            "긴급 주문이 생산계획에 미치는 영향 알려줘",
+            ChatIntent.URGENT_ORDER_IMPACT,
+        ),
+        (
             "MANUFACTURING_MANAGER",
             "자재 부족으로 영향받는 생산계획을 알려줘",
             ChatIntent.MATERIAL_SHORTAGE,
@@ -94,29 +104,19 @@ def test_role_access_policy_blocks_operator_financial_question() -> None:
     assert "경영/재무성 정보" in (result.reason or "")
 
 
-@pytest.mark.parametrize(
-    ("role", "question", "intent"),
-    [
-        (
-            "OPERATOR",
-            "이번 달 월간 리포트 요약해줘",
-            ChatIntent.REPORT_LOOKUP,
-        ),
-    ],
-)
-def test_role_access_policy_blocks_intent_outside_role_matrix(
-    role: str,
-    question: str,
-    intent: ChatIntent,
-) -> None:
+def test_role_access_policy_blocks_operator_financial_urgent_order_question() -> None:
     policy = RoleAccessPolicy()
 
-    result = policy.evaluate(role, question, intent)
+    result = policy.evaluate(
+        "OPERATOR",
+        "긴급 주문 투입 시 패널티 비용과 계약 금액 영향을 알려줘",
+        ChatIntent.URGENT_ORDER_IMPACT,
+    )
 
     assert result is not None
     assert result.status == SecurityStatus.BLOCKED_UNAUTHORIZED
     assert result.code == ChatErrorCode.CHAT_SECURITY_004
-    assert "질문 의도에 접근할 수 없습니다" in (result.reason or "")
+    assert "경영/재무성 정보" in (result.reason or "")
 
 
 def test_role_access_policy_allows_unknown_intent_for_no_guess_response() -> None:

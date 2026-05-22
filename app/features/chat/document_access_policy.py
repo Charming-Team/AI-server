@@ -2,6 +2,8 @@ from typing import Any
 
 from app.features.chat.access_control import OPERATOR_RESTRICTED_TERMS, OPERATOR_ROLE
 from app.features.chat.document_payload import InternalDocumentInput
+from app.features.chat.schemas import ChatSource, DocumentSearchResult
+from app.features.chat.skip_reasons import QDRANT_OPERATOR_RESTRICTED_CONTENT
 
 
 class DocumentAccessPolicy:
@@ -29,6 +31,39 @@ class DocumentAccessPolicy:
             payload.get("title"),
             payload.get("summary"),
             payload.get("chunkText"),
+        )
+
+    def allows_source(self, source: ChatSource, role: str) -> bool:
+        if role.strip().upper() != self._operator_role:
+            return True
+
+        return not self._contains_restricted_content(
+            source.title,
+            source.summary,
+        )
+
+    def sanitize_search_result(
+        self,
+        document_result: DocumentSearchResult,
+        role: str,
+    ) -> DocumentSearchResult:
+        filtered_sources = [
+            source
+            for source in document_result.sources
+            if self.allows_source(source, role)
+        ]
+        if len(filtered_sources) == len(document_result.sources):
+            return document_result
+
+        skipped_reason = document_result.skipped_reason
+        if not filtered_sources and document_result.sources and skipped_reason is None:
+            skipped_reason = QDRANT_OPERATOR_RESTRICTED_CONTENT
+
+        return document_result.model_copy(
+            update={
+                "sources": filtered_sources,
+                "skipped_reason": skipped_reason,
+            }
         )
 
     def _includes_operator(self, allowed_roles: list[str]) -> bool:

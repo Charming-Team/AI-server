@@ -30,10 +30,14 @@ def test_access_control_company_info_indexer_roles() -> None:
     }
 
 
-def test_access_control_executive_and_manager_can_access_report_lookup() -> None:
+def test_access_control_business_roles_can_access_report_lookup() -> None:
+    assert ChatIntent.REPORT_LOOKUP in ROLE_INTENT_MATRIX[OPERATOR_ROLE]
     assert ChatIntent.REPORT_LOOKUP in ROLE_INTENT_MATRIX[EXECUTIVE_ROLE]
     assert ChatIntent.REPORT_LOOKUP in ROLE_INTENT_MATRIX[MANUFACTURING_MANAGER_ROLE]
-    assert ChatIntent.REPORT_LOOKUP not in ROLE_INTENT_MATRIX[OPERATOR_ROLE]
+
+
+def test_access_control_operator_can_access_urgent_order_impact() -> None:
+    assert ChatIntent.URGENT_ORDER_IMPACT in ROLE_INTENT_MATRIX[OPERATOR_ROLE]
 
 
 def test_access_control_role_matrix_covers_every_business_role() -> None:

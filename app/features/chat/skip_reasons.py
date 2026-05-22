@@ -5,6 +5,7 @@ EMBEDDING_DISABLED = "임베딩 기능이 비활성화되어 있습니다."
 EMBEDDING_EMPTY_VECTOR = "임베딩 모델이 빈 벡터를 반환했습니다."
 LLM_DISABLED = "LLM 답변 생성 기능이 비활성화되어 있습니다."
 LLM_EMPTY_ANSWER = "LLM이 빈 답변을 반환했습니다."
+LLM_UNAVAILABLE = "LLM 서버 호출에 실패해 근거 기반 대체 답변을 반환했습니다."
 NO_GROUNDING_EVIDENCE = "RDB Evidence와 문서 검색 근거가 없습니다."
 QDRANT_NO_RESULTS = "Qdrant 검색 결과가 없습니다."
 QDRANT_OPERATOR_RESTRICTED_CONTENT = (

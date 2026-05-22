@@ -1,11 +1,16 @@
 import logging
 from typing import Any
 
+from app.features.chat.document_id_policy import is_safe_document_id
 from app.features.chat.document_payload import (
     InternalDocumentDeleteRequest,
     InternalDocumentInput,
 )
-from app.features.chat.schemas import ChatAnswerRequest, ChatAnswerResponse
+from app.features.chat.schemas import (
+    ChatAnswerRequest,
+    ChatAnswerResponse,
+    ChatErrorCode,
+)
 
 
 class ChatAuditLogger:
@@ -40,6 +45,26 @@ class ChatAuditLogger:
         self.logger.info(
             "chat_document_delete_completed",
             extra={"chat_audit": self.build_document_delete_payload(request, result)},
+        )
+
+    def log_document_index_failure(
+        self,
+        document: InternalDocumentInput,
+        error: Any,
+    ) -> None:
+        self.logger.warning(
+            "chat_document_index_failed",
+            extra={"chat_audit": self.build_document_index_failure_payload(document, error)},
+        )
+
+    def log_document_delete_failure(
+        self,
+        request: InternalDocumentDeleteRequest,
+        error: Any,
+    ) -> None:
+        self.logger.warning(
+            "chat_document_delete_failed",
+            extra={"chat_audit": self.build_document_delete_failure_payload(request, error)},
         )
 
     def build_answer_payload(
@@ -109,4 +134,49 @@ class ChatAuditLogger:
             "operationType": result.operation_type,
             "operationStatus": result.operation.get("status"),
             "operationId": result.operation.get("operation_id"),
+        }
+
+    def build_document_index_failure_payload(
+        self,
+        document: InternalDocumentInput,
+        error: Any,
+    ) -> dict[str, Any]:
+        return {
+            "event": "chat_document_index_failed",
+            "documentId": self._failure_document_id(document.document_id, error),
+            "documentIdLength": len(document.document_id),
+            "documentType": document.document_type,
+            "requestedByRole": document.requested_by_role,
+            "allowedRoles": document.allowed_roles,
+            "companyName": document.company_name,
+            "intentTags": document.intent_tags,
+            "hasUrl": bool(document.url),
+            "hasSummary": bool(document.summary),
+            "contentLength": len(document.content),
+            "statusCode": error.status_code,
+            "errorCode": error.code.value,
+        }
+
+    def build_document_delete_failure_payload(
+        self,
+        request: InternalDocumentDeleteRequest,
+        error: Any,
+    ) -> dict[str, Any]:
+        return {
+            "event": "chat_document_delete_failed",
+            "documentId": self._failure_document_id(request.document_id, error),
+            "documentIdLength": len(request.document_id),
+            "statusCode": error.status_code,
+            "errorCode": error.code.value,
+        }
+
+    def _failure_document_id(self, document_id: str, error: Any) -> str | None:
+        if self._is_security_failure(error) or not is_safe_document_id(document_id):
+            return None
+        return document_id
+
+    def _is_security_failure(self, error: Any) -> bool:
+        return error.code in {
+            ChatErrorCode.CHAT_SECURITY_001,
+            ChatErrorCode.CHAT_SECURITY_002,
         }

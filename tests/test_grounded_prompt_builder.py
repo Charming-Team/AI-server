@@ -13,13 +13,13 @@ from app.features.chat.schemas import (
 )
 
 
-def _build_request() -> ChatAnswerRequest:
+def _build_request(role: str = "EXECUTIVE") -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
         messageId=24,
         user=ChatUserContext(
             userId=1,
-            role="EXECUTIVE",
+            role=role,
             companyName="S-MAP",
             status="ACTIVE",
         ),
@@ -43,8 +43,29 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "제공된 내부 근거만 사용" in prompt.system_prompt
     assert "웹 검색" in prompt.system_prompt
     assert "일반 상식" in prompt.system_prompt
+    assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
+    assert "역할별 응답 제한:" in prompt.user_prompt
     assert "RDB 근거:\n없음" in prompt.user_prompt
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request(role="OPERATOR")
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(sources=[])
+
+    prompt = builder.build(request, evidence_result, document_result)
+
+    assert "사용자 역할:\nOPERATOR" in prompt.user_prompt
+    assert "OPERATOR에게는 금액, 계약, 패널티, 비용, 매출, 수익" in (
+        prompt.user_prompt
+    )
+    assert "비금액성 보고서 근거만 요약" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None:
@@ -90,6 +111,146 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
     assert "근거 원천: QDRANT" in prompt.user_prompt
     assert "관련도 점수: 0.9182" in prompt.user_prompt
     assert "기준 시각: 2026-05-12T11:00:00+09:00" in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_sanitizes_source_urls_before_prompt() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="외부 URL 보고서 근거",
+                summary="URL은 프롬프트에 그대로 들어가면 안 됩니다.",
+                url="https://evil.example/reports/20",
+                source="reports",
+            ),
+            EvidenceItem(
+                type="REPORT",
+                title="내부 URL 보고서 근거",
+                summary="내부 상대 경로만 프롬프트에 남습니다.",
+                url=" /reports/20?mode=read ",
+                source="reports",
+            ),
+        ],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="스크립트 URL 문서 근거",
+                summary="허용되지 않은 URL은 제외됩니다.",
+                url="javascript:alert(1)",
+            ),
+            ChatSource(
+                sourceType="REPORT",
+                title="내부 URL 문서 근거",
+                summary="허용된 URL만 포함됩니다.",
+                url="/reports/21?mode=read",
+            ),
+        ]
+    )
+
+    prompt = builder.build(request, evidence_result, document_result)
+
+    assert "https://evil.example" not in prompt.user_prompt
+    assert "javascript:alert" not in prompt.user_prompt
+    assert "URL: /reports/20?mode=read" in prompt.user_prompt
+    assert "URL: /reports/21?mode=read" in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_sanitizes_data_urls_before_prompt() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="원천 데이터 URL도 내부 경로만 프롬프트에 남습니다.",
+                source="reports",
+                data={
+                    "reportUrl": "/reports/20?mode=read",
+                    "externalUrl": "https://evil.example/reports/20",
+                    "nested": {
+                        "detailUrl": " /lines/1?mode=read ",
+                        "scriptUrl": "javascript:alert(1)",
+                    },
+                    "relatedUrls": [
+                        "/materials/11?mode=read",
+                        "https://evil.example/materials/11",
+                    ],
+                },
+            )
+        ],
+    )
+
+    prompt = builder.build(
+        request,
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+    )
+
+    assert "https://evil.example" not in prompt.user_prompt
+    assert "javascript:alert" not in prompt.user_prompt
+    assert '"reportUrl": "/reports/20?mode=read"' in prompt.user_prompt
+    assert '"detailUrl": "/lines/1?mode=read"' in prompt.user_prompt
+    assert '"relatedUrls": ["/materials/11?mode=read", null]' in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_redacts_sensitive_data_before_prompt() -> None:
+    builder = GroundedPromptBuilder()
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title="월간 생산 리스크 보고서",
+                summary="민감 패턴은 프롬프트 원천 데이터에서 마스킹됩니다.",
+                source="reports",
+                data={
+                    "riskLevel": "WARNING",
+                    "apiKey": "sk-abcdefghijklmnopqrstuvwxyz123456",
+                    "accessToken": "short-token-value",
+                    "notes": [
+                        "운영 확인 필요",
+                        (
+                            "Authorization: Bearer "
+                            "abcDEF1234567890abcDEF1234567890abcDEF1234567890"
+                        ),
+                    ],
+                    "nested": {
+                        "password": "short-password",
+                        "lineCode": "LINE-A01",
+                    },
+                },
+            )
+        ],
+    )
+
+    prompt = builder.build(
+        request,
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+    )
+
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in prompt.user_prompt
+    assert "short-token-value" not in prompt.user_prompt
+    assert "Bearer abcDEF" not in prompt.user_prompt
+    assert "short-password" not in prompt.user_prompt
+    assert '"apiKey": "[보안 제한]"' in prompt.user_prompt
+    assert '"accessToken": "[보안 제한]"' in prompt.user_prompt
+    assert '"notes": ["운영 확인 필요", "[보안 제한]"]' in prompt.user_prompt
+    assert '"nested": {"lineCode": "LINE-A01", "password": "[보안 제한]"}' in (
+        prompt.user_prompt
+    )
+    assert '"riskLevel": "WARNING"' in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:

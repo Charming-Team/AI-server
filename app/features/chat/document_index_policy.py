@@ -4,6 +4,7 @@ from app.features.chat.access_control import (
     QDRANT_DOCUMENT_TYPES,
 )
 from app.features.chat.document_access_policy import DocumentAccessPolicy
+from app.features.chat.document_id_policy import document_id_format_error
 from app.features.chat.document_payload import InternalDocumentInput
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
@@ -37,6 +38,7 @@ class DocumentIndexPolicy:
         self._validate_content_length(document.content)
         self._validate_url(document.url)
         self._validate_grounding_security(document)
+        self._validate_document_id_format(document.document_id)
 
         if document.document_type not in self.allowed_document_types:
             raise ChatServiceError(
@@ -122,6 +124,17 @@ class DocumentIndexPolicy:
             status_code=400,
             code=ChatErrorCode.CHAT_DOCUMENT_002,
             message=f"문서 본문은 최대 {self.max_content_chars}자까지 인덱싱할 수 있습니다.",
+        )
+
+    def _validate_document_id_format(self, document_id: str) -> None:
+        message = document_id_format_error(document_id)
+        if message is None:
+            return
+
+        raise ChatServiceError(
+            status_code=400,
+            code=ChatErrorCode.CHAT_DOCUMENT_002,
+            message=message,
         )
 
     def _validate_url(self, url: str | None) -> None:
