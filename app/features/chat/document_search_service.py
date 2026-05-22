@@ -7,6 +7,10 @@ from app.features.chat.document_payload import QdrantSearchPoint
 from app.features.chat.embedding_service import EmbeddingService
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounding_security_policy import GroundingSecurityPolicy
+from app.features.chat.navigation_target_policy import (
+    has_invalid_navigation_url,
+    has_navigation_target,
+)
 from app.features.chat.qdrant_client import QdrantDocumentSearchClient
 from app.features.chat.schemas import (
     ChatAnswerRequest,
@@ -26,7 +30,6 @@ from app.features.chat.skip_reasons import (
     QDRANT_SCORE_THRESHOLD_NOT_MET,
     QDRANT_UNKNOWN_INTENT,
 )
-from app.features.chat.source_url_policy import normalize_internal_url
 
 
 class DocumentSearchService:
@@ -211,26 +214,14 @@ class DocumentSearchService:
         if not isinstance(payload, dict):
             return False
 
-        url = payload.get("url")
-        if isinstance(url, str) and normalize_internal_url(url) is not None:
-            return True
-
-        reference_type = payload.get("referenceType")
-        reference_id = payload.get("referenceId")
-        return (
-            isinstance(reference_type, str)
-            and bool(reference_type.strip())
-            and self._is_reference_id_present(reference_id)
-        )
-
-    def _is_reference_id_present(self, value: object) -> bool:
-        if isinstance(value, bool):
+        if has_invalid_navigation_url(payload.get("url")):
             return False
-        if isinstance(value, int):
-            return True
-        if isinstance(value, str):
-            return value.strip().isdigit()
-        return False
+
+        return has_navigation_target(
+            payload.get("url"),
+            payload.get("referenceType"),
+            payload.get("referenceId"),
+        )
 
     def _filter_points_by_document_type(self, points: list[dict]) -> list[dict]:
         return [

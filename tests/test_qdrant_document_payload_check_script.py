@@ -129,6 +129,14 @@ def test_check_qdrant_document_payloads_passes_valid_points() -> None:
             "url or reference metadata is required",
         ),
         (
+            _valid_point(url=None, referenceType="REPORT", referenceId=0),
+            "url or reference metadata is required",
+        ),
+        (
+            _valid_point(url=None, referenceType="REPORT", referenceId=-1),
+            "url or reference metadata is required",
+        ),
+        (
             _valid_point(
                 allowedRoles=["OPERATOR"],
                 chunkText="계약 금액과 패널티가 포함된 보고서입니다.",

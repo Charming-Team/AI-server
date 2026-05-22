@@ -174,6 +174,32 @@ class FakeReferenceOnlyQdrantClient:
         ]
 
 
+class FakeExternalUrlWithReferenceQdrantClient:
+    def __init__(self) -> None:
+        self.search_payload: dict | None = None
+
+    async def search(self, payload: dict) -> list[dict]:
+        self.search_payload = payload
+        return [
+            {
+                "id": "external-url-reference-point",
+                "score": 0.91,
+                "payload": {
+                    "documentId": "report-external-url",
+                    "chunkId": "summary",
+                    "documentType": "REPORT",
+                    "title": "외부 URL 보고서",
+                    "chunkText": "외부 URL과 참조 메타데이터가 함께 있는 보고서입니다.",
+                    "url": "https://external.example/reports/20",
+                    "referenceType": "REPORT",
+                    "referenceId": 20,
+                    "allowedRoles": ["EXECUTIVE"],
+                    "intentTags": ["REPORT_LOOKUP"],
+                },
+            }
+        ]
+
+
 class FakeEmptyQdrantClient:
     def __init__(self) -> None:
         self.search_payload: dict | None = None
@@ -802,6 +828,22 @@ def test_document_search_service_accepts_reference_metadata_without_url() -> Non
     assert result.sources[0].title == "참조 메타데이터 보고서"
     assert result.sources[0].url is None
     assert result.sources[0].reference_id == 20
+
+
+def test_document_search_service_filters_external_url_even_with_reference_metadata() -> None:
+    qdrant_client = FakeExternalUrlWithReferenceQdrantClient()
+    service = DocumentSearchService(
+        Settings(qdrant_search_enabled=True),
+        embedding_service=FakeEmbeddingService(),
+        qdrant_client=qdrant_client,
+    )
+    request = _build_request()
+
+    result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.was_searched is True
+    assert result.sources == []
+    assert result.skipped_reason == "Qdrant 검색 결과에 화면 이동 정보가 없어 제외되었습니다."
 
 
 def test_document_search_service_filters_sources_outside_user_role() -> None:
