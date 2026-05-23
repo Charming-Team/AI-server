@@ -50,13 +50,14 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str = "local-open-source-model"
     llm_temperature: float = 0.1
-    llm_max_tokens: int = Field(default=1024, ge=1, le=4096)
+    llm_max_tokens: int = Field(default=512, ge=1, le=4096)
     llm_timeout_seconds: float = 60.0
     answer_max_chars: int = Field(default=2000, ge=100, le=5000)
     prompt_max_evidence_items: int = Field(default=5, ge=0, le=20)
     prompt_max_document_sources: int = Field(default=5, ge=0, le=20)
-    prompt_max_summary_chars: int = 700
-    prompt_max_data_chars: int = 1000
+    prompt_max_summary_chars: int = Field(default=700, ge=1, le=2_000)
+    prompt_max_data_chars: int = Field(default=1000, ge=1, le=5_000)
+    prompt_max_total_chars: int = Field(default=6_000, ge=1_000, le=20_000)
 
     model_config = SettingsConfigDict(
         env_file=".env",

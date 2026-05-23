@@ -7,8 +7,10 @@ from scripts import check_k8s_runtime_env
 def _valid_env_values() -> dict[str, str]:
     return {
         "ENVIRONMENT": "kubernetes",
+        "API_V1_PREFIX": "/ai/api/v1",
         "CHAT_ANSWER_INTERNAL_TOKEN": "answer-token",
         "CHAT_RECOMMENDATION_INTERNAL_TOKEN": "recommendation-token",
+        "DOCUMENT_INDEX_INTERNAL_TOKEN": "document-token",
         "EVIDENCE_LOOKUP_ENABLED": "false",
         "RDB_EVIDENCE_ENABLED": "true",
         "RDB_EVIDENCE_DSN": "postgresql://reader:secret@postgres.local:5432/smap",
@@ -22,6 +24,13 @@ def _valid_env_values() -> dict[str, str]:
         "EMBEDDING_PATH": "/embed",
         "EMBEDDING_MODEL": "BAAI/bge-m3",
         "EMBEDDING_DIMENSION": "1024",
+        "LLM_ENABLED": "true",
+        "LLM_PROVIDER": "openai",
+        "LLM_BASE_URL": "https://api.openai.com/v1",
+        "LLM_API_KEY": "openai-secret-token",
+        "LLM_MODEL": "gpt-test",
+        "LLM_MAX_TOKENS": "512",
+        "PROMPT_MAX_TOTAL_CHARS": "6000",
     }
 
 
@@ -36,6 +45,9 @@ def test_check_k8s_runtime_env_allows_placeholders_for_example_file() -> None:
     values = _valid_env_values()
     values["CHAT_ANSWER_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
     values["CHAT_RECOMMENDATION_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
+    values["DOCUMENT_INDEX_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
+    values["LLM_API_KEY"] = "__SET_BY_SECRET__"
+    values["LLM_MODEL"] = "__SET_OPENAI_MODEL__"
     values["RDB_EVIDENCE_DSN"] = "__SET_BY_SECRET__"
 
     result = check_k8s_runtime_env.check_k8s_runtime_env(
@@ -72,6 +84,41 @@ def test_check_k8s_runtime_env_rejects_localhost_service_urls() -> None:
         check["name"] for check in result["checks"] if check["status"] == "FAIL"
     }
     assert {"QDRANT_URL", "EMBEDDING_BASE_URL"} <= failed_names
+
+
+def test_check_k8s_runtime_env_rejects_local_llm_runtime_values() -> None:
+    values = _valid_env_values()
+    values["LLM_PROVIDER"] = "openai_compatible"
+    values["LLM_BASE_URL"] = "http://llm-service:8001/v1"
+    values["LLM_MAX_TOKENS"] = "1024"
+    values["PROMPT_MAX_TOTAL_CHARS"] = "20000"
+
+    result = check_k8s_runtime_env.check_k8s_runtime_env(values)
+
+    assert result["checkStatus"] == "FAIL"
+    failed_names = {
+        check["name"] for check in result["checks"] if check["status"] == "FAIL"
+    }
+    assert {
+        "LLM_PROVIDER",
+        "LLM_BASE_URL",
+        "LLM_MAX_TOKENS",
+        "PROMPT_MAX_TOTAL_CHARS",
+    } <= failed_names
+
+
+def test_check_k8s_runtime_env_rejects_missing_openai_runtime_values() -> None:
+    values = _valid_env_values()
+    values["LLM_API_KEY"] = ""
+    values["LLM_MODEL"] = ""
+
+    result = check_k8s_runtime_env.check_k8s_runtime_env(values)
+
+    assert result["checkStatus"] == "FAIL"
+    failed_names = {
+        check["name"] for check in result["checks"] if check["status"] == "FAIL"
+    }
+    assert {"LLM_API_KEY", "LLM_MODEL"} <= failed_names
 
 
 def test_check_k8s_runtime_env_loads_example_file() -> None:

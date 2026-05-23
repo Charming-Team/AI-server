@@ -58,8 +58,11 @@ jobs:
           EMBEDDING_MODEL: BAAI/bge-m3
           EMBEDDING_DIMENSION: "1024"
           LLM_ENABLED: "true"
+          LLM_PROVIDER: openai_compatible
           LLM_BASE_URL: http://localhost:8001/v1
           LLM_MODEL: local-open-source-model
+          LLM_MAX_TOKENS: "512"
+          PROMPT_MAX_TOTAL_CHARS: "6000"
         run: python -m scripts.check_chat_runtime --preset full --json
 
       - name: Set up Docker Buildx

@@ -43,8 +43,11 @@ def test_docker_build_workflow_configures_chat_runtime_gate() -> None:
     assert env["EMBEDDING_DIMENSION"] == "1024"
     assert env["QDRANT_COLLECTION"] == "smap_internal_documents"
     assert env["LLM_ENABLED"] == "true"
+    assert env["LLM_PROVIDER"] == "openai_compatible"
     assert env["LLM_BASE_URL"] == "http://localhost:8001/v1"
     assert env["LLM_MODEL"] == "local-open-source-model"
+    assert env["LLM_MAX_TOKENS"] == "512"
+    assert env["PROMPT_MAX_TOTAL_CHARS"] == "6000"
 
 
 def test_docker_build_workflow_runs_on_project_branch_patterns() -> None:

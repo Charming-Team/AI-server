@@ -46,6 +46,7 @@ class GroundedPromptBuilder:
         self.max_document_sources = max(0, settings.prompt_max_document_sources) if settings else 5
         self.max_summary_chars = max(0, settings.prompt_max_summary_chars) if settings else 700
         self.max_data_chars = max(0, settings.prompt_max_data_chars) if settings else 1000
+        self.max_total_chars = max(0, settings.prompt_max_total_chars) if settings else 6_000
         self.sensitive_pattern_policy = SensitivePatternPolicy()
 
     def build(
@@ -69,7 +70,7 @@ class GroundedPromptBuilder:
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
     ) -> str:
-        return "\n\n".join(
+        user_prompt = "\n\n".join(
             [
                 f"사용자 질문:\n{request.question}",
                 f"사용자 역할:\n{request.user.role}",
@@ -87,6 +88,7 @@ class GroundedPromptBuilder:
                 "- 답변 형식은 핵심 답변, 근거, 확인 필요 순서를 따른다.",
             ]
         )
+        return self._truncate_total_prompt(user_prompt)
 
     def _format_role_constraints(self, role: str) -> str:
         normalized_role = role.strip().upper()
@@ -229,6 +231,15 @@ class GroundedPromptBuilder:
         if max_chars <= 3:
             return "." * max_chars
         return f"{text[: max_chars - 3]}..."
+
+    def _truncate_total_prompt(self, prompt: str) -> str:
+        if self.max_total_chars <= 0 or len(prompt) <= self.max_total_chars:
+            return prompt
+
+        suffix = "\n\n... 프롬프트 전체 길이 제한으로 일부 근거가 생략되었습니다."
+        if self.max_total_chars <= len(suffix):
+            return prompt[: self.max_total_chars]
+        return f"{prompt[: self.max_total_chars - len(suffix)]}{suffix}"
 
     def _compact(self, text: str) -> str:
         return "".join(text.split()).replace("_", "").replace("-", "")

@@ -311,3 +311,47 @@ def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
     assert "AAAAAAAAAAAAAAAAA..." in prompt.user_prompt
     assert "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" not in prompt.user_prompt
     assert "CCCCCCCCCCCCCCCCC..." in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_limits_total_prompt_length() -> None:
+    builder = GroundedPromptBuilder(
+        Settings(
+            prompt_max_evidence_items=20,
+            prompt_max_document_sources=20,
+            prompt_max_summary_chars=500,
+            prompt_max_data_chars=500,
+            prompt_max_total_chars=1000,
+        )
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title=f"긴 RDB 근거 {index}",
+                summary="A" * 500,
+                source="reports",
+                data={"detail": "B" * 500},
+            )
+            for index in range(10)
+        ],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title=f"긴 문서 근거 {index}",
+                summary="C" * 500,
+            )
+            for index in range(10)
+        ]
+    )
+
+    prompt = builder.build(request, evidence_result, document_result)
+
+    assert len(prompt.user_prompt) <= 1000
+    assert "프롬프트 전체 길이 제한으로 일부 근거가 생략되었습니다." in (
+        prompt.user_prompt
+    )

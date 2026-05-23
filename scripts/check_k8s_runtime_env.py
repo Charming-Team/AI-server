@@ -7,10 +7,12 @@ from urllib.parse import urlparse
 
 K8S_ENV_EXAMPLE_PATH = "deploy/kubernetes/fastapi-chat-runtime.env.example"
 PLACEHOLDER_PREFIX = "__SET_BY_SECRET"
+CONFIG_PLACEHOLDER_PREFIX = "__SET_"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 REQUIRED_EXACT_VALUES = {
     "ENVIRONMENT": "kubernetes",
+    "API_V1_PREFIX": "/ai/api/v1",
     "RDB_EVIDENCE_ENABLED": "true",
     "QDRANT_SEARCH_ENABLED": "true",
     "QDRANT_COLLECTION": "smap_internal_documents",
@@ -18,12 +20,23 @@ REQUIRED_EXACT_VALUES = {
     "EMBEDDING_PATH": "/embed",
     "EMBEDDING_MODEL": "BAAI/bge-m3",
     "EMBEDDING_DIMENSION": "1024",
+    "LLM_ENABLED": "true",
+    "LLM_PROVIDER": "openai",
+    "LLM_BASE_URL": "https://api.openai.com/v1",
+    "LLM_MAX_TOKENS": "512",
+    "PROMPT_MAX_TOTAL_CHARS": "6000",
 }
 
 REQUIRED_SECRET_KEYS = {
     "CHAT_ANSWER_INTERNAL_TOKEN",
     "CHAT_RECOMMENDATION_INTERNAL_TOKEN",
+    "DOCUMENT_INDEX_INTERNAL_TOKEN",
+    "LLM_API_KEY",
     "RDB_EVIDENCE_DSN",
+}
+
+REQUIRED_CONFIG_KEYS = {
+    "LLM_MODEL",
 }
 
 K8S_SERVICE_URL_KEYS = {
@@ -76,6 +89,7 @@ def check_k8s_runtime_env(
     checks = []
     checks.extend(_check_exact_values(values))
     checks.extend(_check_secret_values(values, allow_placeholders))
+    checks.extend(_check_config_values(values, allow_placeholders))
     checks.extend(_check_k8s_service_urls(values))
     checks.extend(_check_disabled_spring_evidence_lookup(values))
 
@@ -133,6 +147,32 @@ def _check_secret_values(
     return checks
 
 
+def _check_config_values(
+    values: dict[str, str],
+    allow_placeholders: bool,
+) -> list[dict]:
+    checks: list[dict] = []
+    for key in sorted(REQUIRED_CONFIG_KEYS):
+        value = values.get(key, "")
+        is_placeholder = value.startswith(CONFIG_PLACEHOLDER_PREFIX)
+        is_valid = bool(value) and (allow_placeholders or not is_placeholder)
+        checks.append(
+            _build_check(
+                name=key,
+                status="PASS" if is_valid else "FAIL",
+                reason=_build_config_failure_reason(
+                    key,
+                    value=value,
+                    allow_placeholders=allow_placeholders,
+                    is_placeholder=is_placeholder,
+                ),
+                expected="non-empty runtime value",
+                actual=_mask_config_value(value),
+            )
+        )
+    return checks
+
+
 def _build_secret_failure_reason(
     key: str,
     value: str,
@@ -143,6 +183,19 @@ def _build_secret_failure_reason(
         return None
     if not value:
         return f"{key} 값은 Kubernetes Secret에서 주입되어야 합니다."
+    return f"{key} placeholder는 실제 배포 env에서 사용할 수 없습니다."
+
+
+def _build_config_failure_reason(
+    key: str,
+    value: str,
+    allow_placeholders: bool,
+    is_placeholder: bool,
+) -> str | None:
+    if value and (allow_placeholders or not is_placeholder):
+        return None
+    if not value:
+        return f"{key} 값은 실제 런타임 설정으로 주입되어야 합니다."
     return f"{key} placeholder는 실제 배포 env에서 사용할 수 없습니다."
 
 
@@ -218,6 +271,14 @@ def _mask_secret_value(value: str) -> str:
     if not value:
         return ""
     if value.startswith(PLACEHOLDER_PREFIX):
+        return value
+    return "<set>"
+
+
+def _mask_config_value(value: str) -> str:
+    if not value:
+        return ""
+    if value.startswith(CONFIG_PLACEHOLDER_PREFIX):
         return value
     return "<set>"
 
