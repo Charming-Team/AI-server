@@ -507,6 +507,14 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     assert result["steps"][3]["result"]["scenarioCount"] == 9
     assert result["steps"][4]["result"]["minEvidenceCount"] == 1
     assert result["steps"][4]["result"]["requireRdbEvidence"] is True
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/api/v1",
+        "groundingMode": "RDB_ONLY",
+        "answerMode": "LLM",
+        "ragSearchMode": "DISABLED",
+        "enabledGroundingSources": ["RDB_EVIDENCE"],
+        "expectedLlmSkippedReason": None,
+    }
 
 
 def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> None:
@@ -544,6 +552,43 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
     assert result["steps"][7]["result"]["minDocumentSourceCount"] == 1
     assert result["steps"][7]["result"]["requireRdbEvidence"] is True
     assert result["steps"][7]["result"]["requireVectorSearch"] is True
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/api/v1",
+        "groundingMode": "RDB_QDRANT",
+        "answerMode": "LLM",
+        "ragSearchMode": "ENABLED",
+        "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+        "expectedLlmSkippedReason": None,
+    }
+
+
+def test_check_chat_runtime_summarizes_k8s_configmap_chat_mode() -> None:
+    settings = _base_ready_settings(
+        environment="prod",
+        api_v1_prefix="/ai/api/v1",
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        qdrant_url="http://qdrant.qdrant.svc.cluster.local:6333",
+        qdrant_collection="smap_internal_documents",
+        embedding_enabled=True,
+        embedding_base_url="http://embedding-service:8002",
+        embedding_model="BAAI/bge-m3",
+        llm_enabled=False,
+    )
+    args = _build_args(preset="rag")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/ai/api/v1",
+        "groundingMode": "RDB_QDRANT",
+        "answerMode": "FALLBACK",
+        "ragSearchMode": "ENABLED",
+        "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+        "expectedLlmSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+    }
 
 
 def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
@@ -1716,6 +1761,16 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
             "mode": "VALIDATE_ONLY",
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence"],
+            "runtimeMode": {
+                "apiPrefix": "/ai/api/v1",
+                "groundingMode": "RDB_QDRANT",
+                "answerMode": "FALLBACK",
+                "ragSearchMode": "ENABLED",
+                "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+                "expectedLlmSkippedReason": (
+                    "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                ),
+            },
             "summary": {
                 "totalStepCount": 1,
                 "passedStepCount": 0,
@@ -1746,6 +1801,11 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
     assert "status=FAIL" in output
     assert "requiredComponents=rdbEvidence" in output
     assert "summary=passed:0 failed:1 total:1" in output
+    assert "apiPrefix=/ai/api/v1" in output
+    assert "groundingMode=RDB_QDRANT" in output
+    assert "answerMode=FALLBACK" in output
+    assert "ragSearchMode=ENABLED" in output
+    assert "enabledGroundingSources=RDB_EVIDENCE,QDRANT" in output
     assert "readiness: status=FAIL code=CHAT_EVIDENCE_004" in output
     assert "failure=readiness code=CHAT_EVIDENCE_004" in output
     assert "nextAction=RDB Evidence 설정을 확인하세요." in output
@@ -1842,6 +1902,31 @@ def test_check_chat_runtime_builds_readonly_search_failure_action_from_error() -
 
     assert summary["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
     assert "Qdrant에 질문과 관련된 보고서" in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+def test_check_chat_runtime_builds_readonly_search_k8s_hint_from_settings() -> None:
+    settings = _base_ready_settings(
+        qdrant_search_enabled=True,
+        qdrant_url="http://qdrant.qdrant.svc.cluster.local:6333",
+        embedding_enabled=True,
+        embedding_base_url="http://embedding-service:8002",
+    )
+    steps = [
+        {
+            "name": "qdrantReadOnlySearch",
+            "status": "FAIL",
+            "error": {
+                "code": "CHAT_EMBEDDING_004",
+                "message": "임베딩 서버 호출에 실패했습니다.",
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps, settings)
+
+    assert summary["failedSteps"][0]["code"] == "CHAT_EMBEDDING_004"
+    assert "로컬에서 실행 중이면 embedding-service" in summary["failedSteps"][0]["action"]
     assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
 
 

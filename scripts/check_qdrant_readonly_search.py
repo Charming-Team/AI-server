@@ -3,6 +3,7 @@ import asyncio
 import json
 import sys
 from typing import Any, TextIO
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from app.core.config import Settings
 from app.features.chat.document_search_service import DocumentSearchService
@@ -13,6 +14,7 @@ from app.features.chat.qdrant_client import (
     QdrantDocumentSearchClient,
     validate_qdrant_settings,
 )
+from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
@@ -45,6 +47,18 @@ QDRANT_READONLY_MATCH_FAILURE_ACTIONS = (
     "allowedRoles, intentTags, url/referenceType/referenceId payload를 확인하세요.",
     "검색 질문과 intent가 실제 문서 메타데이터와 맞는지 확인하세요.",
 )
+QDRANT_READONLY_LOCAL_K8S_EMBEDDING_ACTION = (
+    "로컬에서 실행 중이면 embedding-service는 Kubernetes 내부 DNS이므로 "
+    "port-forward 또는 클러스터 내부 실행으로 점검하세요."
+)
+QDRANT_READONLY_LOCAL_K8S_QDRANT_ACTION = (
+    "로컬에서 실행 중이면 Qdrant Kubernetes 내부 DNS 대신 port-forward URL을 사용하세요."
+)
+
+LOCALHOST_ENDPOINT_SCOPE = "LOCALHOST"
+KUBERNETES_SERVICE_ENDPOINT_SCOPE = "KUBERNETES_SERVICE"
+REMOTE_ENDPOINT_SCOPE = "REMOTE_OR_EXTERNAL"
+UNKNOWN_ENDPOINT_SCOPE = "UNKNOWN"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -175,6 +189,11 @@ def build_validate_only_result(
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "collectionName": search_settings.qdrant_collection,
+        "runtimeMode": build_chat_runtime_mode(search_settings).model_dump(
+            mode="json",
+            by_alias=True,
+        ),
+        "endpointSummary": build_endpoint_summary(search_settings),
         "qdrantUrlConfigured": bool(search_settings.qdrant_url.strip()),
         "apiKeyConfigured": bool(search_settings.qdrant_api_key),
         "embeddingBaseUrlConfigured": bool(search_settings.embedding_base_url.strip()),
@@ -218,6 +237,11 @@ async def check_qdrant_readonly_search(
         "mode": "NETWORK",
         "networkChecked": True,
         "collectionName": search_settings.qdrant_collection,
+        "runtimeMode": build_chat_runtime_mode(search_settings).model_dump(
+            mode="json",
+            by_alias=True,
+        ),
+        "endpointSummary": build_endpoint_summary(search_settings),
         "question": request.question,
         "intent": intent.value,
         "role": request.user.role,
@@ -255,7 +279,59 @@ def validate_search_result(
         )
 
 
-def build_readonly_failure_actions(exc: ChatServiceError) -> list[str]:
+def build_endpoint_summary(settings: Settings) -> dict[str, str]:
+    return {
+        "qdrantBaseUrl": redact_url(settings.qdrant_url),
+        "qdrantEndpointScope": classify_endpoint_scope(settings.qdrant_url),
+        "embeddingBaseUrl": redact_url(settings.embedding_base_url),
+        "embeddingEndpointScope": classify_endpoint_scope(settings.embedding_base_url),
+    }
+
+
+def classify_endpoint_scope(url: str) -> str:
+    parsed_url = urlsplit(url.strip())
+    host = (parsed_url.hostname or "").lower()
+    if not host:
+        return UNKNOWN_ENDPOINT_SCOPE
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return LOCALHOST_ENDPOINT_SCOPE
+    if _looks_like_kubernetes_service_host(host):
+        return KUBERNETES_SERVICE_ENDPOINT_SCOPE
+    return REMOTE_ENDPOINT_SCOPE
+
+
+def redact_url(url: str) -> str:
+    stripped_url = url.strip()
+    parsed_url = urlsplit(stripped_url)
+    if not parsed_url.netloc or ("@" not in parsed_url.netloc):
+        return stripped_url
+
+    hostname = parsed_url.hostname or ""
+    port = f":{parsed_url.port}" if parsed_url.port else ""
+    return urlunsplit(
+        SplitResult(
+            scheme=parsed_url.scheme,
+            netloc=f"***:***@{hostname}{port}",
+            path=parsed_url.path,
+            query=parsed_url.query,
+            fragment=parsed_url.fragment,
+        )
+    )
+
+
+def _looks_like_kubernetes_service_host(host: str) -> bool:
+    return (
+        host.endswith(".svc")
+        or ".svc." in host
+        or host.endswith(".svc.cluster.local")
+        or host in {"embedding-service", "qdrant", "qdrant-service"}
+    )
+
+
+def build_readonly_failure_actions(
+    exc: ChatServiceError,
+    settings: Settings | None = None,
+) -> list[str]:
     if exc.code == ChatErrorCode.CHAT_QDRANT_001:
         return list(QDRANT_READONLY_SETTINGS_FAILURE_ACTIONS)
     if exc.code in {
@@ -264,9 +340,23 @@ def build_readonly_failure_actions(exc: ChatServiceError) -> list[str]:
         ChatErrorCode.CHAT_EMBEDDING_003,
         ChatErrorCode.CHAT_EMBEDDING_004,
     }:
-        return list(QDRANT_READONLY_EMBEDDING_FAILURE_ACTIONS)
+        actions = list(QDRANT_READONLY_EMBEDDING_FAILURE_ACTIONS)
+        if (
+            settings is not None
+            and classify_endpoint_scope(settings.embedding_base_url)
+            == KUBERNETES_SERVICE_ENDPOINT_SCOPE
+        ):
+            actions.insert(0, QDRANT_READONLY_LOCAL_K8S_EMBEDDING_ACTION)
+        return actions
     if exc.code == ChatErrorCode.CHAT_QDRANT_002:
-        return list(QDRANT_READONLY_QDRANT_NETWORK_FAILURE_ACTIONS)
+        actions = list(QDRANT_READONLY_QDRANT_NETWORK_FAILURE_ACTIONS)
+        if (
+            settings is not None
+            and classify_endpoint_scope(settings.qdrant_url)
+            == KUBERNETES_SERVICE_ENDPOINT_SCOPE
+        ):
+            actions.insert(0, QDRANT_READONLY_LOCAL_K8S_QDRANT_ACTION)
+        return actions
     if exc.code == ChatErrorCode.CHAT_QDRANT_003:
         return list(QDRANT_READONLY_RESPONSE_FAILURE_ACTIONS)
     if exc.code == ChatErrorCode.CHAT_QDRANT_004:
@@ -279,11 +369,22 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"status={result['checkStatus']}",
         f"mode={result['mode']}",
         f"collection={result['collectionName']}",
+        f"qdrantEndpointScope={result['endpointSummary']['qdrantEndpointScope']}",
+        f"embeddingEndpointScope={result['endpointSummary']['embeddingEndpointScope']}",
         f"question={result['question']}",
         f"intent={result['intent']}",
         f"role={result['role']}",
         f"networkChecked={result['networkChecked']}",
     ]
+    runtime_mode = result.get("runtimeMode")
+    if isinstance(runtime_mode, dict):
+        lines.extend(
+            [
+                f"groundingMode={runtime_mode['groundingMode']}",
+                f"answerMode={runtime_mode['answerMode']}",
+                f"ragSearchMode={runtime_mode['ragSearchMode']}",
+            ]
+        )
     if result["mode"] == "NETWORK":
         lines.extend(
             [
@@ -321,6 +422,7 @@ def main(
     output = stdout or sys.stdout
     error_output = stderr or sys.stderr
     args = build_parser().parse_args(argv)
+    settings: Settings | None = None
 
     try:
         settings = build_settings(args)
@@ -345,7 +447,7 @@ def main(
     except ChatServiceError as exc:
         print(f"Qdrant read-only 검색 점검 실패: {exc.message}", file=error_output)
         print(f"code={exc.code.value}", file=error_output)
-        for action in build_readonly_failure_actions(exc):
+        for action in build_readonly_failure_actions(exc, settings):
             print(f"nextAction={action}", file=error_output)
         return 1
     except Exception as exc:

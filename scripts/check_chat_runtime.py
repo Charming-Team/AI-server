@@ -7,6 +7,7 @@ from typing import Any, TextIO
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
 from app.features.chat.skip_reasons import LLM_DISABLED
 from scripts import (
@@ -563,12 +564,16 @@ async def check_chat_runtime(
         )
 
     check_status = "PASS" if all(step["status"] == "PASS" for step in steps) else "FAIL"
-    summary = build_runtime_summary(steps)
+    summary = build_runtime_summary(steps, settings)
     return {
         "checkStatus": check_status,
         "mode": "NETWORK" if args.network else "VALIDATE_ONLY",
         "networkChecked": bool(args.network),
         "requiredComponents": required_components,
+        "runtimeMode": build_chat_runtime_mode(settings).model_dump(
+            mode="json",
+            by_alias=True,
+        ),
         "summary": summary,
         "steps": steps,
     }
@@ -649,9 +654,12 @@ def resolve_expected_answer_llm_skipped_reason(
     return None
 
 
-def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
+def build_runtime_summary(
+    steps: list[dict[str, Any]],
+    settings: Settings | None = None,
+) -> dict[str, Any]:
     failed_steps = [step for step in steps if step["status"] != "PASS"]
-    failure_items = [build_failure_item(step) for step in failed_steps]
+    failure_items = [build_failure_item(step, settings) for step in failed_steps]
     next_actions = list(
         dict.fromkeys(item["action"] for item in failure_items if item["action"])
     )
@@ -664,9 +672,12 @@ def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build_failure_item(step: dict[str, Any]) -> dict[str, Any]:
+def build_failure_item(
+    step: dict[str, Any],
+    settings: Settings | None = None,
+) -> dict[str, Any]:
     code, message = extract_failure_reason(step)
-    action = extract_failure_action(step)
+    action = extract_failure_action(step, settings)
     return {
         "name": step["name"],
         "code": code,
@@ -675,7 +686,10 @@ def build_failure_item(step: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def extract_failure_action(step: dict[str, Any]) -> str:
+def extract_failure_action(
+    step: dict[str, Any],
+    settings: Settings | None = None,
+) -> str:
     result = step.get("result")
     if isinstance(result, dict):
         next_actions = result.get("nextActions")
@@ -697,7 +711,7 @@ def extract_failure_action(step: dict[str, Any]) -> str:
         if vector_action:
             return vector_action
     if isinstance(error, dict) and step.get("name") == "qdrantReadOnlySearch":
-        readonly_action = build_qdrant_readonly_failure_action(error)
+        readonly_action = build_qdrant_readonly_failure_action(error, settings)
         if readonly_action:
             return readonly_action
     if isinstance(error, dict) and step.get("name") == "documentApiSmoke":
@@ -761,7 +775,10 @@ def build_qdrant_vector_failure_action(error: dict[str, Any]) -> str | None:
     return actions[0] if actions else None
 
 
-def build_qdrant_readonly_failure_action(error: dict[str, Any]) -> str | None:
+def build_qdrant_readonly_failure_action(
+    error: dict[str, Any],
+    settings: Settings | None = None,
+) -> str | None:
     code = error.get("code")
     message = error.get("message")
     if not isinstance(code, str) or not isinstance(message, str):
@@ -777,7 +794,8 @@ def build_qdrant_readonly_failure_action(error: dict[str, Any]) -> str | None:
             status_code=500,
             code=error_code,
             message=message,
-        )
+        ),
+        settings,
     )
     return actions[0] if actions else None
 
@@ -1381,6 +1399,23 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"total:{summary.get('totalStepCount', len(result['steps']))}"
         ),
     ]
+    runtime_mode = result.get("runtimeMode")
+    if isinstance(runtime_mode, dict):
+        lines.extend(
+            [
+                f"apiPrefix={runtime_mode['apiPrefix']}",
+                f"groundingMode={runtime_mode['groundingMode']}",
+                f"answerMode={runtime_mode['answerMode']}",
+                f"ragSearchMode={runtime_mode['ragSearchMode']}",
+                "enabledGroundingSources="
+                f"{','.join(runtime_mode['enabledGroundingSources'])}",
+            ]
+        )
+        if runtime_mode.get("expectedLlmSkippedReason"):
+            lines.append(
+                "expectedLlmSkippedReason="
+                f"{runtime_mode['expectedLlmSkippedReason']}"
+            )
     for step in result["steps"]:
         line = f"{step['name']}: status={step['status']}"
         if "error" in step:

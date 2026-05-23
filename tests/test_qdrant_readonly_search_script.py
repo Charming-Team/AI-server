@@ -117,6 +117,20 @@ def test_qdrant_readonly_search_validate_only_result() -> None:
     assert result["checkStatus"] == "VALIDATED"
     assert result["mode"] == "VALIDATE_ONLY"
     assert result["collectionName"] == "smap_internal_documents"
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/api/v1",
+        "groundingMode": "QDRANT_ONLY",
+        "answerMode": "FALLBACK",
+        "ragSearchMode": "ENABLED",
+        "enabledGroundingSources": ["QDRANT"],
+        "expectedLlmSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+    }
+    assert result["endpointSummary"] == {
+        "qdrantBaseUrl": "http://localhost:6333",
+        "qdrantEndpointScope": "LOCALHOST",
+        "embeddingBaseUrl": "http://localhost:8002",
+        "embeddingEndpointScope": "LOCALHOST",
+    }
     assert result["qdrantUrlConfigured"] is True
     assert result["embeddingBaseUrlConfigured"] is True
     assert result["intent"] == "LINE_BOTTLENECK"
@@ -179,6 +193,10 @@ def test_qdrant_readonly_search_uses_embedding_and_existing_qdrant_points() -> N
     assert result["sourceTitles"] == ["LINE-A01 병목 대응 기준"]
     assert result["sourceTypes"] == ["COMPANY_INFO"]
     assert result["usedReadOnlySearch"] is True
+    assert result["runtimeMode"]["groundingMode"] == "QDRANT_ONLY"
+    assert result["runtimeMode"]["ragSearchMode"] == "ENABLED"
+    assert result["endpointSummary"]["qdrantEndpointScope"] == "LOCALHOST"
+    assert result["endpointSummary"]["embeddingEndpointScope"] == "LOCALHOST"
     assert qdrant_client.search_payload is not None
     assert qdrant_client.search_payload["filter"]["must"] == [
         {"key": "allowedRoles", "match": {"any": ["MANUFACTURING_MANAGER"]}},
@@ -247,8 +265,26 @@ def test_qdrant_readonly_search_main_validate_only_does_not_expose_secret() -> N
     assert exit_code == 0
     assert '"checkStatus": "VALIDATED"' in output
     assert '"apiKeyConfigured": true' in output
+    assert '"endpointSummary"' in output
     assert "qdrant-secret-token" not in output
     assert "embedding-secret-token" not in output
+
+
+def test_qdrant_readonly_search_endpoint_summary_redacts_basic_auth() -> None:
+    args = _build_args(
+        qdrant_url="http://reader:password@qdrant.qdrant.svc.cluster.local:6333",
+        embedding_base_url="http://embedding-service:8002",
+    )
+    settings = check_qdrant_readonly_search.build_settings(args)
+
+    summary = check_qdrant_readonly_search.build_endpoint_summary(settings)
+
+    assert summary == {
+        "qdrantBaseUrl": "http://***:***@qdrant.qdrant.svc.cluster.local:6333",
+        "qdrantEndpointScope": "KUBERNETES_SERVICE",
+        "embeddingBaseUrl": "http://embedding-service:8002",
+        "embeddingEndpointScope": "KUBERNETES_SERVICE",
+    }
 
 
 def test_qdrant_readonly_search_main_guides_match_failure(
@@ -273,3 +309,33 @@ def test_qdrant_readonly_search_main_guides_match_failure(
     assert exit_code == 1
     assert "code=CHAT_QDRANT_004" in stderr.getvalue()
     assert "nextAction=Qdrant에 질문과 관련된 보고서" in stderr.getvalue()
+
+
+def test_qdrant_readonly_search_main_guides_local_k8s_embedding_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_qdrant_readonly_search(*args: Any, **kwargs: Any) -> dict:
+        raise check_qdrant_readonly_search.ChatServiceError(
+            status_code=503,
+            code=check_qdrant_readonly_search.ChatErrorCode.CHAT_EMBEDDING_004,
+            message="임베딩 서버 호출에 실패했습니다.",
+        )
+
+    monkeypatch.setattr(
+        check_qdrant_readonly_search,
+        "check_qdrant_readonly_search",
+        fake_check_qdrant_readonly_search,
+    )
+    stderr = StringIO()
+
+    exit_code = check_qdrant_readonly_search.main(
+        [
+            "--embedding-base-url",
+            "http://embedding-service:8002",
+        ],
+        stderr=stderr,
+    )
+
+    assert exit_code == 1
+    assert "code=CHAT_EMBEDDING_004" in stderr.getvalue()
+    assert "nextAction=로컬에서 실행 중이면 embedding-service" in stderr.getvalue()
