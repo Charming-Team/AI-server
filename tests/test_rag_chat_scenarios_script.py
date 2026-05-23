@@ -30,6 +30,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "min_evidence_count": None,
         "min_rdb_evidence_count": None,
         "min_document_source_count": None,
+        "markdown": False,
         "json": False,
     }
     values.update(overrides)
@@ -508,6 +509,57 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
     assert "scenario=line-bottleneck-with-company-guide" in output
     assert "requireVectorSearch=True" in output
     assert "documentSourceCount=1" in output
+
+
+def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
+    output = check_rag_chat_scenarios.format_markdown_result(
+        {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "line-bottleneck-with-company-guide",
+                    "role": "MANUFACTURING_MANAGER",
+                    "question": "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘",
+                    "intent": "LINE_BOTTLENECK",
+                    "securityStatus": "PASSED",
+                    "securityCode": None,
+                    "evidenceCount": 2,
+                    "rdbEvidenceCount": 1,
+                    "documentSourceCount": 1,
+                    "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
+                    "sourceDetails": [
+                        {
+                            "sourceOrigin": "RDB",
+                            "sourceType": "LINE",
+                            "title": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        },
+                        {
+                            "sourceOrigin": "QDRANT",
+                            "sourceType": "COMPANY_INFO",
+                            "title": "LINE-PE-01 병목 대응 기준",
+                            "url": "/company-info/line-pe-01-bottleneck-guide",
+                        },
+                    ],
+                    "urlDetails": [
+                        {
+                            "type": "LINE",
+                            "label": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert "# RAG 챗봇 시나리오 점검 결과" in output
+    assert "## line-bottleneck-with-company-guide" in output
+    assert "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘" in output
+    assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
+    assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
+    assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
 
 
 def test_check_rag_chat_scenarios_main_does_not_expose_secret(

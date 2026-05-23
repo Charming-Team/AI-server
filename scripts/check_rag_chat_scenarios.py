@@ -212,6 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="모든 시나리오에 적용할 최소 Qdrant 문서 출처 개수",
     )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -460,6 +465,69 @@ def format_json_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
+def format_markdown_result(result: dict[str, Any]) -> str:
+    lines = [
+        "# RAG 챗봇 시나리오 점검 결과",
+        "",
+        f"- 점검 상태: `{result['checkStatus']}`",
+        f"- 시나리오 수: `{result['scenarioCount']}`",
+    ]
+
+    for scenario in result["scenarios"]:
+        lines.extend(
+            [
+                "",
+                f"## {scenario['scenarioId']}",
+                "",
+                f"- Role: `{scenario['role']}`",
+                f"- 질문: {scenario['question']}",
+                f"- Intent: `{scenario['intent']}`",
+                (
+                    "- 보안 결과: "
+                    f"`{scenario['securityStatus']}`"
+                    f"{_format_optional_code(scenario['securityCode'])}"
+                ),
+                (
+                    "- 근거 수: "
+                    f"전체 `{scenario['evidenceCount']}`, "
+                    f"RDB `{scenario['rdbEvidenceCount']}`, "
+                    f"Qdrant `{scenario['documentSourceCount']}`"
+                ),
+            ]
+        )
+        answer = scenario.get("answer")
+        if answer:
+            lines.extend(["", "### 답변", "", "```text", answer, "```"])
+
+        source_details = scenario.get("sourceDetails") or []
+        if source_details:
+            lines.extend(["", "### 출처", "", "| 유형 | 제목 | URL |", "| --- | --- | --- |"])
+            lines.extend(
+                (
+                    f"| `{source['sourceOrigin'] or '-'}` / `{source['sourceType']}` "
+                    f"| {_escape_markdown_cell(source['title'])} "
+                    f"| `{source['url'] or '-'}` |"
+                )
+                for source in source_details
+            )
+
+        url_details = scenario.get("urlDetails") or []
+        if url_details:
+            lines.extend(
+                ["", "### 화면 이동 URL", "", "| 유형 | 라벨 | URL |", "| --- | --- | --- |"]
+            )
+            lines.extend(
+                (
+                    f"| `{url['type']}` "
+                    f"| {_escape_markdown_cell(url['label'])} "
+                    f"| `{url['url']}` |"
+                )
+                for url in url_details
+            )
+
+    return "\n".join(lines)
+
+
 def _select_scenario_groups(
     scenario_groups: list[str] | None,
 ) -> tuple[RagChatScenario, ...]:
@@ -558,6 +626,18 @@ def _format_security_result(security_result: tuple[str, str | None]) -> str:
     return f"{status}:{code or 'NONE'}"
 
 
+def _format_optional_code(code: str | None) -> str:
+    if code is None:
+        return ""
+    return f" / `{code}`"
+
+
+def _escape_markdown_cell(value: str | None) -> str:
+    if value is None:
+        return "-"
+    return value.replace("|", "\\|").replace("\n", "<br>")
+
+
 def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
@@ -579,6 +659,8 @@ def main(
 
     if args.json:
         print(format_json_result(result), file=output)
+    elif args.markdown:
+        print(format_markdown_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
     return 0
