@@ -150,7 +150,7 @@ def test_select_rag_scenarios_returns_core_by_default() -> None:
     assert [scenario.scenario_id for scenario in scenarios] == [
         "material-shortage-with-company-guide",
         "line-bottleneck-with-company-guide",
-        "delivery-risk-with-report",
+        "delivery-risk-with-company-guide",
     ]
     assert all(scenario.require_rdb_evidence for scenario in scenarios)
     assert all(scenario.require_vector_search for scenario in scenarios)

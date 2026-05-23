@@ -65,9 +65,9 @@ CORE_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
         required_source_title_fragments=("LINE-PE-01",),
     ),
     RagChatScenario(
-        scenario_id="delivery-risk-with-report",
+        scenario_id="delivery-risk-with-company-guide",
         intent=ChatIntent.DELIVERY_RISK,
-        question="납기 위험이 있는 주문과 관련 보고서 근거를 알려줘",
+        question="납기 위험이 있는 주문과 주요 원인, 대응 기준을 알려줘",
     ),
 )
 
