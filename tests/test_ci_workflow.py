@@ -1,29 +1,50 @@
 from pathlib import Path
 
+import yaml
+
 WORKFLOW_PATH = Path(".github/workflows/docker-build-push.yml")
 
 
-def test_docker_build_workflow_runs_python_quality_gates() -> None:
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+def _load_workflow() -> dict:
+    return yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
-    assert "python -m ruff check ." in workflow
-    assert "python -m pytest" in workflow
-    assert "python -m scripts.check_chat_runtime --preset full --json" in workflow
+
+def _build_steps() -> list[dict]:
+    workflow = _load_workflow()
+    return workflow["jobs"]["build-and-push"]["steps"]
+
+
+def _step_by_name(name: str) -> dict:
+    for step in _build_steps():
+        if step.get("name") == name:
+            return step
+    raise AssertionError(f"Workflow step not found: {name}")
+
+
+def test_docker_build_workflow_runs_python_quality_gates() -> None:
+    steps = _build_steps()
+    runs = [step.get("run") for step in steps]
+
+    assert "python -m ruff check ." in runs
+    assert "python -m pytest" in runs
+    assert "python -m scripts.check_chat_runtime --preset full --json" in runs
 
 
 def test_docker_build_workflow_configures_chat_runtime_gate() -> None:
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    release_gate_step = _step_by_name("Run chatbot release gate")
+    env = release_gate_step["env"]
 
-    assert "CHAT_ANSWER_INTERNAL_TOKEN: ci-answer-token" in workflow
-    assert "CHAT_RECOMMENDATION_INTERNAL_TOKEN: ci-recommendation-token" in workflow
-    assert "DOCUMENT_INDEX_INTERNAL_TOKEN: ci-document-token" in workflow
-    assert 'RDB_EVIDENCE_ENABLED: "true"' in workflow
-    assert 'QDRANT_SEARCH_ENABLED: "true"' in workflow
-    assert 'EMBEDDING_ENABLED: "true"' in workflow
-    assert "QDRANT_COLLECTION: smap_internal_documents" in workflow
-    assert 'LLM_ENABLED: "true"' in workflow
-    assert "LLM_BASE_URL: http://localhost:8001/v1" in workflow
-    assert "LLM_MODEL: local-open-source-model" in workflow
+    assert env["CHAT_ANSWER_INTERNAL_TOKEN"] == "ci-answer-token"
+    assert env["CHAT_RECOMMENDATION_INTERNAL_TOKEN"] == "ci-recommendation-token"
+    assert "DOCUMENT_INDEX_INTERNAL_TOKEN" not in env
+    assert env["RDB_EVIDENCE_ENABLED"] == "true"
+    assert env["QDRANT_SEARCH_ENABLED"] == "true"
+    assert env["EMBEDDING_ENABLED"] == "true"
+    assert env["EMBEDDING_DIMENSION"] == "1024"
+    assert env["QDRANT_COLLECTION"] == "smap_internal_documents"
+    assert env["LLM_ENABLED"] == "true"
+    assert env["LLM_BASE_URL"] == "http://localhost:8001/v1"
+    assert env["LLM_MODEL"] == "local-open-source-model"
 
 
 def test_docker_build_workflow_runs_on_project_branch_patterns() -> None:

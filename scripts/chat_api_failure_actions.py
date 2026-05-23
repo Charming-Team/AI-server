@@ -11,6 +11,10 @@ ANSWER_API_NETWORK_FAILURE_ACTIONS = (
 ANSWER_API_EVIDENCE_FAILURE_ACTIONS = (
     "RDB Evidence, Qdrant 문서 출처, 최소 Evidence 개수 조건을 확인하세요.",
 )
+ANSWER_API_INTENT_FAILURE_ACTIONS = (
+    "질문 문구와 expected intent 조건이 일치하는지 확인하세요.",
+    "IntentClassifier 키워드 규칙 또는 RAG 시나리오 질문을 확인하세요.",
+)
 ANSWER_API_RDB_EVIDENCE_FAILURE_ACTIONS = (
     "RDB_EVIDENCE_ENABLED, RDB_EVIDENCE_DSN, chat_evidence view 조회 결과를 확인하세요.",
 )
@@ -64,6 +68,8 @@ def build_recommendation_api_failure_actions(exc: ChatServiceError) -> list[str]
 
 
 def _build_answer_evidence_failure_actions(message: str) -> list[str]:
+    if "intent" in message:
+        return list(ANSWER_API_INTENT_FAILURE_ACTIONS)
     if "RDB Evidence" in message:
         return list(ANSWER_API_RDB_EVIDENCE_FAILURE_ACTIONS)
     if "Qdrant" in message or "Vector Search" in message:

@@ -882,7 +882,6 @@ def _build_company_info_qdrant_chat_service() -> ChatService:
         embedding_service=FakeSearchEmbeddingService(),
         qdrant_client=FakeCompanyInfoQdrantClient(),
     )
-    service.answer_generation_service = FakeCompanyInfoAnswerGenerationService()
     return service
 
 
@@ -1731,10 +1730,13 @@ def test_chat_answer_evaluation_uses_company_info_qdrant_source() -> None:
     body = response.json()
     assert body["intent"] == "LINE_BOTTLENECK"
     assert body["securityResult"]["status"] == "PASSED"
-    assert body["answer"] == (
-        "LINE-A01 병목은 대기시간 증가 시 작업 순서와 "
-        "설비 상태를 함께 확인해야 합니다."
-    )
+    assert "확인된 문서 검색 근거 기준으로 요약합니다." in body["answer"]
+    assert "문서 검색 근거:" in body["answer"]
+    assert "LINE-A01 병목 대응 기준" in body["answer"]
+    assert (
+        "LINE-A01 대기시간이 증가하면 작업 순서와 "
+        "설비 상태를 함께 확인합니다."
+    ) in body["answer"]
     assert body["urls"] == [
         {
             "label": "LINE-A01 병목 대응 기준",
@@ -1761,12 +1763,12 @@ def test_chat_answer_evaluation_uses_company_info_qdrant_source() -> None:
     assert body["modelResult"] == {
         "usedVectorSearch": True,
         "usedRdbEvidence": False,
-        "usedLlmGeneration": True,
+        "usedLlmGeneration": False,
         "rdbEvidenceCount": 0,
         "documentSourceCount": 1,
         "evidenceCount": 1,
         "vectorSearchSkippedReason": None,
-        "llmGenerationSkippedReason": None,
+        "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
     }
 
 

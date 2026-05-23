@@ -14,6 +14,9 @@ QDRANT_OPERATOR_RESTRICTED_CONTENT = (
 QDRANT_GROUNDING_SECURITY_BLOCKED = (
     "Qdrant 검색 결과가 근거 보안 정책에 의해 제외되었습니다."
 )
+QDRANT_NAVIGATION_TARGET_MISSING = (
+    "Qdrant 검색 결과에 화면 이동 정보가 없어 제외되었습니다."
+)
 QDRANT_DOCUMENT_TYPE_NOT_ALLOWED = (
     "Qdrant 검색 결과가 허용되지 않은 문서 유형이라 제외되었습니다."
 )

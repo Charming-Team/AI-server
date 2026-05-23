@@ -73,8 +73,19 @@ class ChatResponseBuilder:
         return SecurityResult(
             status=SecurityStatus.INSUFFICIENT_EVIDENCE,
             code=ChatErrorCode.CHAT_EVIDENCE_001,
-            reason="조회된 RDB Evidence가 없고 Qdrant 검색 결과가 없습니다.",
+            reason=self._build_insufficient_evidence_reason(document_result),
         )
+
+    def _build_insufficient_evidence_reason(
+        self,
+        document_result: DocumentSearchResult,
+    ) -> str:
+        reason = "조회된 RDB Evidence가 없고 Qdrant 문서 근거도 확인되지 않았습니다."
+        if document_result.skipped_reason:
+            return f"{reason} Qdrant 사유: {document_result.skipped_reason}"
+        if not document_result.was_searched:
+            return f"{reason} Qdrant 검색은 수행되지 않았습니다."
+        return reason
 
     def _evidence_item_to_source(
         self,

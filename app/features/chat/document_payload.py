@@ -111,6 +111,14 @@ class InternalDocumentPayload(BaseModel):
     title: str
     chunk_text: str = Field(alias="chunkText")
     chunk_id: str | None = Field(default=None, alias="chunkId")
+    chunk_index: int | None = Field(default=None, alias="chunkIndex")
+    chunk_count: int | None = Field(default=None, alias="chunkCount")
+    chunk_size: int | None = Field(default=None, alias="chunkSize")
+    chunk_overlap: int | None = Field(default=None, alias="chunkOverlap")
+    chunk_profile: str | None = Field(default=None, alias="chunkProfile")
+    chunker_version: str | None = Field(default=None, alias="chunkerVersion")
+    embedding_model: str | None = Field(default=None, alias="embeddingModel")
+    embedding_dimension: int | None = Field(default=None, alias="embeddingDimension")
     summary: str | None = None
     url: str | None = None
     reference_type: str | None = Field(default=None, alias="referenceType")

@@ -10,7 +10,7 @@ class GroundedFallbackAnswerBuilder:
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
     ) -> str:
-        sections = ["확인된 내부 근거 기준으로 요약합니다."]
+        sections = [self._build_intro(evidence_result, document_result)]
 
         if evidence_result.items:
             sections.append(
@@ -36,6 +36,21 @@ class GroundedFallbackAnswerBuilder:
 
         sections.append("확인 필요: 위 근거에 없는 내용은 추가 확인이 필요합니다.")
         return "\n\n".join(sections)
+
+    def _build_intro(
+        self,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> str:
+        has_rdb_evidence = bool(evidence_result.items)
+        has_document_sources = bool(document_result.sources)
+        if has_rdb_evidence and has_document_sources:
+            return "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다."
+        if has_rdb_evidence:
+            return "확인된 RDB 근거 기준으로 요약합니다."
+        if has_document_sources:
+            return "확인된 문서 검색 근거 기준으로 요약합니다."
+        return "확인된 내부 근거 기준으로 요약합니다."
 
     def _build_section(
         self,

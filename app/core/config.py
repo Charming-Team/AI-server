@@ -1,14 +1,16 @@
+import json
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     app_name: str = "S-MAP AI Server"
     environment: str = "local"
     api_v1_prefix: str = "/api/v1"
-    cors_origins: list[str] = Field(
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
     chat_answer_internal_token: str | None = None
@@ -66,6 +68,16 @@ class Settings(BaseSettings):
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
+            stripped_value = value.strip()
+            if stripped_value.startswith("["):
+                parsed_value = json.loads(stripped_value)
+                if not isinstance(parsed_value, list):
+                    raise ValueError("CORS_ORIGINS JSON 값은 배열이어야 합니다.")
+                return [
+                    origin.strip()
+                    for origin in parsed_value
+                    if isinstance(origin, str) and origin.strip()
+                ]
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 

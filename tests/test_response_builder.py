@@ -209,6 +209,29 @@ def test_response_builder_returns_insufficient_evidence_without_sources() -> Non
 
     assert result.status == SecurityStatus.INSUFFICIENT_EVIDENCE
     assert result.code == ChatErrorCode.CHAT_EVIDENCE_001
+    assert result.reason == (
+        "조회된 RDB Evidence가 없고 Qdrant 문서 근거도 확인되지 않았습니다. "
+        "Qdrant 검색은 수행되지 않았습니다."
+    )
+
+
+def test_response_builder_includes_qdrant_skip_reason_for_insufficient_evidence() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = _build_evidence_result([])
+    document_result = DocumentSearchResult(
+        sources=[],
+        was_searched=True,
+        skipped_reason="Qdrant 검색 결과가 없습니다.",
+    )
+
+    result = builder.build_security_result(evidence_result, document_result)
+
+    assert result.status == SecurityStatus.INSUFFICIENT_EVIDENCE
+    assert result.code == ChatErrorCode.CHAT_EVIDENCE_001
+    assert result.reason == (
+        "조회된 RDB Evidence가 없고 Qdrant 문서 근거도 확인되지 않았습니다. "
+        "Qdrant 사유: Qdrant 검색 결과가 없습니다."
+    )
 
 
 def test_response_builder_returns_passed_when_grounding_exists() -> None:

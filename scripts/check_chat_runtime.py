@@ -7,7 +7,9 @@ from typing import Any, TextIO
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
+from app.features.chat.skip_reasons import LLM_DISABLED
 from scripts import (
     chat_api_failure_actions,
     chat_check_common,
@@ -20,6 +22,7 @@ from scripts import (
     check_llm_completion,
     check_qdrant_collection,
     check_qdrant_document_payloads,
+    check_qdrant_readonly_search,
     check_qdrant_vector_search,
     check_rag_chat_scenarios,
     check_rag_end_to_end,
@@ -57,8 +60,8 @@ STEP_ACTION_GUIDE = {
         "확인하세요."
     ),
     "ragEndToEndSmoke": (
-        "FastAPI 문서 등록, 챗봇 답변, 문서 삭제 API가 같은 설정과 토큰으로 "
-        "연결되는지 확인하세요."
+        "명시적으로 임시 문서를 등록/검색/삭제하는 E2E smoke가 필요한 경우에만 "
+        "문서 인덱싱 토큰과 Qdrant/Embedding 설정을 확인하세요."
     ),
     "qdrantCollection": (
         "Qdrant URL, collection 이름, embedding dimension 설정이 일치하는지 "
@@ -67,6 +70,9 @@ STEP_ACTION_GUIDE = {
     "qdrantDocumentPayloads": (
         "Qdrant payload의 documentId, allowedRoles, intentTags, url 메타데이터를 "
         "확인하세요."
+    ),
+    "qdrantReadOnlySearch": (
+        "이미 Qdrant에 저장된 문서가 질문 role/intent로 검색되는지 확인하세요."
     ),
     "qdrantVectorSmoke": (
         "Embedding/Qdrant 연결과 smoke 문서 저장, 검색, 삭제 경로를 확인하세요."
@@ -97,9 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="none",
         help=(
             "자주 쓰는 점검 옵션 묶음. rdb는 RDB Evidence와 답변/추천 API, "
-            "qdrant는 Qdrant 컬렉션/페이로드/벡터 smoke, "
+            "qdrant는 Qdrant 컬렉션/페이로드/read-only 검색 smoke, "
             "llm은 LLM 연결과 출력 보안 정책, "
-            "rag는 Qdrant/문서/답변/추천 API, full은 전체 경로를 점검합니다."
+            "rag는 이미 Qdrant에 저장된 문서 검색 기반 챗봇 경로, "
+            "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로를 점검합니다."
         ),
     )
     parser.add_argument(
@@ -124,7 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--require-document-index",
         action="store_true",
-        help="문서 인덱싱 파이프라인이 준비되어 있어야 합니다.",
+        help=(
+            "문서 API smoke 실행 시 실제 인덱싱 성공을 요구합니다. "
+            "챗봇 런타임 readiness 필수 조건에는 포함되지 않습니다."
+        ),
     )
     parser.add_argument(
         "--require-llm-generation",
@@ -135,6 +145,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-vector-smoke",
         action="store_true",
         help="Qdrant에 임시 문서를 저장/검색/삭제하는 Vector smoke check를 수행합니다.",
+    )
+    parser.add_argument(
+        "--include-qdrant-readonly-search",
+        action="store_true",
+        help=(
+            "Qdrant에 이미 저장된 문서를 수정하지 않고 Embedding + Vector 검색 "
+            "경로를 점검합니다."
+        ),
     )
     parser.add_argument(
         "--include-document-api-smoke",
@@ -223,8 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(check_rag_chat_scenarios.RAG_CHAT_SCENARIO_GROUPS),
         help=(
-            "RAG 챗봇 시나리오 그룹입니다. core, access 중 선택하며 "
-            "여러 번 지정할 수 있습니다. 생략하면 core를 실행합니다."
+            "RAG 챗봇 시나리오 그룹입니다. core, access, company 중 선택하며 "
+            "여러 번 지정할 수 있습니다. 생략하면 core/company를 실행합니다."
         ),
     )
     parser.add_argument(
@@ -285,6 +303,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="챗봇 답변 API smoke check 사용자 Role",
     )
     parser.add_argument(
+        "--answer-api-expected-intent",
+        choices=[intent.value for intent in ChatIntent],
+        help="챗봇 답변 API smoke check에서 기대하는 질문 intent",
+    )
+    parser.add_argument(
         "--answer-api-user-id",
         type=int,
         default=1,
@@ -343,6 +366,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Qdrant payload 점검에서 요구하는 최소 point 개수",
     )
     parser.add_argument(
+        "--qdrant-readonly-search-question",
+        default=check_qdrant_readonly_search.DEFAULT_QUESTION,
+        help="Qdrant read-only 검색 smoke 질문",
+    )
+    parser.add_argument(
+        "--qdrant-readonly-search-intent",
+        choices=[intent.value for intent in ChatIntent if intent != ChatIntent.UNKNOWN],
+        default=check_qdrant_readonly_search.DEFAULT_INTENT,
+        help="Qdrant read-only 검색 smoke intent",
+    )
+    parser.add_argument(
+        "--qdrant-readonly-search-role",
+        default=check_qdrant_readonly_search.DEFAULT_ROLE,
+        help="Qdrant read-only 검색 smoke 사용자 Role",
+    )
+    parser.add_argument(
+        "--qdrant-readonly-search-min-source-count",
+        type=int,
+        default=check_qdrant_readonly_search.DEFAULT_MIN_SOURCE_COUNT,
+        help="Qdrant read-only 검색 smoke 최소 문서 출처 개수",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print result as JSON",
@@ -365,14 +410,11 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.require_rdb_evidence = True
 
     if preset in {"qdrant", "rag", "full"}:
-        args.include_vector_smoke = True
+        args.include_qdrant_readonly_search = True
 
     if preset in {"rag", "full"}:
         args.require_vector_search = True
-        args.require_document_index = True
-        args.include_document_api_smoke = True
         args.include_rag_chat_scenarios = True
-        args.include_rag_end_to_end_smoke = True
         args.answer_api_min_document_source_count = max(
             args.answer_api_min_document_source_count,
             1,
@@ -476,6 +518,15 @@ async def check_chat_runtime(
             )
         )
 
+    if args.include_qdrant_readonly_search:
+        steps.append(
+            await run_step(
+                "qdrantReadOnlySearch",
+                lambda: run_qdrant_readonly_search(settings, args),
+                fail_when=has_failed_check_status,
+            )
+        )
+
     if args.include_vector_smoke:
         steps.append(
             await run_step(
@@ -518,12 +569,16 @@ async def check_chat_runtime(
         )
 
     check_status = "PASS" if all(step["status"] == "PASS" for step in steps) else "FAIL"
-    summary = build_runtime_summary(steps)
+    summary = build_runtime_summary(steps, settings)
     return {
         "checkStatus": check_status,
         "mode": "NETWORK" if args.network else "VALIDATE_ONLY",
         "networkChecked": bool(args.network),
         "requiredComponents": required_components,
+        "runtimeMode": build_chat_runtime_mode(settings).model_dump(
+            mode="json",
+            by_alias=True,
+        ),
         "summary": summary,
         "steps": steps,
     }
@@ -578,6 +633,7 @@ def should_check_qdrant(settings: Settings, args: argparse.Namespace) -> bool:
         or settings.embedding_enabled
         or args.require_vector_search
         or args.require_document_index
+        or args.include_qdrant_readonly_search
         or args.include_vector_smoke
     )
 
@@ -592,9 +648,23 @@ def has_failed_check_status(result: dict[str, Any]) -> bool:
     return result.get("checkStatus") == "FAIL"
 
 
-def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
+def resolve_expected_answer_llm_skipped_reason(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> str | None:
+    if args.answer_api_expected_llm_skipped_reason is not None:
+        return args.answer_api_expected_llm_skipped_reason
+    if not settings.llm_enabled and not args.require_llm_generation:
+        return LLM_DISABLED
+    return None
+
+
+def build_runtime_summary(
+    steps: list[dict[str, Any]],
+    settings: Settings | None = None,
+) -> dict[str, Any]:
     failed_steps = [step for step in steps if step["status"] != "PASS"]
-    failure_items = [build_failure_item(step) for step in failed_steps]
+    failure_items = [build_failure_item(step, settings) for step in failed_steps]
     next_actions = list(
         dict.fromkeys(item["action"] for item in failure_items if item["action"])
     )
@@ -607,9 +677,12 @@ def build_runtime_summary(steps: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build_failure_item(step: dict[str, Any]) -> dict[str, Any]:
+def build_failure_item(
+    step: dict[str, Any],
+    settings: Settings | None = None,
+) -> dict[str, Any]:
     code, message = extract_failure_reason(step)
-    action = extract_failure_action(step)
+    action = extract_failure_action(step, settings)
     return {
         "name": step["name"],
         "code": code,
@@ -618,7 +691,10 @@ def build_failure_item(step: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def extract_failure_action(step: dict[str, Any]) -> str:
+def extract_failure_action(
+    step: dict[str, Any],
+    settings: Settings | None = None,
+) -> str:
     result = step.get("result")
     if isinstance(result, dict):
         next_actions = result.get("nextActions")
@@ -639,6 +715,10 @@ def extract_failure_action(step: dict[str, Any]) -> str:
         vector_action = build_qdrant_vector_failure_action(error)
         if vector_action:
             return vector_action
+    if isinstance(error, dict) and step.get("name") == "qdrantReadOnlySearch":
+        readonly_action = build_qdrant_readonly_failure_action(error, settings)
+        if readonly_action:
+            return readonly_action
     if isinstance(error, dict) and step.get("name") == "documentApiSmoke":
         document_action = build_document_api_failure_action(error)
         if document_action:
@@ -696,6 +776,31 @@ def build_qdrant_vector_failure_action(error: dict[str, Any]) -> str | None:
             code=error_code,
             message=message,
         )
+    )
+    return actions[0] if actions else None
+
+
+def build_qdrant_readonly_failure_action(
+    error: dict[str, Any],
+    settings: Settings | None = None,
+) -> str | None:
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    try:
+        error_code = ChatErrorCode(code)
+    except ValueError:
+        return None
+
+    actions = check_qdrant_readonly_search.build_readonly_failure_actions(
+        ChatServiceError(
+            status_code=500,
+            code=error_code,
+            message=message,
+        ),
+        settings,
     )
     return actions[0] if actions else None
 
@@ -890,7 +995,7 @@ async def run_rag_chat_scenarios(
         settings,
     )
     path = f"{settings.api_v1_prefix}/chat/answer"
-    scenario_groups = args.rag_chat_scenario_group or ["core"]
+    scenario_groups = args.rag_chat_scenario_group or ["core", "company"]
     scenarios = check_rag_chat_scenarios.select_scenarios(
         args.rag_chat_scenario,
         scenario_groups,
@@ -961,6 +1066,38 @@ async def run_qdrant_payload_check(
         settings,
         limit=20,
         min_points=args.qdrant_min_points,
+    )
+
+
+async def run_qdrant_readonly_search(
+    settings: Settings,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    smoke_args = argparse.Namespace(
+        question=args.qdrant_readonly_search_question,
+        role=args.qdrant_readonly_search_role,
+        user_id=1,
+        company_name="S-MAP",
+        session_id=1,
+        message_id=1,
+        requested_at=chat_check_common.DEFAULT_REQUESTED_AT,
+    )
+    request = chat_check_common.build_chat_answer_request(smoke_args)
+    intent = ChatIntent(args.qdrant_readonly_search_intent)
+    min_source_count = args.qdrant_readonly_search_min_source_count
+    if not args.network:
+        return check_qdrant_readonly_search.build_validate_only_result(
+            settings,
+            request,
+            intent,
+            min_source_count,
+        )
+
+    return await check_qdrant_readonly_search.check_qdrant_readonly_search(
+        settings,
+        request,
+        intent,
+        min_source_count=min_source_count,
     )
 
 
@@ -1159,6 +1296,10 @@ async def run_answer_api_smoke(
     )
     require_rdb_evidence = bool(args.require_rdb_evidence)
     require_vector_search = bool(args.require_vector_search)
+    expected_llm_skipped_reason = resolve_expected_answer_llm_skipped_reason(
+        settings,
+        args,
+    )
 
     if not args.network:
         return {
@@ -1169,15 +1310,14 @@ async def run_answer_api_smoke(
             "path": path,
             "question": request.question,
             "role": request.user.role,
+            "expectedIntent": args.answer_api_expected_intent,
             "tokenConfigured": bool(token),
             "minEvidenceCount": args.answer_api_min_evidence_count,
             "requireRdbEvidence": require_rdb_evidence,
             "minDocumentSourceCount": args.answer_api_min_document_source_count,
             "requireVectorSearch": require_vector_search,
             "requireLlmGeneration": bool(args.require_llm_generation),
-            "expectedLlmGenerationSkippedReason": (
-                args.answer_api_expected_llm_skipped_reason
-            ),
+            "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
         }
 
     return await check_chat_answer.check_chat_answer(
@@ -1191,7 +1331,8 @@ async def run_answer_api_smoke(
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
         require_llm_generation=bool(args.require_llm_generation),
-        expected_llm_skipped_reason=args.answer_api_expected_llm_skipped_reason,
+        expected_llm_skipped_reason=expected_llm_skipped_reason,
+        expected_intent=args.answer_api_expected_intent,
     )
 
 
@@ -1265,6 +1406,23 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"total:{summary.get('totalStepCount', len(result['steps']))}"
         ),
     ]
+    runtime_mode = result.get("runtimeMode")
+    if isinstance(runtime_mode, dict):
+        lines.extend(
+            [
+                f"apiPrefix={runtime_mode['apiPrefix']}",
+                f"groundingMode={runtime_mode['groundingMode']}",
+                f"answerMode={runtime_mode['answerMode']}",
+                f"ragSearchMode={runtime_mode['ragSearchMode']}",
+                "enabledGroundingSources="
+                f"{','.join(runtime_mode['enabledGroundingSources'])}",
+            ]
+        )
+        if runtime_mode.get("expectedLlmSkippedReason"):
+            lines.append(
+                "expectedLlmSkippedReason="
+                f"{runtime_mode['expectedLlmSkippedReason']}"
+            )
     for step in result["steps"]:
         line = f"{step['name']}: status={step['status']}"
         if "error" in step:

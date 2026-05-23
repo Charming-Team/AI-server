@@ -11,12 +11,15 @@ from app.features.chat.access_control import BUSINESS_ROLES, QDRANT_DOCUMENT_TYP
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import InternalDocumentPayload
 from app.features.chat.exceptions import ChatServiceError
+from app.features.chat.navigation_target_policy import (
+    has_invalid_navigation_url,
+    has_navigation_target,
+)
 from app.features.chat.qdrant_client import (
     QdrantDocumentSearchClient,
     validate_qdrant_settings,
 )
 from app.features.chat.schemas import ChatErrorCode, ChatIntent
-from app.features.chat.source_url_policy import normalize_internal_url
 
 QDRANT_PAYLOAD_SETTINGS_FAILURE_ACTIONS = (
     "QDRANT_URL과 QDRANT_COLLECTION 설정을 확인하세요.",
@@ -32,7 +35,8 @@ QDRANT_PAYLOAD_MIN_POINTS_FAILURE_ACTIONS = (
 QDRANT_PAYLOAD_CONTRACT_FAILURE_ACTIONS = (
     "Qdrant payload의 documentId, documentType, title, chunkText를 확인하세요.",
     "allowedRoles에는 OPERATOR, EXECUTIVE, MANUFACTURING_MANAGER 중 허용 역할만 넣으세요.",
-    "intentTags에는 챗봇이 지원하는 intent 값을 넣고, url은 내부 relative path로 저장하세요.",
+    "intentTags에는 챗봇이 지원하는 intent 값을 넣으세요.",
+    "화면 이동을 위해 내부 relative url 또는 referenceType/referenceId를 저장하세요.",
     "OPERATOR 허용 문서에는 계약 금액, 패널티, 비용 등 금액성 정보를 넣지 마세요.",
 )
 QDRANT_PAYLOAD_RESPONSE_FAILURE_ACTIONS = (
@@ -198,13 +202,24 @@ def validate_point(point: dict, access_policy: DocumentAccessPolicy) -> list[str
     elif set(document.intent_tags) - _allowed_intent_tags():
         errors.append("intentTags contains unsupported intent")
 
-    if document.url and normalize_internal_url(document.url) is None:
+    if has_invalid_navigation_url(document.url):
         errors.append("url must be internal relative path")
 
-    if not access_policy.allows_point(point, "OPERATOR"):
+    if not has_navigation_target(
+        document.url,
+        document.reference_type,
+        document.reference_id,
+    ):
+        errors.append("url or reference metadata is required")
+
+    if _allows_operator(document) and not access_policy.allows_point(point, "OPERATOR"):
         errors.append("OPERATOR document contains restricted business terms")
 
     return errors
+
+
+def _allows_operator(document: InternalDocumentPayload) -> bool:
+    return any(role.strip().upper() == "OPERATOR" for role in document.allowed_roles)
 
 
 def build_payload_failure_actions(exc: ChatServiceError) -> list[str]:

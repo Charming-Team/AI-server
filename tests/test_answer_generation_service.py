@@ -84,6 +84,8 @@ def test_answer_generation_returns_insufficient_evidence_without_grounding() -> 
 
     assert result.was_generated is False
     assert "근거" in result.answer
+    assert "추측성 답변은 제공하지 않습니다." in result.answer
+    assert "아직 연결되지 않았습니다" not in result.answer
     assert result.skipped_reason == "RDB Evidence와 문서 검색 근거가 없습니다."
 
 
@@ -117,7 +119,7 @@ def test_answer_generation_returns_grounded_fallback_when_llm_disabled() -> None
     )
 
     assert result.was_generated is False
-    assert "확인된 내부 근거 기준으로 요약합니다." in result.answer
+    assert "확인된 문서 검색 근거 기준으로 요약합니다." in result.answer
     assert "문서 검색 근거:" in result.answer
     assert "2026년 5월 생산 리스크 보고서" in result.answer
     assert "자재 부족과 LINE-A01 병목이 주요 리스크입니다." in result.answer
@@ -320,7 +322,7 @@ def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> No
     )
 
     assert result.was_generated is False
-    assert "확인된 내부 근거 기준으로 요약합니다." in result.answer
+    assert "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다." in result.answer
     assert "RDB 근거:" in result.answer
     assert "문서 검색 근거:" in result.answer
     assert "월간 생산 리스크" in result.answer
