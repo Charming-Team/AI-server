@@ -468,6 +468,49 @@ def test_chat_answer_classifies_report_lookup_intent() -> None:
     assert response.json()["intent"] == "REPORT_LOOKUP"
 
 
+def test_chat_answer_classifies_company_info_as_report_lookup_intent() -> None:
+    response = _post_chat_answer(
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "MANUFACTURING_MANAGER",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "S-Map 매출 구조 알려줘",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "REPORT_LOOKUP"
+
+
+def test_chat_answer_blocks_operator_financial_company_info_after_classification() -> None:
+    response = _post_chat_answer(
+        json={
+            "sessionId": 10,
+            "messageId": 24,
+            "user": {
+                "userId": 1,
+                "role": "OPERATOR",
+                "companyName": "S-MAP",
+                "status": "ACTIVE",
+            },
+            "question": "S-Map 매출 구조 알려줘",
+            "requestedAt": "2026-05-12T10:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["intent"] == "REPORT_LOOKUP"
+    assert body["securityResult"]["status"] == "BLOCKED_UNAUTHORIZED"
+    assert body["securityResult"]["code"] == "CHAT_SECURITY_004"
+
+
 def test_chat_answer_returns_grounded_answer_with_sources_and_urls() -> None:
     app.dependency_overrides[get_chat_service] = _build_grounded_chat_service
     try:
