@@ -48,12 +48,12 @@ CORE_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
     RagChatScenario(
         scenario_id="material-shortage-with-company-guide",
         intent=ChatIntent.MATERIAL_SHORTAGE,
-        question="RM-AL-001 자재 부족 현황과 대응 기준을 같이 알려줘",
+        question="MAT-FOAM-ADD 자재 부족 현황과 대응 기준을 같이 알려줘",
     ),
     RagChatScenario(
         scenario_id="line-bottleneck-with-company-guide",
         intent=ChatIntent.LINE_BOTTLENECK,
-        question="LINE-A01 병목 현황과 대응 기준을 같이 알려줘",
+        question="LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘",
     ),
     RagChatScenario(
         scenario_id="delivery-risk-with-report",
