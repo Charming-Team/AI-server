@@ -15,6 +15,29 @@ from app.features.chat.schemas import (
     EvidenceResult,
 )
 
+_COMPANY_INFO_KEYWORDS = (
+    "s-map",
+    "smap",
+    "회사",
+    "기업",
+    "사업",
+    "매출",
+    "조직",
+    "공장",
+    "생산라인",
+    "제품",
+    "자재",
+    "용어",
+    "워크플로우",
+)
+_REPORT_LOOKUP_KEYWORDS = (
+    "보고서",
+    "리포트",
+    "report",
+    "월간",
+    "수시",
+)
+
 
 class RdbEvidenceProvider(Protocol):
     intent: ChatIntent
@@ -59,6 +82,9 @@ class RdbEvidenceService:
         if provider is None:
             return self._empty_result(request, intent)
 
+        if self._should_skip_report_metadata_evidence(request, intent):
+            return self._empty_result(request, intent)
+
         filters = self._build_filters(request)
         items = await provider.get_evidence(request, filters)
         return EvidenceResult(
@@ -81,6 +107,25 @@ class RdbEvidenceService:
                 )
             }
         )
+
+    def _should_skip_report_metadata_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> bool:
+        if intent != ChatIntent.REPORT_LOOKUP:
+            return False
+
+        normalized_question = request.question.strip().lower().replace(" ", "")
+        asks_report = any(
+            keyword in normalized_question
+            for keyword in _REPORT_LOOKUP_KEYWORDS
+        )
+        asks_company_info = any(
+            keyword in normalized_question
+            for keyword in _COMPANY_INFO_KEYWORDS
+        )
+        return asks_company_info and not asks_report
 
     def _empty_result(
         self,

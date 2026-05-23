@@ -10,6 +10,8 @@ from app.features.chat.query_filter_extractor import QueryFilterExtractor
     [
         ("ORD-202605-001 납기 위험 알려줘", "ORDER", "ORD-202605-001"),
         ("line-a01 현재 병목 원인을 알려줘", "LINE", "LINE-A01"),
+        ("LINE-PE-01 현재 병목 원인을 알려줘", "LINE", "LINE-PE-01"),
+        ("line-abs-01 전환 기준 알려줘", "LINE", "LINE-ABS-01"),
         ("PROD-A001 생산 가능 라인을 알려줘", "PRODUCT", "PROD-A001"),
         ("mat-001 재고 현황을 알려줘", "MATERIAL", "MAT-001"),
         ("RM-AL-001 입고 예정일을 알려줘", "MATERIAL", "RM-AL-001"),

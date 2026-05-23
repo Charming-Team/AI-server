@@ -33,7 +33,12 @@ class RagChatScenario:
     require_vector_search: bool = True
     min_evidence_count: int = 2
     min_rdb_evidence_count: int = 1
+    max_rdb_evidence_count: int | None = None
     min_document_source_count: int = 1
+    required_answer_fragments: tuple[str, ...] = ()
+    required_source_title_fragments: tuple[str, ...] = ()
+    forbidden_source_origins: tuple[str, ...] = ()
+    require_rdb_urls_read_only: bool = True
 
     @property
     def expected_security_statuses(self) -> tuple[str, ...]:
@@ -48,12 +53,16 @@ CORE_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
     RagChatScenario(
         scenario_id="material-shortage-with-company-guide",
         intent=ChatIntent.MATERIAL_SHORTAGE,
-        question="RM-AL-001 자재 부족 현황과 대응 기준을 같이 알려줘",
+        question="MAT-FOAM-ADD 자재 부족 현황과 대응 기준을 같이 알려줘",
+        required_answer_fragments=("핵심 답변", "확인 필요"),
+        required_source_title_fragments=("MAT-FOAM-ADD",),
     ),
     RagChatScenario(
         scenario_id="line-bottleneck-with-company-guide",
         intent=ChatIntent.LINE_BOTTLENECK,
-        question="LINE-A01 병목 현황과 대응 기준을 같이 알려줘",
+        question="LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘",
+        required_answer_fragments=("핵심 답변", "확인 필요"),
+        required_source_title_fragments=("LINE-PE-01",),
     ),
     RagChatScenario(
         scenario_id="delivery-risk-with-report",
@@ -72,6 +81,7 @@ ACCESS_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
         min_evidence_count=1,
         min_rdb_evidence_count=0,
         min_document_source_count=1,
+        require_rdb_urls_read_only=False,
     ),
     RagChatScenario(
         scenario_id="operator-financial-rag-blocked",
@@ -84,6 +94,7 @@ ACCESS_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
         min_evidence_count=0,
         min_rdb_evidence_count=0,
         min_document_source_count=0,
+        require_rdb_urls_read_only=False,
     ),
 )
 
@@ -96,7 +107,11 @@ COMPANY_INFO_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
         require_rdb_evidence=False,
         min_evidence_count=1,
         min_rdb_evidence_count=0,
+        max_rdb_evidence_count=0,
         min_document_source_count=1,
+        required_source_title_fragments=("S-Map",),
+        forbidden_source_origins=("RDB",),
+        require_rdb_urls_read_only=False,
     ),
     RagChatScenario(
         scenario_id="manager-revenue-company-info-allowed",
@@ -106,7 +121,11 @@ COMPANY_INFO_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
         require_rdb_evidence=False,
         min_evidence_count=1,
         min_rdb_evidence_count=0,
+        max_rdb_evidence_count=0,
         min_document_source_count=1,
+        required_source_title_fragments=("매출",),
+        forbidden_source_origins=("RDB",),
+        require_rdb_urls_read_only=False,
     ),
     RagChatScenario(
         scenario_id="operator-revenue-company-info-blocked",
@@ -119,6 +138,7 @@ COMPANY_INFO_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
         min_evidence_count=0,
         min_rdb_evidence_count=0,
         min_document_source_count=0,
+        require_rdb_urls_read_only=False,
     ),
 )
 
@@ -273,6 +293,7 @@ async def check_rag_chat_scenarios(
                 "requireRdbEvidence": scenario.require_rdb_evidence,
                 "requireVectorSearch": scenario.require_vector_search,
                 "minRdbEvidenceCount": _resolve_min_rdb_evidence_count(args, scenario),
+                "maxRdbEvidenceCount": scenario.max_rdb_evidence_count,
                 "minDocumentSourceCount": _resolve_min_document_source_count(
                     args,
                     scenario,
@@ -349,6 +370,66 @@ def validate_scenario_result(
             ),
         )
 
+    if (
+        scenario.max_rdb_evidence_count is not None
+        and result["rdbEvidenceCount"] > scenario.max_rdb_evidence_count
+    ):
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message=(
+                "RAG 챗봇 응답 RDB Evidence 개수가 허용 기준보다 많습니다. "
+                f"scenario={scenario.scenario_id}, "
+                f"expected<={scenario.max_rdb_evidence_count}, "
+                f"actual={result['rdbEvidenceCount']}"
+            ),
+        )
+
+    for fragment in scenario.required_answer_fragments:
+        if fragment not in result["answer"]:
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message=(
+                    "RAG 챗봇 응답 답변에 필요한 문구가 없습니다. "
+                    f"scenario={scenario.scenario_id}, fragment={fragment}"
+                ),
+            )
+
+    for fragment in scenario.required_source_title_fragments:
+        if not _has_source_title_fragment(result, fragment):
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message=(
+                    "RAG 챗봇 응답 출처 제목에 필요한 문구가 없습니다. "
+                    f"scenario={scenario.scenario_id}, fragment={fragment}"
+                ),
+            )
+
+    for forbidden_origin in scenario.forbidden_source_origins:
+        if _has_source_origin(result, forbidden_origin):
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message=(
+                    "RAG 챗봇 응답에 허용되지 않은 출처 유형이 포함되었습니다. "
+                    f"scenario={scenario.scenario_id}, origin={forbidden_origin}"
+                ),
+            )
+
+    if scenario.require_rdb_urls_read_only:
+        invalid_urls = _find_non_read_only_rdb_urls(result)
+        if invalid_urls:
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message=(
+                    "RAG 챗봇 응답 RDB 화면 이동 URL이 read-only 형식이 아닙니다. "
+                    f"scenario={scenario.scenario_id}, urls={', '.join(invalid_urls)}"
+                ),
+            )
+
 
 def format_text_result(result: dict[str, Any]) -> str:
     lines = [
@@ -366,6 +447,7 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"requireRdbEvidence={scenario['requireRdbEvidence']} "
             f"requireVectorSearch={scenario['requireVectorSearch']} "
             f"rdbEvidenceCount={scenario['rdbEvidenceCount']} "
+            f"maxRdbEvidenceCount={scenario.get('maxRdbEvidenceCount')} "
             f"documentSourceCount={scenario['documentSourceCount']} "
             f"usedVectorSearch={scenario['usedVectorSearch']} "
             f"sourceCount={scenario['sourceCount']} "
@@ -418,6 +500,32 @@ def _resolve_min_document_source_count(
     if args.min_document_source_count is not None:
         return args.min_document_source_count
     return scenario.min_document_source_count
+
+
+def _has_source_title_fragment(result: dict[str, Any], fragment: str) -> bool:
+    normalized_fragment = fragment.casefold()
+    return any(
+        normalized_fragment in source["title"].casefold()
+        for source in result["sourceDetails"]
+    )
+
+
+def _has_source_origin(result: dict[str, Any], source_origin: str) -> bool:
+    normalized_origin = source_origin.casefold()
+    return any(
+        (source["sourceOrigin"] or "").casefold() == normalized_origin
+        for source in result["sourceDetails"]
+    )
+
+
+def _find_non_read_only_rdb_urls(result: dict[str, Any]) -> list[str]:
+    return [
+        source["url"]
+        for source in result["sourceDetails"]
+        if source["sourceOrigin"] == "RDB"
+        and source["url"]
+        and "mode=read" not in source["url"]
+    ]
 
 
 def _single_expected_security_status(scenario: RagChatScenario) -> str | None:

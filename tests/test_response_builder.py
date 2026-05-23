@@ -92,6 +92,36 @@ def test_response_builder_builds_unique_urls_from_sources() -> None:
     assert urls[0].type == "REPORT"
 
 
+def test_response_builder_deduplicates_sources_by_safe_url() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = _build_evidence_result(
+        [
+            EvidenceItem(
+                type="MATERIAL",
+                title="MAT-FOAM-ADD 발포 첨가제 SHORTAGE",
+                summary="생산계획 12005에서 부족 수량이 확인되었습니다.",
+                url="/materials/inventory/711?mode=read",
+                source="chat_material_shortage_evidence_view",
+                referenceId=12005,
+            ),
+            EvidenceItem(
+                type="MATERIAL",
+                title="MAT-FOAM-ADD 발포 첨가제 LOW",
+                summary="다른 생산계획에서도 같은 자재의 부족 위험이 확인되었습니다.",
+                url="/materials/inventory/711?mode=read",
+                source="chat_material_shortage_evidence_view",
+                referenceId=12006,
+            ),
+        ]
+    )
+
+    sources = builder.build_sources(evidence_result, DocumentSearchResult(sources=[]))
+
+    assert len(sources) == 1
+    assert sources[0].title == "MAT-FOAM-ADD 발포 첨가제 SHORTAGE"
+    assert sources[0].url == "/materials/inventory/711?mode=read"
+
+
 def test_response_builder_builds_latest_basis_time_from_sources() -> None:
     builder = ChatResponseBuilder()
     sources = [

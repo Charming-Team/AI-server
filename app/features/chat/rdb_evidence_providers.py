@@ -165,15 +165,15 @@ class CatalogRdbEvidenceProvider:
         if source_type == "MATERIAL" and self._has_value(row.get("material_id")):
             return f"/materials/inventory/{row['material_id']}?mode=read"
         if source_type == "PREDICTION" and self._has_value(row.get("prediction_id")):
-            return f"/predictions/{row['prediction_id']}"
+            return f"/predictions/{row['prediction_id']}?mode=read"
         if source_type == "PLAN" and self._has_value(row.get("plan_id")):
-            return f"/production-plans/{row['plan_id']}"
+            return f"/production-plans/{row['plan_id']}?mode=read"
         if source_type == "LINE" and self._has_value(row.get("line_id")):
-            return f"/production-lines/{row['line_id']}"
+            return f"/production-lines/{row['line_id']}?mode=read"
         if source_type == "ORDER" and self._has_value(row.get("order_id")):
-            return f"/orders/{row['order_id']}"
+            return f"/orders/{row['order_id']}?mode=read"
         if source_type == "REPORT" and self._has_value(row.get("report_id")):
-            return f"/reports/{row['report_id']}"
+            return f"/reports/{row['report_id']}?mode=read"
         return None
 
     def _build_data(self, row: Mapping[str, Any]) -> dict[str, Any]:
