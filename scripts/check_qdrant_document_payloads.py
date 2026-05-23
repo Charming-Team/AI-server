@@ -212,10 +212,14 @@ def validate_point(point: dict, access_policy: DocumentAccessPolicy) -> list[str
     ):
         errors.append("url or reference metadata is required")
 
-    if not access_policy.allows_point(point, "OPERATOR"):
+    if _allows_operator(document) and not access_policy.allows_point(point, "OPERATOR"):
         errors.append("OPERATOR document contains restricted business terms")
 
     return errors
+
+
+def _allows_operator(document: InternalDocumentPayload) -> bool:
+    return any(role.strip().upper() == "OPERATOR" for role in document.allowed_roles)
 
 
 def build_payload_failure_actions(exc: ChatServiceError) -> list[str]:

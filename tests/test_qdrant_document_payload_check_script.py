@@ -163,6 +163,17 @@ def test_validate_points_accepts_reference_metadata_without_url() -> None:
     assert invalid_points == []
 
 
+def test_validate_points_allows_restricted_terms_when_operator_is_not_allowed() -> None:
+    point = _valid_point(
+        allowedRoles=["EXECUTIVE", "MANUFACTURING_MANAGER"],
+        chunkText="매출 구조와 비용 정보가 포함된 경영 보고서입니다.",
+    )
+
+    invalid_points = check_qdrant_document_payloads.validate_points([point])
+
+    assert invalid_points == []
+
+
 def test_check_qdrant_document_payloads_fails_below_minimum_points() -> None:
     async def run() -> None:
         await check_qdrant_document_payloads.check_qdrant_document_payloads(
