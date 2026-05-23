@@ -115,6 +115,30 @@ def test_catalog_rdb_evidence_provider_converts_material_view_rows_to_evidence()
     assert view_client.calls == [(definition, filters, 5)]
 
 
+def test_catalog_rdb_evidence_provider_builds_read_only_url_for_non_material_source() -> None:
+    definition = get_rdb_evidence_view_definition(ChatIntent.DELIVERY_RISK)
+    assert definition is not None
+    row = {
+        "prediction_id": 41001,
+        "order_no": "SM-2026-05-FR-004",
+        "risk_level": "CRITICAL",
+        "main_cause_type": "MATERIAL_SHORTAGE",
+        "delay_probability": Decimal("0.7820"),
+        "predicted_at": datetime.fromisoformat("2026-05-23T10:05:00+09:00"),
+    }
+    view_client = FakeRdbEvidenceViewClient([row])
+    provider = CatalogRdbEvidenceProvider(definition, view_client)
+
+    items = anyio.run(
+        provider.get_evidence,
+        _build_request(role="EXECUTIVE"),
+        EvidenceLookupFilters(limit=5),
+    )
+
+    assert len(items) == 1
+    assert items[0].url == "/predictions/41001?mode=read"
+
+
 def test_catalog_rdb_evidence_provider_blocks_role_outside_view_definition() -> None:
     definition = get_rdb_evidence_view_definition(ChatIntent.URGENT_ORDER_IMPACT)
     assert definition is not None

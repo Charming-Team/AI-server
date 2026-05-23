@@ -26,7 +26,10 @@ class QueryFilterExtractor:
         ),
         TargetPattern(
             target_type="LINE",
-            pattern=re.compile(r"(?<![A-Z0-9])LINE-[A-Z]\d{2}(?![A-Z0-9])", re.IGNORECASE),
+            pattern=re.compile(
+                r"(?<![A-Z0-9])LINE-[A-Z0-9]+(?:-[A-Z0-9]+)*(?![A-Z0-9-])",
+                re.IGNORECASE,
+            ),
         ),
         TargetPattern(
             target_type="PRODUCT",

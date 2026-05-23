@@ -29,9 +29,8 @@ def _build_request(question: str = "RM-AL-001 자재 부족 현황 알려줘") -
 
 
 class StubRdbEvidenceProvider:
-    intent = ChatIntent.MATERIAL_SHORTAGE
-
-    def __init__(self) -> None:
+    def __init__(self, intent: ChatIntent = ChatIntent.MATERIAL_SHORTAGE) -> None:
+        self.intent = intent
         self.request: ChatAnswerRequest | None = None
         self.filters: EvidenceLookupFilters | None = None
 
@@ -147,3 +146,32 @@ def test_rdb_evidence_service_passes_date_filters_from_question() -> None:
     assert provider.filters.to_date == "2026-05-17"
     assert provider.filters.target_type == "MATERIAL"
     assert provider.filters.target_code == "RM-AL-001"
+
+
+def test_rdb_evidence_service_skips_report_metadata_for_company_info_question() -> None:
+    provider = StubRdbEvidenceProvider(intent=ChatIntent.REPORT_LOOKUP)
+    service = RdbEvidenceService(
+        Settings(rdb_evidence_enabled=True),
+        providers=[provider],
+    )
+    request = _build_request("S-Map 회사 개요 알려줘")
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.REPORT_LOOKUP)
+
+    assert result.intent == ChatIntent.REPORT_LOOKUP
+    assert result.items == []
+    assert provider.request is None
+
+
+def test_rdb_evidence_service_uses_report_metadata_for_report_question() -> None:
+    provider = StubRdbEvidenceProvider(intent=ChatIntent.REPORT_LOOKUP)
+    service = RdbEvidenceService(
+        Settings(rdb_evidence_enabled=True),
+        providers=[provider],
+    )
+    request = _build_request("최근 보고서 목록 알려줘")
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.REPORT_LOOKUP)
+
+    assert len(result.items) == 1
+    assert provider.request == request
