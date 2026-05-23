@@ -254,6 +254,7 @@ async def check_rdb_chat_scenarios(
             require_rdb_evidence=scenario.require_rdb_evidence,
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
+            expected_intent=scenario.intent.value,
             http_client=http_client,
         )
         if result["intent"] != scenario.intent.value:

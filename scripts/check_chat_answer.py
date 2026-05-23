@@ -12,6 +12,7 @@ from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatAnswerResponse,
     ChatErrorCode,
+    ChatIntent,
     SecurityStatus,
 )
 from scripts import chat_check_common
@@ -81,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[code.value for code in ChatErrorCode] + ["NONE"],
         help="기대하는 응답 보안 에러 코드. 코드가 없어야 하면 NONE을 사용합니다.",
     )
+    parser.add_argument(
+        "--expected-intent",
+        choices=[intent.value for intent in ChatIntent],
+        help="기대하는 질문 intent. 예: MATERIAL_SHORTAGE, LINE_BOTTLENECK",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -130,6 +136,7 @@ async def check_chat_answer(
     expected_llm_skipped_reason: str | None = None,
     expected_security_status: str | None = None,
     expected_security_code: str | None = None,
+    expected_intent: str | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     url = build_answer_url(base_url, path)
@@ -141,6 +148,17 @@ async def check_chat_answer(
         http_client=http_client,
     )
     answer = ChatAnswerResponse.model_validate(response.json())
+    actual_intent = answer.intent.value
+    if expected_intent is not None and actual_intent != expected_intent:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_EVIDENCE_001,
+            message=(
+                "FastAPI 챗봇 응답 intent가 기대값과 다릅니다. "
+                f"expected={expected_intent}, actual={actual_intent}"
+            ),
+        )
+
     security_status = answer.security_result.status.value
     security_code = (
         answer.security_result.code.value if answer.security_result.code else None
@@ -235,7 +253,8 @@ async def check_chat_answer(
     return {
         "checkStatus": "PASS",
         "url": url,
-        "intent": answer.intent.value,
+        "intent": actual_intent,
+        "expectedIntent": expected_intent,
         "securityStatus": security_status,
         "expectedSecurityStatus": expected_security_status,
         "securityCode": security_code,
@@ -313,6 +332,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"status={result['checkStatus']}",
         f"url={result['url']}",
         f"intent={result['intent']}",
+        f"expectedIntent={result['expectedIntent']}",
         f"securityStatus={result['securityStatus']}",
         f"expectedSecurityStatus={result['expectedSecurityStatus']}",
         f"securityCode={result['securityCode']}",
@@ -373,6 +393,7 @@ def main(
                 expected_llm_skipped_reason=args.expected_llm_skipped_reason,
                 expected_security_status=args.expected_security_status,
                 expected_security_code=args.expected_security_code,
+                expected_intent=args.expected_intent,
             )
         )
     except ChatServiceError as exc:

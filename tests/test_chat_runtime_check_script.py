@@ -37,6 +37,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "answer_api_base_url": "http://fastapi.local",
         "answer_api_question": "자재 부족 현황 알려줘",
         "answer_api_role": "MANUFACTURING_MANAGER",
+        "answer_api_expected_intent": None,
         "answer_api_user_id": 1,
         "answer_api_timeout_seconds": 10.0,
         "answer_api_min_evidence_count": 0,
@@ -1334,6 +1335,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "path": "/api/v1/chat/answer",
         "question": "자재 부족 현황 알려줘",
         "role": "MANUFACTURING_MANAGER",
+        "expectedIntent": None,
         "tokenConfigured": True,
         "minEvidenceCount": 1,
         "requireRdbEvidence": False,
@@ -1489,14 +1491,17 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
         include_answer_api_smoke=True,
         require_rdb_evidence=True,
         answer_api_min_evidence_count=2,
+        answer_api_expected_intent="MATERIAL_SHORTAGE",
     )
     calls: list[str] = []
+    captured: dict[str, Any] = {}
 
     async def fake_rdb_check(settings_arg, args_arg):
         return {"checkStatus": "PASS", "viewCount": 7}
 
     async def fake_answer_check(**kwargs):
         calls.append(kwargs["request"].question)
+        captured["expected_intent"] = kwargs["expected_intent"]
         return {
             "checkStatus": "PASS",
             "url": f"{kwargs['base_url']}/{kwargs['path'].lstrip('/')}",
@@ -1524,6 +1529,7 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
     assert result["mode"] == "NETWORK"
     assert result["steps"][-1]["name"] == "answerApiSmoke"
     assert calls == ["자재 부족 현황 알려줘"]
+    assert captured == {"expected_intent": "MATERIAL_SHORTAGE"}
     assert result["steps"][-1]["result"]["evidenceCount"] == 2
     assert result["steps"][-1]["result"]["usedRdbEvidence"] is True
 

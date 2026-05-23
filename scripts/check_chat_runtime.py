@@ -303,6 +303,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="챗봇 답변 API smoke check 사용자 Role",
     )
     parser.add_argument(
+        "--answer-api-expected-intent",
+        choices=[intent.value for intent in ChatIntent],
+        help="챗봇 답변 API smoke check에서 기대하는 질문 intent",
+    )
+    parser.add_argument(
         "--answer-api-user-id",
         type=int,
         default=1,
@@ -1305,6 +1310,7 @@ async def run_answer_api_smoke(
             "path": path,
             "question": request.question,
             "role": request.user.role,
+            "expectedIntent": args.answer_api_expected_intent,
             "tokenConfigured": bool(token),
             "minEvidenceCount": args.answer_api_min_evidence_count,
             "requireRdbEvidence": require_rdb_evidence,
@@ -1326,6 +1332,7 @@ async def run_answer_api_smoke(
         require_vector_search=require_vector_search,
         require_llm_generation=bool(args.require_llm_generation),
         expected_llm_skipped_reason=expected_llm_skipped_reason,
+        expected_intent=args.answer_api_expected_intent,
     )
 
 

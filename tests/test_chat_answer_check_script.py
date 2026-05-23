@@ -33,6 +33,7 @@ def _build_args(**overrides):
         "expected_llm_skipped_reason": None,
         "expected_security_status": None,
         "expected_security_code": None,
+        "expected_intent": None,
         "json": False,
     }
     values.update(overrides)
@@ -49,6 +50,7 @@ def _answer_response(
     llm_skipped_reason: str | None = None,
     security_status: str = "PASSED",
     security_code: str | None = None,
+    intent: str = "MATERIAL_SHORTAGE",
 ) -> dict:
     resolved_rdb_evidence_count = (
         evidence_count if rdb_evidence_count is None else rdb_evidence_count
@@ -105,7 +107,7 @@ def _answer_response(
     return {
         "sessionId": 10,
         "messageId": 24,
-        "intent": "MATERIAL_SHORTAGE",
+        "intent": intent,
         "answer": "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
         "basisTime": "2026-05-12T10:35:00+09:00",
         "urls": urls,
@@ -206,6 +208,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "checkStatus": "PASS",
         "url": "http://fastapi.local/api/v1/chat/answer",
         "intent": ChatIntent.MATERIAL_SHORTAGE.value,
+        "expectedIntent": None,
         "securityStatus": "PASSED",
         "expectedSecurityStatus": None,
         "securityCode": None,
@@ -349,6 +352,57 @@ def test_check_chat_answer_script_validates_empty_security_code() -> None:
     assert result["securityStatus"] == "PASSED"
     assert result["securityCode"] is None
     assert result["expectedSecurityCode"] == "NONE"
+
+
+def test_check_chat_answer_script_validates_expected_intent() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_answer_response(), request=request)
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_intent="MATERIAL_SHORTAGE",
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["intent"] == "MATERIAL_SHORTAGE"
+    assert result["expectedIntent"] == "MATERIAL_SHORTAGE"
+
+
+def test_check_chat_answer_script_fails_when_intent_is_unexpected() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(intent="UNKNOWN"),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                expected_intent="REPORT_LOOKUP",
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "expected=REPORT_LOOKUP, actual=UNKNOWN" in exc_info.value.message
 
 
 def test_check_chat_answer_script_fails_when_security_status_is_unexpected() -> None:
@@ -673,6 +727,7 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "checkStatus": "PASS",
             "url": "http://fastapi.local/api/v1/chat/answer",
             "intent": "MATERIAL_SHORTAGE",
+            "expectedIntent": None,
             "securityStatus": "PASSED",
             "expectedSecurityStatus": None,
             "securityCode": None,
@@ -744,6 +799,14 @@ def test_check_chat_answer_script_main_returns_one_without_token() -> None:
                 message="FastAPI 챗봇 답변 API 호출에 실패했습니다.",
             ),
             "FastAPI base URL",
+        ),
+        (
+            ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message="FastAPI 챗봇 응답 intent가 기대값과 다릅니다.",
+            ),
+            "expected intent",
         ),
         (
             ChatServiceError(

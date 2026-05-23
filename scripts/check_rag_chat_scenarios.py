@@ -256,6 +256,7 @@ async def check_rag_chat_scenarios(
             require_vector_search=scenario.require_vector_search,
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
+            expected_intent=scenario.intent.value,
             http_client=http_client,
         )
         validate_scenario_result(args, scenario, result)
