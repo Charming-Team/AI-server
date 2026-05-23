@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from app.core.config import Settings, get_settings
+from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import ChatErrorCode
 from app.schemas.health import HealthResponse, ReadinessComponent, ReadinessResponse
 
@@ -37,6 +38,7 @@ async def readiness_check(
         status="ready" if is_ready else "not_ready",
         app_name=settings.app_name,
         environment=settings.environment,
+        runtime_mode=build_chat_runtime_mode(settings),
         components=components,
     )
 
