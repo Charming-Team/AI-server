@@ -7,7 +7,7 @@ import pytest
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
-from app.features.chat.llm_client import LlmClient
+from app.features.chat.llm_client import LlmClient, resolve_llm_base_url
 from app.features.chat.schemas import ChatErrorCode
 
 
@@ -52,6 +52,22 @@ def test_llm_client_builds_url_and_optional_auth_header() -> None:
     assert client._headers == {
         "Content-Type": "application/json",
         "Authorization": "Bearer local-token",
+    }
+
+
+def test_llm_client_resolves_openai_base_url_and_requires_api_key() -> None:
+    settings = Settings(
+        llm_provider="openai",
+        llm_model="gpt-test",
+        llm_api_key="openai-secret-token",
+    )
+    client = LlmClient(settings)
+
+    assert resolve_llm_base_url(settings) == "https://api.openai.com/v1"
+    assert client._chat_completions_url == "https://api.openai.com/v1/chat/completions"
+    assert client._headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer openai-secret-token",
     }
 
 
@@ -102,6 +118,14 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
         (
             Settings(llm_base_url=" ", llm_model=" "),
             "LLM 필수 설정이 누락되었습니다: llm_base_url, llm_model",
+        ),
+        (
+            Settings(llm_provider="openai", llm_model="gpt-test", llm_api_key=None),
+            "LLM 필수 설정이 누락되었습니다: llm_api_key",
+        ),
+        (
+            Settings(llm_provider="unsupported", llm_model="gpt-test"),
+            "지원하지 않는 LLM provider입니다: unsupported",
         ),
     ],
 )

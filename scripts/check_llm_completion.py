@@ -10,7 +10,12 @@ from app.core.config import Settings
 from app.features.chat.answer_output_policy import AnswerOutputPolicy
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
-from app.features.chat.llm_client import LlmClient, validate_llm_settings
+from app.features.chat.llm_client import (
+    LlmClient,
+    normalize_llm_provider,
+    resolve_llm_base_url,
+    validate_llm_settings,
+)
 from app.features.chat.schemas import ChatErrorCode
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -22,7 +27,7 @@ DEFAULT_USER_PROMPT = "LLM 연결 점검입니다. 짧게 정상 응답을 반�
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="OpenAI-compatible LLM chat completions 연결을 점검합니다."
+        description="OpenAI 또는 OpenAI-compatible LLM chat completions 연결을 점검합니다."
     )
     parser.add_argument(
         "--env-file",
@@ -67,7 +72,8 @@ def build_validate_only_result(settings: Settings) -> dict[str, Any]:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "llmEnabled": settings.llm_enabled,
-        "baseUrlConfigured": bool(settings.llm_base_url.strip()),
+        "provider": normalize_llm_provider(settings.llm_provider),
+        "baseUrlConfigured": bool(resolve_llm_base_url(settings)),
         "modelConfigured": bool(settings.llm_model.strip()),
         "apiKeyConfigured": bool(settings.llm_api_key),
     }
@@ -115,6 +121,7 @@ async def check_llm_completion(
         "mode": "NETWORK",
         "networkChecked": True,
         "llmEnabled": settings.llm_enabled,
+        "provider": normalize_llm_provider(settings.llm_provider),
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": bool(settings.llm_api_key),
@@ -130,6 +137,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"mode={result['mode']}",
         f"networkChecked={result['networkChecked']}",
         f"llmEnabled={result['llmEnabled']}",
+        f"provider={result['provider']}",
         f"baseUrlConfigured={result['baseUrlConfigured']}",
         f"modelConfigured={result['modelConfigured']}",
         f"apiKeyConfigured={result['apiKeyConfigured']}",

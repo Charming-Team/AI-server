@@ -5,13 +5,33 @@ from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.schemas import ChatErrorCode
 
+OPENAI_PROVIDER = "openai"
+OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+_DEFAULT_LOCAL_LLM_BASE_URL = "http://localhost:8001/v1"
+SUPPORTED_LLM_PROVIDERS = (OPENAI_PROVIDER, OPENAI_COMPATIBLE_PROVIDER)
+
+
+def normalize_llm_provider(provider: str) -> str:
+    return provider.strip().casefold().replace("-", "_")
+
 
 def validate_llm_settings(settings: Settings) -> None:
+    provider = normalize_llm_provider(settings.llm_provider)
+    if provider not in SUPPORTED_LLM_PROVIDERS:
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_LLM_001,
+            message=f"지원하지 않는 LLM provider입니다: {settings.llm_provider}",
+        )
+
     missing_fields: list[str] = []
-    if not settings.llm_base_url.strip():
+    if provider != OPENAI_PROVIDER and not settings.llm_base_url.strip():
         missing_fields.append("llm_base_url")
     if not settings.llm_model.strip():
         missing_fields.append("llm_model")
+    if provider == OPENAI_PROVIDER and not settings.llm_api_key:
+        missing_fields.append("llm_api_key")
 
     if not missing_fields:
         return
@@ -21,6 +41,16 @@ def validate_llm_settings(settings: Settings) -> None:
         code=ChatErrorCode.CHAT_LLM_001,
         message=f"LLM 필수 설정이 누락되었습니다: {', '.join(missing_fields)}",
     )
+
+
+def resolve_llm_base_url(settings: Settings) -> str:
+    provider = normalize_llm_provider(settings.llm_provider)
+    base_url = settings.llm_base_url.strip()
+    if provider == OPENAI_PROVIDER and (
+        not base_url or base_url == _DEFAULT_LOCAL_LLM_BASE_URL
+    ):
+        return OPENAI_BASE_URL
+    return base_url
 
 
 class LlmClient:
@@ -119,7 +149,7 @@ class LlmClient:
 
     @property
     def _chat_completions_url(self) -> str:
-        return f"{self.settings.llm_base_url.rstrip('/')}/chat/completions"
+        return f"{resolve_llm_base_url(self.settings).rstrip('/')}/chat/completions"
 
     @property
     def _headers(self) -> dict[str, str]:

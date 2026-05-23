@@ -52,6 +52,7 @@ def test_check_llm_completion_validate_only_result_does_not_expose_model_value()
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "llmEnabled": True,
+        "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": True,
@@ -68,6 +69,36 @@ def test_check_llm_completion_requires_llm_enabled() -> None:
 
     assert exc_info.value.code.value == "CHAT_LLM_001"
     assert "LLM_ENABLED=true" in exc_info.value.message
+
+
+def test_check_llm_completion_accepts_openai_provider_with_api_key() -> None:
+    result = check_llm_completion.build_validate_only_result(
+        _ready_settings(
+            llm_provider="openai",
+            llm_base_url=" ",
+            llm_model="gpt-test",
+            llm_api_key="secret-llm-token",
+        )
+    )
+
+    assert result["provider"] == "openai"
+    assert result["baseUrlConfigured"] is True
+    assert result["apiKeyConfigured"] is True
+    assert "secret-llm-token" not in check_llm_completion.format_json_result(result)
+
+
+def test_check_llm_completion_requires_openai_api_key() -> None:
+    with pytest.raises(ChatServiceError) as exc_info:
+        check_llm_completion.build_validate_only_result(
+            _ready_settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key=None,
+            )
+        )
+
+    assert exc_info.value.code.value == "CHAT_LLM_001"
+    assert "llm_api_key" in exc_info.value.message
 
 
 def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None:
@@ -105,6 +136,7 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         "mode": "NETWORK",
         "networkChecked": True,
         "llmEnabled": True,
+        "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": True,
@@ -174,6 +206,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
         "mode": "NETWORK",
         "networkChecked": True,
         "llmEnabled": True,
+        "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": False,
@@ -185,6 +218,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
     output = check_llm_completion.format_text_result(result)
 
     assert "outputPolicyPassed=True" in output
+    assert "provider=openai_compatible" in output
 
 
 def test_check_llm_completion_main_prints_text_without_secret(

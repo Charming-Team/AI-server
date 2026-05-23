@@ -32,6 +32,8 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.qdrant_search_enabled is False
     assert settings.embedding_enabled is False
     assert settings.llm_enabled is False
+    assert settings.llm_provider == "openai"
+    assert settings.llm_base_url == "https://api.openai.com/v1"
     assert settings.qdrant_top_k == 5
     assert settings.document_chunk_size == 800
     assert settings.document_chunk_overlap == 80
