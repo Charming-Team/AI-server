@@ -990,7 +990,7 @@ async def run_rag_chat_scenarios(
         settings,
     )
     path = f"{settings.api_v1_prefix}/chat/answer"
-    scenario_groups = args.rag_chat_scenario_group or ["core"]
+    scenario_groups = args.rag_chat_scenario_group or ["core", "company"]
     scenarios = check_rag_chat_scenarios.select_scenarios(
         args.rag_chat_scenario,
         scenario_groups,

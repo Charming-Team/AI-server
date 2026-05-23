@@ -547,8 +547,8 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
-    assert result["steps"][3]["result"]["scenarioGroups"] == ["core"]
-    assert result["steps"][3]["result"]["scenarioCount"] == 3
+    assert result["steps"][3]["result"]["scenarioGroups"] == ["core", "company"]
+    assert result["steps"][3]["result"]["scenarioCount"] == 6
     assert result["steps"][7]["result"]["minDocumentSourceCount"] == 1
     assert result["steps"][7]["result"]["requireRdbEvidence"] is True
     assert result["steps"][7]["result"]["requireVectorSearch"] is True
