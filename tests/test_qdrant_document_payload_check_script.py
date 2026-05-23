@@ -117,6 +117,26 @@ def test_check_qdrant_document_payloads_passes_valid_points() -> None:
         (_valid_point(intentTags=["UNKNOWN"]), "unsupported intent"),
         (_valid_point(url="https://external.example/report"), "internal relative path"),
         (
+            _valid_point(url=None, referenceType=None, referenceId=None),
+            "url or reference metadata is required",
+        ),
+        (
+            _valid_point(url=None, referenceType=" ", referenceId=20),
+            "url or reference metadata is required",
+        ),
+        (
+            _valid_point(url=None, referenceType="REPORT", referenceId=None),
+            "url or reference metadata is required",
+        ),
+        (
+            _valid_point(url=None, referenceType="REPORT", referenceId=0),
+            "url or reference metadata is required",
+        ),
+        (
+            _valid_point(url=None, referenceType="REPORT", referenceId=-1),
+            "url or reference metadata is required",
+        ),
+        (
             _valid_point(
                 allowedRoles=["OPERATOR"],
                 chunkText="계약 금액과 패널티가 포함된 보고서입니다.",
@@ -133,6 +153,25 @@ def test_validate_points_returns_payload_contract_errors(
 
     assert len(invalid_points) == 1
     assert any(expected_error in error for error in invalid_points[0]["errors"])
+
+
+def test_validate_points_accepts_reference_metadata_without_url() -> None:
+    point = _valid_point(url=None, referenceType="REPORT", referenceId=20)
+
+    invalid_points = check_qdrant_document_payloads.validate_points([point])
+
+    assert invalid_points == []
+
+
+def test_validate_points_allows_restricted_terms_when_operator_is_not_allowed() -> None:
+    point = _valid_point(
+        allowedRoles=["EXECUTIVE", "MANUFACTURING_MANAGER"],
+        chunkText="매출 구조와 비용 정보가 포함된 경영 보고서입니다.",
+    )
+
+    invalid_points = check_qdrant_document_payloads.validate_points([point])
+
+    assert invalid_points == []
 
 
 def test_check_qdrant_document_payloads_fails_below_minimum_points() -> None:

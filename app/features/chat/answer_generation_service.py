@@ -23,8 +23,10 @@ from app.features.chat.skip_reasons import (
 
 class AnswerGenerationService:
     _insufficient_evidence_answer = (
-        "현재 답변 생성을 위한 근거 조회 기능이 아직 연결되지 않았습니다. "
-        "확인 가능한 근거 데이터가 부족해 답변할 수 없습니다."
+        "질문과 관련해 확인 가능한 내부 근거를 찾지 못했습니다. "
+        "추측성 답변은 제공하지 않습니다.\n\n"
+        "자재, 라인, 주문 번호, 기간 같은 기준을 포함해 다시 질문하거나 "
+        "관련 RDB 데이터와 Qdrant 문서 등록 상태를 확인해 주세요."
     )
 
     def __init__(

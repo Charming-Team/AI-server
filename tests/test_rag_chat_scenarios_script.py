@@ -142,6 +142,25 @@ def test_select_rag_scenarios_supports_access_group() -> None:
     )
 
 
+def test_select_rag_scenarios_supports_company_group() -> None:
+    scenarios = check_rag_chat_scenarios.select_scenarios(None, ["company"])
+
+    assert [scenario.scenario_id for scenario in scenarios] == [
+        "company-overview-document-allowed",
+        "manager-revenue-company-info-allowed",
+        "operator-revenue-company-info-blocked",
+    ]
+    assert [scenario.role for scenario in scenarios] == [
+        "OPERATOR",
+        "MANUFACTURING_MANAGER",
+        "OPERATOR",
+    ]
+    assert all(not scenario.require_rdb_evidence for scenario in scenarios)
+    assert scenarios[2].expected_security_results == (
+        ("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),
+    )
+
+
 def test_check_rag_chat_scenarios_calls_fastapi_for_each_core_scenario() -> None:
     captured_questions: list[str] = []
 
@@ -225,6 +244,65 @@ def test_check_rag_chat_scenarios_verifies_access_group() -> None:
     assert [scenario["securityStatus"] for scenario in result["scenarios"]] == [
         "PASSED",
         "BLOCKED_UNAUTHORIZED",
+    ]
+
+
+def test_check_rag_chat_scenarios_verifies_company_group() -> None:
+    captured_roles: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode()
+        payload = json.loads(body)
+        for scenario in check_rag_chat_scenarios.COMPANY_INFO_RAG_CHAT_SCENARIOS:
+            if scenario.question in body and payload["user"]["role"] == scenario.role:
+                captured_roles.append(payload["user"]["role"])
+                if scenario.scenario_id == "operator-revenue-company-info-blocked":
+                    return httpx.Response(
+                        200,
+                        json=_answer_response(
+                            scenario.intent,
+                            evidence_count=0,
+                            rdb_evidence_count=0,
+                            document_source_count=0,
+                            used_vector_search=False,
+                            security_status="BLOCKED_UNAUTHORIZED",
+                        ),
+                        request=request,
+                    )
+                return httpx.Response(
+                    200,
+                    json=_answer_response(
+                        scenario.intent,
+                        evidence_count=1,
+                        rdb_evidence_count=0,
+                        document_source_count=1,
+                    ),
+                    request=request,
+                )
+        return httpx.Response(500, json={}, request=request)
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(scenario_group=["company"]),
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["scenarioCount"] == 3
+    assert captured_roles == ["OPERATOR", "MANUFACTURING_MANAGER", "OPERATOR"]
+    assert [scenario["securityStatus"] for scenario in result["scenarios"]] == [
+        "PASSED",
+        "PASSED",
+        "BLOCKED_UNAUTHORIZED",
+    ]
+    assert [scenario["requireRdbEvidence"] for scenario in result["scenarios"]] == [
+        False,
+        False,
+        False,
     ]
 
 

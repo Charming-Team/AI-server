@@ -43,10 +43,13 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "제공된 내부 근거만 사용" in prompt.system_prompt
     assert "웹 검색" in prompt.system_prompt
     assert "일반 상식" in prompt.system_prompt
+    assert "핵심 답변, 근거, 확인 필요 순서" in prompt.system_prompt
     assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
     assert "역할별 응답 제한:" in prompt.user_prompt
     assert "RDB 근거:\n없음" in prompt.user_prompt
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
+    assert "수치, 상태, 날짜는 RDB 근거 또는 문서 검색 근거" in prompt.user_prompt
+    assert "답변 형식은 핵심 답변, 근거, 확인 필요 순서" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:

@@ -87,9 +87,45 @@ ACCESS_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
     ),
 )
 
+COMPANY_INFO_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
+    RagChatScenario(
+        scenario_id="company-overview-document-allowed",
+        intent=ChatIntent.REPORT_LOOKUP,
+        question="S-Map 회사 개요 알려줘",
+        role="OPERATOR",
+        require_rdb_evidence=False,
+        min_evidence_count=1,
+        min_rdb_evidence_count=0,
+        min_document_source_count=1,
+    ),
+    RagChatScenario(
+        scenario_id="manager-revenue-company-info-allowed",
+        intent=ChatIntent.REPORT_LOOKUP,
+        question="S-Map 매출 구조 알려줘",
+        role="MANUFACTURING_MANAGER",
+        require_rdb_evidence=False,
+        min_evidence_count=1,
+        min_rdb_evidence_count=0,
+        min_document_source_count=1,
+    ),
+    RagChatScenario(
+        scenario_id="operator-revenue-company-info-blocked",
+        intent=ChatIntent.REPORT_LOOKUP,
+        question="S-Map 매출 구조 알려줘",
+        role="OPERATOR",
+        expected_security_results=(("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),),
+        require_rdb_evidence=False,
+        require_vector_search=False,
+        min_evidence_count=0,
+        min_rdb_evidence_count=0,
+        min_document_source_count=0,
+    ),
+)
+
 RAG_CHAT_SCENARIO_GROUPS = {
     "core": CORE_RAG_CHAT_SCENARIOS,
     "access": ACCESS_RAG_CHAT_SCENARIOS,
+    "company": COMPANY_INFO_RAG_CHAT_SCENARIOS,
 }
 ALL_RAG_CHAT_SCENARIOS = tuple(
     scenario
@@ -134,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(RAG_CHAT_SCENARIO_GROUPS),
         help=(
-            "실행할 시나리오 묶음입니다. core, access 중 선택하며 "
+            "실행할 시나리오 묶음입니다. core, access, company 중 선택하며 "
             "여러 번 지정할 수 있습니다. 생략하면 core만 실행합니다."
         ),
     )
@@ -220,6 +256,7 @@ async def check_rag_chat_scenarios(
             require_vector_search=scenario.require_vector_search,
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
+            expected_intent=scenario.intent.value,
             http_client=http_client,
         )
         validate_scenario_result(args, scenario, result)

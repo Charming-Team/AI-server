@@ -21,6 +21,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "require_document_index": False,
         "require_llm_generation": False,
         "include_vector_smoke": False,
+        "include_qdrant_readonly_search": False,
         "include_document_api_smoke": False,
         "include_answer_api_smoke": False,
         "include_recommendation_api_smoke": False,
@@ -36,6 +37,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "answer_api_base_url": "http://fastapi.local",
         "answer_api_question": "자재 부족 현황 알려줘",
         "answer_api_role": "MANUFACTURING_MANAGER",
+        "answer_api_expected_intent": None,
         "answer_api_user_id": 1,
         "answer_api_timeout_seconds": 10.0,
         "answer_api_min_evidence_count": 0,
@@ -52,6 +54,10 @@ def _build_args(**overrides: Any) -> Namespace:
         "document_api_timeout_seconds": 10.0,
         "skip_rdb_privilege_check": False,
         "qdrant_min_points": 0,
+        "qdrant_readonly_search_question": "LINE-A01 병목 대응 기준 알려줘",
+        "qdrant_readonly_search_intent": "LINE_BOTTLENECK",
+        "qdrant_readonly_search_role": "MANUFACTURING_MANAGER",
+        "qdrant_readonly_search_min_source_count": 1,
         "json": False,
     }
     values.update(overrides)
@@ -83,7 +89,6 @@ def test_check_chat_runtime_builds_required_components() -> None:
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
         "llm",
     ]
 
@@ -95,21 +100,33 @@ def test_check_chat_runtime_builds_required_components_from_full_preset() -> Non
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
         "llm",
     ]
     assert args.include_answer_api_smoke is True
     assert args.include_recommendation_api_smoke is True
-    assert args.include_document_api_smoke is True
-    assert args.include_vector_smoke is True
+    assert args.include_document_api_smoke is False
+    assert args.include_vector_smoke is False
+    assert args.include_qdrant_readonly_search is True
     assert args.include_answer_output_policy_smoke is True
     assert args.include_llm_smoke is True
     assert args.include_rdb_chat_scenarios is True
     assert args.include_rag_chat_scenarios is True
-    assert args.include_rag_end_to_end_smoke is True
+    assert args.include_rag_end_to_end_smoke is False
     assert args.require_llm_generation is True
     assert args.answer_api_min_evidence_count == 1
     assert args.answer_api_min_document_source_count == 1
+
+
+def test_check_chat_runtime_preset_help_matches_chat_runtime_scope() -> None:
+    parser = check_chat_runtime.build_parser()
+    preset_action = next(
+        action for action in parser._actions if action.dest == "preset"
+    )
+    help_text = preset_action.help or ""
+
+    assert "rag는 이미 Qdrant에 저장된 문서 검색 기반 챗봇 경로" in help_text
+    assert "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로" in help_text
+    assert "rag는 Qdrant/문서/답변/추천 API" not in help_text
 
 
 def test_check_chat_runtime_llm_preset_runs_only_llm_checks() -> None:
@@ -182,17 +199,18 @@ def test_check_chat_runtime_qdrant_preset_runs_only_qdrant_checks() -> None:
         "readiness",
         "qdrantCollection",
         "qdrantDocumentPayloads",
-        "qdrantVectorSmoke",
+        "qdrantReadOnlySearch",
     ]
     assert result["steps"][0]["status"] == "PASS"
     assert result["steps"][0]["result"]["status"] in {"ready", "not_ready"}
     assert result["steps"][1]["result"]["checkStatus"] == "VALIDATED"
     assert result["steps"][2]["result"]["checkStatus"] == "VALIDATED"
     assert result["steps"][3]["result"]["checkStatus"] == "VALIDATED"
-    assert result["steps"][3]["result"]["documentId"] == "smoke-company-line-bottleneck"
+    assert result["steps"][3]["result"]["intent"] == "LINE_BOTTLENECK"
+    assert result["steps"][3]["result"]["role"] == "MANUFACTURING_MANAGER"
 
 
-def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
+def test_check_chat_runtime_qdrant_preset_network_runs_readonly_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = _base_ready_settings(qdrant_collection="smap_internal_documents")
@@ -207,9 +225,9 @@ def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
         calls.append("payload")
         return {"checkStatus": "PASS", "pointCount": 0}
 
-    async def fake_vector_smoke(settings_arg, args_arg):
-        calls.append("vector")
-        return {"checkStatus": "PASS", "matchedSourceCount": 1}
+    async def fake_readonly_search(settings_arg, args_arg):
+        calls.append("readonly")
+        return {"checkStatus": "PASS", "sourceCount": 1}
 
     monkeypatch.setattr(
         check_chat_runtime,
@@ -221,13 +239,17 @@ def test_check_chat_runtime_qdrant_preset_network_runs_vector_smoke(
         "run_qdrant_payload_check",
         fake_qdrant_payload_check,
     )
-    monkeypatch.setattr(check_chat_runtime, "run_qdrant_vector_smoke", fake_vector_smoke)
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_readonly_search",
+        fake_readonly_search,
+    )
 
     result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
 
     assert result["checkStatus"] == "PASS"
     assert result["mode"] == "NETWORK"
-    assert calls == ["collection", "payload", "vector"]
+    assert calls == ["collection", "payload", "readonly"]
 
 
 def test_check_chat_runtime_fails_when_qdrant_collection_result_fails(
@@ -252,8 +274,8 @@ def test_check_chat_runtime_fails_when_qdrant_collection_result_fails(
     async def fake_qdrant_payload_check(settings_arg, args_arg):
         return {"checkStatus": "PASS", "pointCount": 0}
 
-    async def fake_vector_smoke(settings_arg, args_arg):
-        return {"checkStatus": "PASS", "matchedSourceCount": 1}
+    async def fake_readonly_search(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "sourceCount": 1}
 
     monkeypatch.setattr(
         check_chat_runtime,
@@ -265,7 +287,11 @@ def test_check_chat_runtime_fails_when_qdrant_collection_result_fails(
         "run_qdrant_payload_check",
         fake_qdrant_payload_check,
     )
-    monkeypatch.setattr(check_chat_runtime, "run_qdrant_vector_smoke", fake_vector_smoke)
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_qdrant_readonly_search",
+        fake_readonly_search,
+    )
 
     result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
 
@@ -482,6 +508,14 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     assert result["steps"][3]["result"]["scenarioCount"] == 9
     assert result["steps"][4]["result"]["minEvidenceCount"] == 1
     assert result["steps"][4]["result"]["requireRdbEvidence"] is True
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/api/v1",
+        "groundingMode": "RDB_ONLY",
+        "answerMode": "LLM",
+        "ragSearchMode": "DISABLED",
+        "enabledGroundingSources": ["RDB_EVIDENCE"],
+        "expectedLlmSkippedReason": None,
+    }
 
 
 def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> None:
@@ -502,7 +536,6 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
     ]
     assert [step["name"] for step in result["steps"]] == [
         "readiness",
@@ -511,17 +544,52 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
         "ragChatScenarios",
         "qdrantCollection",
         "qdrantDocumentPayloads",
-        "qdrantVectorSmoke",
-        "documentApiSmoke",
-        "ragEndToEndSmoke",
+        "qdrantReadOnlySearch",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
-    assert result["steps"][3]["result"]["scenarioGroups"] == ["core"]
-    assert result["steps"][3]["result"]["scenarioCount"] == 3
-    assert result["steps"][8]["result"]["minDocumentSourceCount"] == 1
-    assert result["steps"][9]["result"]["requireRdbEvidence"] is True
-    assert result["steps"][9]["result"]["requireVectorSearch"] is True
+    assert result["steps"][3]["result"]["scenarioGroups"] == ["core", "company"]
+    assert result["steps"][3]["result"]["scenarioCount"] == 6
+    assert result["steps"][7]["result"]["minDocumentSourceCount"] == 1
+    assert result["steps"][7]["result"]["requireRdbEvidence"] is True
+    assert result["steps"][7]["result"]["requireVectorSearch"] is True
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/api/v1",
+        "groundingMode": "RDB_QDRANT",
+        "answerMode": "LLM",
+        "ragSearchMode": "ENABLED",
+        "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+        "expectedLlmSkippedReason": None,
+    }
+
+
+def test_check_chat_runtime_summarizes_k8s_configmap_chat_mode() -> None:
+    settings = _base_ready_settings(
+        environment="prod",
+        api_v1_prefix="/ai/api/v1",
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        qdrant_url="http://qdrant.qdrant.svc.cluster.local:6333",
+        qdrant_collection="smap_internal_documents",
+        embedding_enabled=True,
+        embedding_base_url="http://embedding-service:8002",
+        embedding_model="BAAI/bge-m3",
+        llm_enabled=False,
+    )
+    args = _build_args(preset="rag")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["runtimeMode"] == {
+        "apiPrefix": "/ai/api/v1",
+        "groundingMode": "RDB_QDRANT",
+        "answerMode": "FALLBACK",
+        "ragSearchMode": "ENABLED",
+        "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+        "expectedLlmSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+    }
 
 
 def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> None:
@@ -547,9 +615,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "ragChatScenarios",
         "qdrantCollection",
         "qdrantDocumentPayloads",
-        "qdrantVectorSmoke",
-        "documentApiSmoke",
-        "ragEndToEndSmoke",
+        "qdrantReadOnlySearch",
         "answerApiSmoke",
         "recommendationApiSmoke",
     ]
@@ -557,12 +623,11 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "rdbEvidence",
         "qdrantSearch",
         "ragSearchPipeline",
-        "documentIndexPipeline",
         "llm",
     ]
     assert result["summary"] == {
-        "totalStepCount": 13,
-        "passedStepCount": 13,
+        "totalStepCount": 11,
+        "passedStepCount": 11,
         "failedStepCount": 0,
         "failedSteps": [],
         "nextActions": [],
@@ -1270,6 +1335,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "path": "/api/v1/chat/answer",
         "question": "자재 부족 현황 알려줘",
         "role": "MANUFACTURING_MANAGER",
+        "expectedIntent": None,
         "tokenConfigured": True,
         "minEvidenceCount": 1,
         "requireRdbEvidence": False,
@@ -1278,6 +1344,45 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "requireLlmGeneration": False,
         "expectedLlmGenerationSkippedReason": None,
     }
+
+
+def test_check_chat_runtime_answer_api_smoke_expects_fallback_when_llm_disabled() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        llm_enabled=False,
+    )
+    args = _build_args(
+        include_answer_api_smoke=True,
+        answer_api_min_evidence_count=1,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert (
+        result["steps"][-1]["result"]["expectedLlmGenerationSkippedReason"]
+        == "LLM 답변 생성 기능이 비활성화되어 있습니다."
+    )
+
+
+def test_check_chat_runtime_answer_api_smoke_keeps_explicit_llm_skip_expectation() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        llm_enabled=False,
+    )
+    args = _build_args(
+        include_answer_api_smoke=True,
+        answer_api_expected_llm_skipped_reason="NONE",
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert result["steps"][-1]["result"]["expectedLlmGenerationSkippedReason"] == "NONE"
 
 
 def test_check_chat_runtime_answer_api_smoke_requires_token() -> None:
@@ -1386,14 +1491,17 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
         include_answer_api_smoke=True,
         require_rdb_evidence=True,
         answer_api_min_evidence_count=2,
+        answer_api_expected_intent="MATERIAL_SHORTAGE",
     )
     calls: list[str] = []
+    captured: dict[str, Any] = {}
 
     async def fake_rdb_check(settings_arg, args_arg):
         return {"checkStatus": "PASS", "viewCount": 7}
 
     async def fake_answer_check(**kwargs):
         calls.append(kwargs["request"].question)
+        captured["expected_intent"] = kwargs["expected_intent"]
         return {
             "checkStatus": "PASS",
             "url": f"{kwargs['base_url']}/{kwargs['path'].lstrip('/')}",
@@ -1421,6 +1529,7 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
     assert result["mode"] == "NETWORK"
     assert result["steps"][-1]["name"] == "answerApiSmoke"
     assert calls == ["자재 부족 현황 알려줘"]
+    assert captured == {"expected_intent": "MATERIAL_SHORTAGE"}
     assert result["steps"][-1]["result"]["evidenceCount"] == 2
     assert result["steps"][-1]["result"]["usedRdbEvidence"] is True
 
@@ -1471,6 +1580,53 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
     assert captured == {
         "require_llm_generation": True,
         "expected_llm_skipped_reason": "NONE",
+    }
+
+
+def test_check_chat_runtime_network_answer_api_smoke_expects_fallback_when_llm_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        llm_enabled=False,
+    )
+    args = _build_args(
+        network=True,
+        include_answer_api_smoke=True,
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_rdb_check(settings_arg, args_arg):
+        return {"checkStatus": "PASS", "viewCount": 7}
+
+    async def fake_answer_check(**kwargs):
+        captured["expected_llm_skipped_reason"] = kwargs[
+            "expected_llm_skipped_reason"
+        ]
+        return {
+            "checkStatus": "PASS",
+            "usedLlmGeneration": False,
+            "llmGenerationSkippedReason": kwargs["expected_llm_skipped_reason"],
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime,
+        "run_rdb_evidence_view_check",
+        fake_rdb_check,
+    )
+    monkeypatch.setattr(
+        check_chat_runtime.check_chat_answer,
+        "check_chat_answer",
+        fake_answer_check,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["steps"][-1]["name"] == "answerApiSmoke"
+    assert captured == {
+        "expected_llm_skipped_reason": "LLM 답변 생성 기능이 비활성화되어 있습니다."
     }
 
 
@@ -1611,6 +1767,16 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
             "mode": "VALIDATE_ONLY",
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence"],
+            "runtimeMode": {
+                "apiPrefix": "/ai/api/v1",
+                "groundingMode": "RDB_QDRANT",
+                "answerMode": "FALLBACK",
+                "ragSearchMode": "ENABLED",
+                "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+                "expectedLlmSkippedReason": (
+                    "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                ),
+            },
             "summary": {
                 "totalStepCount": 1,
                 "passedStepCount": 0,
@@ -1641,6 +1807,11 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
     assert "status=FAIL" in output
     assert "requiredComponents=rdbEvidence" in output
     assert "summary=passed:0 failed:1 total:1" in output
+    assert "apiPrefix=/ai/api/v1" in output
+    assert "groundingMode=RDB_QDRANT" in output
+    assert "answerMode=FALLBACK" in output
+    assert "ragSearchMode=ENABLED" in output
+    assert "enabledGroundingSources=RDB_EVIDENCE,QDRANT" in output
     assert "readiness: status=FAIL code=CHAT_EVIDENCE_004" in output
     assert "failure=readiness code=CHAT_EVIDENCE_004" in output
     assert "nextAction=RDB Evidence 설정을 확인하세요." in output
@@ -1718,6 +1889,50 @@ def test_check_chat_runtime_builds_vector_failure_action_from_error() -> None:
 
     assert summary["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
     assert "Smoke 문서가 Qdrant에 저장" in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+def test_check_chat_runtime_builds_readonly_search_failure_action_from_error() -> None:
+    steps = [
+        {
+            "name": "qdrantReadOnlySearch",
+            "status": "FAIL",
+            "error": {
+                "code": "CHAT_QDRANT_004",
+                "message": "Qdrant read-only 검색 결과가 기준보다 적습니다.",
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps)
+
+    assert summary["failedSteps"][0]["code"] == "CHAT_QDRANT_004"
+    assert "Qdrant에 질문과 관련된 보고서" in summary["failedSteps"][0]["action"]
+    assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
+
+
+def test_check_chat_runtime_builds_readonly_search_k8s_hint_from_settings() -> None:
+    settings = _base_ready_settings(
+        qdrant_search_enabled=True,
+        qdrant_url="http://qdrant.qdrant.svc.cluster.local:6333",
+        embedding_enabled=True,
+        embedding_base_url="http://embedding-service:8002",
+    )
+    steps = [
+        {
+            "name": "qdrantReadOnlySearch",
+            "status": "FAIL",
+            "error": {
+                "code": "CHAT_EMBEDDING_004",
+                "message": "임베딩 서버 호출에 실패했습니다.",
+            },
+        }
+    ]
+
+    summary = check_chat_runtime.build_runtime_summary(steps, settings)
+
+    assert summary["failedSteps"][0]["code"] == "CHAT_EMBEDDING_004"
+    assert "로컬에서 실행 중이면 embedding-service" in summary["failedSteps"][0]["action"]
     assert summary["nextActions"] == [summary["failedSteps"][0]["action"]]
 
 

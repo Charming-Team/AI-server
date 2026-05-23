@@ -5,6 +5,7 @@ from typing import TextIO
 
 from app.api.v1.routes.health import build_readiness_components
 from app.core.config import Settings
+from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import ChatErrorCode
 
 REQUIRED_COMPONENT_OPTIONS = {
@@ -19,10 +20,6 @@ REQUIRED_COMPONENT_OPTIONS = {
     "ragSearchPipeline": {
         "code": ChatErrorCode.CHAT_EMBEDDING_001,
         "reason": "Vector 검색 사용이 요구되지만 검색 파이프라인이 준비되지 않았습니다.",
-    },
-    "documentIndexPipeline": {
-        "code": ChatErrorCode.CHAT_DOCUMENT_001,
-        "reason": "문서 인덱싱 사용이 요구되지만 파이프라인이 활성화되어 있지 않습니다.",
     },
     "llm": {
         "code": ChatErrorCode.CHAT_LLM_001,
@@ -53,11 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-vector-search",
         action="store_true",
         help="Qdrant 검색과 RAG 검색 파이프라인이 활성화되어 있어야 합니다.",
-    )
-    parser.add_argument(
-        "--require-document-index",
-        action="store_true",
-        help="문서 인덱싱 파이프라인이 활성화되어 있어야 합니다.",
     )
     parser.add_argument(
         "--require-llm-generation",
@@ -92,6 +84,10 @@ def build_readiness_result(
     )
     return {
         "status": "ready" if is_ready else "not_ready",
+        "runtimeMode": build_chat_runtime_mode(settings).model_dump(
+            mode="json",
+            by_alias=True,
+        ),
         "components": component_items,
         "requirementFailures": requirement_failures,
     }
@@ -103,8 +99,6 @@ def build_required_components(args: argparse.Namespace) -> list[str]:
         required_components.append("rdbEvidence")
     if args.require_vector_search:
         required_components.extend(["qdrantSearch", "ragSearchPipeline"])
-    if args.require_document_index:
-        required_components.append("documentIndexPipeline")
     if args.require_llm_generation:
         required_components.append("llm")
     return required_components
@@ -147,7 +141,20 @@ def _build_requirement_failure(
 
 
 def format_text_result(result: dict) -> str:
-    lines = [f"status={result['status']}"]
+    runtime_mode = result["runtimeMode"]
+    lines = [
+        f"status={result['status']}",
+        f"apiPrefix={runtime_mode['apiPrefix']}",
+        f"groundingMode={runtime_mode['groundingMode']}",
+        f"answerMode={runtime_mode['answerMode']}",
+        f"ragSearchMode={runtime_mode['ragSearchMode']}",
+        "enabledGroundingSources="
+        f"{','.join(runtime_mode['enabledGroundingSources'])}",
+        (
+            "expectedLlmSkippedReason="
+            f"{runtime_mode['expectedLlmSkippedReason']}"
+        ),
+    ]
     for component in result["components"]:
         line = (
             f"{component['name']}: "
