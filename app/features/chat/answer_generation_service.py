@@ -87,6 +87,11 @@ class AnswerGenerationService:
                 skipped_reason=LLM_EMPTY_ANSWER,
             )
 
+        answer = self._ensure_answer_sections(
+            answer,
+            evidence_result,
+            document_result,
+        )
         answer = self._ensure_source_titles(answer, evidence_result, document_result)
         return self._build_output_checked_result(
             answer,
@@ -172,6 +177,39 @@ class AnswerGenerationService:
             seen_titles.add(normalized_title)
             titles.append(title)
         return titles
+
+    def _ensure_answer_sections(
+        self,
+        answer: str,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> str:
+        if self._has_required_sections(answer):
+            return answer
+
+        source_titles = self._collect_source_titles(evidence_result, document_result)
+        if source_titles:
+            evidence_lines = "\n".join(f"- {title}" for title in source_titles[:3])
+        else:
+            evidence_lines = "- 제공된 내부 근거"
+
+        return "\n\n".join(
+            [
+                f"핵심 답변:\n{answer.strip()}",
+                f"근거:\n{evidence_lines}",
+                (
+                    "확인 필요:\n"
+                    "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
+                ),
+            ]
+        )
+
+    def _has_required_sections(self, answer: str) -> bool:
+        normalized_answer = answer.casefold()
+        return all(
+            section in normalized_answer
+            for section in ("핵심 답변", "근거", "확인 필요")
+        )
 
     def _limit_answer_length(self, answer: str) -> str:
         max_chars = self.settings.answer_max_chars

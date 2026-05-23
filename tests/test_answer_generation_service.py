@@ -277,12 +277,55 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     )
 
     assert result.was_generated is True
-    assert (
-        result.answer
-        == "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+    assert result.answer.startswith(
+        "핵심 답변:\n"
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
     )
+    assert "근거:\n- 2026년 5월 생산 리스크 보고서" in result.answer
+    assert "확인 필요:" in result.answer
     assert llm_client.prompt is not None
     assert "2026년 5월 생산 리스크 보고서" in llm_client.prompt.user_prompt
+
+
+def test_answer_generation_keeps_structured_llm_answer() -> None:
+    structured_answer = (
+        "핵심 답변:\n"
+        "2026년 5월 생산 리스크 보고서 기준으로 자재 부족이 주요 리스크입니다.\n\n"
+        "근거:\n"
+        "- 2026년 5월 생산 리스크 보고서\n\n"
+        "확인 필요:\n"
+        "- 근거에 없는 원인은 추가 확인이 필요합니다."
+    )
+    llm_client = FakeLlmClient(structured_answer)
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is True
+    assert result.answer == structured_answer
 
 
 def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> None:
@@ -334,7 +377,7 @@ def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> No
     assert llm_client.prompt is not None
 
 
-def test_answer_generation_appends_source_titles_when_answer_omits_them() -> None:
+def test_answer_generation_wraps_unstructured_llm_answer_with_source_titles() -> None:
     llm_client = FakeLlmClient("근거에 따르면 자재 부족이 주요 리스크입니다.")
     service = AnswerGenerationService(
         Settings(llm_enabled=True),
@@ -372,8 +415,13 @@ def test_answer_generation_appends_source_titles_when_answer_omits_them() -> Non
 
     assert result.was_generated is True
     assert result.answer == (
+        "핵심 답변:\n"
         "근거에 따르면 자재 부족이 주요 리스크입니다.\n\n"
-        "참조 근거: 월간 생산 리스크, 2026년 5월 생산 리스크 보고서"
+        "근거:\n"
+        "- 월간 생산 리스크\n"
+        "- 2026년 5월 생산 리스크 보고서\n\n"
+        "확인 필요:\n"
+        "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
     )
 
 
