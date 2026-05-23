@@ -506,7 +506,7 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     ]
     assert result["steps"][1]["result"]["checkStatus"] == "PASS"
     assert result["steps"][3]["result"]["scenarioGroups"] == ["core", "access"]
-    assert result["steps"][3]["result"]["scenarioCount"] == 9
+    assert result["steps"][3]["result"]["scenarioCount"] == 8
     assert result["steps"][4]["result"]["minEvidenceCount"] == 1
     assert result["steps"][4]["result"]["requireRdbEvidence"] is True
     assert result["runtimeMode"] == {

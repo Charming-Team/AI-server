@@ -135,13 +135,22 @@ def test_select_scenarios_supports_scenario_groups() -> None:
     )
 
     assert [scenario.scenario_id for scenario in scenarios] == [
-        "operator-report-allowed",
         "operator-urgent-order-allowed",
         "operator-financial-blocked",
         "admin-chat-blocked",
         "material-shortage-this-week-target",
         "line-bottleneck-today-target",
         "production-plan-date-range",
+    ]
+    assert scenarios[0].role == "OPERATOR"
+    assert scenarios[0].expected_security_statuses == ("PASSED",)
+
+
+def test_select_scenarios_supports_report_group() -> None:
+    scenarios = check_rdb_chat_scenarios.select_scenarios(None, ["report"])
+
+    assert [scenario.scenario_id for scenario in scenarios] == [
+        "operator-report-allowed",
     ]
     assert scenarios[0].role == "OPERATOR"
     assert scenarios[0].expected_security_statuses == (
@@ -245,16 +254,14 @@ def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
     result = anyio.run(run)
 
     assert result["checkStatus"] == "PASS"
-    assert result["scenarioCount"] == 4
-    assert captured_roles == ["OPERATOR", "OPERATOR", "OPERATOR", "ADMIN"]
+    assert result["scenarioCount"] == 3
+    assert captured_roles == ["OPERATOR", "OPERATOR", "ADMIN"]
     assert [scenario["securityStatus"] for scenario in result["scenarios"]] == [
-        "INSUFFICIENT_EVIDENCE",
         "PASSED",
         "BLOCKED_UNAUTHORIZED",
         "BLOCKED_UNAUTHORIZED",
     ]
     assert [scenario["requireRdbEvidence"] for scenario in result["scenarios"]] == [
-        False,
         True,
         False,
         False,

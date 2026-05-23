@@ -71,18 +71,6 @@ DEFAULT_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
 
 ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     RdbChatScenario(
-        scenario_id="operator-report-allowed",
-        intent=ChatIntent.REPORT_LOOKUP,
-        question="이번 달 월간 리포트 요약해줘",
-        role="OPERATOR",
-        expected_security_results=(
-            ("INSUFFICIENT_EVIDENCE", "CHAT_EVIDENCE_001"),
-            ("PASSED", None),
-        ),
-        require_rdb_evidence=False,
-        min_evidence_count=0,
-    ),
-    RdbChatScenario(
         scenario_id="operator-urgent-order-allowed",
         intent=ChatIntent.URGENT_ORDER_IMPACT,
         question="긴급 주문이 생산계획에 미치는 영향 알려줘",
@@ -111,6 +99,21 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     ),
 )
 
+REPORT_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
+    RdbChatScenario(
+        scenario_id="operator-report-allowed",
+        intent=ChatIntent.REPORT_LOOKUP,
+        question="이번 달 월간 리포트 요약해줘",
+        role="OPERATOR",
+        expected_security_results=(
+            ("INSUFFICIENT_EVIDENCE", "CHAT_EVIDENCE_001"),
+            ("PASSED", None),
+        ),
+        require_rdb_evidence=False,
+        min_evidence_count=0,
+    ),
+)
+
 FILTERED_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     RdbChatScenario(
         scenario_id="material-shortage-this-week-target",
@@ -132,6 +135,7 @@ FILTERED_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
 RDB_CHAT_SCENARIO_GROUPS = {
     "core": DEFAULT_RDB_CHAT_SCENARIOS,
     "access": ACCESS_CONTROL_RDB_CHAT_SCENARIOS,
+    "report": REPORT_RDB_CHAT_SCENARIOS,
     "filtered": FILTERED_RDB_CHAT_SCENARIOS,
 }
 ALL_RDB_CHAT_SCENARIOS = tuple(
@@ -177,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(RDB_CHAT_SCENARIO_GROUPS),
         help=(
-            "실행할 시나리오 묶음입니다. core, access, filtered 중 선택하며 "
+            "실행할 시나리오 묶음입니다. core, access, filtered, report 중 선택하며 "
             "여러 번 지정할 수 있습니다. 생략하면 core만 실행합니다."
         ),
     )

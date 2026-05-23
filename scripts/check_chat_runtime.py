@@ -223,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(check_rdb_chat_scenarios.RDB_CHAT_SCENARIO_GROUPS),
         help=(
-            "RDB 챗봇 시나리오 그룹입니다. core, access, filtered 중 선택하며 "
+            "RDB 챗봇 시나리오 그룹입니다. core, access, filtered, report 중 선택하며 "
             "여러 번 지정할 수 있습니다. 생략하면 core/access를 실행합니다."
         ),
     )
