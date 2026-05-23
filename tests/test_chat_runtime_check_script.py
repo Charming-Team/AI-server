@@ -2235,3 +2235,51 @@ def test_check_chat_runtime_main_returns_zero_on_pass(
 
     assert exit_code == 0
     assert '"checkStatus": "PASS"' in stdout.getvalue()
+
+
+def test_check_chat_runtime_main_formats_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_chat_runtime(settings, args):
+        return {
+            "checkStatus": "PASS",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "requiredComponents": ["rdbEvidence", "qdrantSearch"],
+            "runtimeMode": {
+                "apiPrefix": "/ai/api/v1",
+                "groundingMode": "RDB_QDRANT",
+                "answerMode": "FALLBACK",
+                "ragSearchMode": "ENABLED",
+                "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+                "expectedLlmSkippedReason": (
+                    "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                ),
+            },
+            "summary": {
+                "totalStepCount": 1,
+                "passedStepCount": 1,
+                "failedStepCount": 0,
+                "failedSteps": [],
+                "nextActions": [],
+            },
+            "steps": [
+                {
+                    "name": "readiness",
+                    "status": "PASS",
+                    "result": {"checkStatus": "PASS"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(check_chat_runtime, "check_chat_runtime", fake_check_chat_runtime)
+    stdout = StringIO()
+
+    exit_code = check_chat_runtime.main(["--preset", "rag", "--markdown"], stdout=stdout)
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "# 챗봇 런타임 통합 점검 결과" in output
+    assert "- 점검 상태: `PASS`" in output
+    assert "| Grounding Mode | RDB_QDRANT |" in output
+    assert "| readiness | `PASS` | - | - |" in output

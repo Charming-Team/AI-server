@@ -604,6 +604,69 @@ def test_check_rag_chat_scenarios_main_does_not_expose_secret(
     assert "secret-answer-token" not in stdout.getvalue()
 
 
+def test_check_rag_chat_scenarios_main_formats_markdown_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_rag_chat_scenarios(args) -> dict:
+        return {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "line-bottleneck-with-company-guide",
+                    "role": "MANUFACTURING_MANAGER",
+                    "question": "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘",
+                    "intent": "LINE_BOTTLENECK",
+                    "securityStatus": "PASSED",
+                    "securityCode": None,
+                    "requireRdbEvidence": True,
+                    "requireVectorSearch": True,
+                    "evidenceCount": 2,
+                    "rdbEvidenceCount": 1,
+                    "documentSourceCount": 1,
+                    "usedVectorSearch": True,
+                    "sourceCount": 2,
+                    "urlCount": 2,
+                    "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
+                    "sourceDetails": [
+                        {
+                            "sourceOrigin": "RDB",
+                            "sourceType": "LINE",
+                            "title": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        }
+                    ],
+                    "urlDetails": [
+                        {
+                            "type": "LINE",
+                            "label": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        }
+                    ],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        check_rag_chat_scenarios,
+        "check_rag_chat_scenarios",
+        fake_check_rag_chat_scenarios,
+    )
+    stdout = StringIO()
+
+    exit_code = check_rag_chat_scenarios.main(
+        ["--token", "secret-answer-token", "--scenario-group", "core", "--markdown"],
+        stdout=stdout,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "# RAG 챗봇 시나리오 점검 결과" in output
+    assert "## line-bottleneck-with-company-guide" in output
+    assert "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다." in output
+    assert "secret-answer-token" not in output
+
+
 def test_check_rag_chat_scenarios_main_returns_one_without_token() -> None:
     stderr = StringIO()
 

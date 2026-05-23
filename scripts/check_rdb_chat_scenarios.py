@@ -194,6 +194,11 @@ def build_parser() -> argparse.ArgumentParser:
             "생략하면 시나리오 기본값을 사용합니다."
         ),
     )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -348,6 +353,61 @@ def format_text_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_markdown_result(result: dict[str, Any]) -> str:
+    lines = [
+        "# RDB 챗봇 시나리오 점검 결과",
+        "",
+        f"- 점검 상태: `{_markdown_text(result.get('checkStatus'))}`",
+        f"- 시나리오 수: `{_markdown_text(result.get('scenarioCount'))}`",
+        "",
+        "## 시나리오 결과",
+        "",
+        "| 시나리오 | Role | Intent | 보안 상태 | 보안 코드 | RDB 필수 | RDB 근거 | 출처 | URL |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for scenario in result["scenarios"]:
+        lines.append(
+            "| "
+            f"{_escape_markdown_cell(scenario.get('scenarioId'))} | "
+            f"{_escape_markdown_cell(scenario.get('role'))} | "
+            f"{_escape_markdown_cell(scenario.get('intent'))} | "
+            f"{_escape_markdown_cell(scenario.get('securityStatus'))} | "
+            f"{_escape_markdown_cell(scenario.get('securityCode'))} | "
+            f"{_format_markdown_bool(scenario.get('requireRdbEvidence'))} | "
+            f"{_escape_markdown_cell(scenario.get('rdbEvidenceCount'))} | "
+            f"{_escape_markdown_cell(scenario.get('sourceCount'))} | "
+            f"{_escape_markdown_cell(scenario.get('urlCount'))} |"
+        )
+
+    lines.extend(["", "## 질문", ""])
+    for scenario in result["scenarios"]:
+        lines.append(
+            f"- `{_markdown_text(scenario.get('scenarioId'))}`: "
+            f"{_markdown_text(scenario.get('question'))}"
+        )
+
+    return "\n".join(lines)
+
+
+def _markdown_text(value: object) -> str:
+    if value is None:
+        return "-"
+    return str(value)
+
+
+def _escape_markdown_cell(value: object) -> str:
+    if value is None or value == "":
+        return "-"
+    text = str(value)
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _format_markdown_bool(value: object) -> str:
+    if isinstance(value, bool):
+        return "`true`" if value else "`false`"
+    return _escape_markdown_cell(value)
+
+
 def _select_scenario_groups(
     scenario_groups: list[str] | None,
 ) -> tuple[RdbChatScenario, ...]:
@@ -418,6 +478,8 @@ def main(
 
     if args.json:
         print(format_json_result(result), file=output)
+    elif args.markdown:
+        print(format_markdown_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
     return 0

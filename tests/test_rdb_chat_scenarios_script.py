@@ -28,6 +28,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "scenario": None,
         "scenario_group": None,
         "min_evidence_count": None,
+        "markdown": False,
         "json": False,
     }
     values.update(overrides)
@@ -394,6 +395,49 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
     assert "rdbEvidenceCount=3" in output
 
 
+def test_check_rdb_chat_scenarios_formats_markdown_result() -> None:
+    result = {
+        "checkStatus": "PASS",
+        "scenarioCount": 1,
+        "scenarios": [
+            {
+                "scenarioId": "operator-financial-blocked",
+                "role": "OPERATOR",
+                "question": "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
+                "intent": "DELIVERY_RISK",
+                "securityStatus": "BLOCKED_UNAUTHORIZED",
+                "securityCode": "CHAT_SECURITY_004",
+                "expectedSecurityStatuses": ["BLOCKED_UNAUTHORIZED"],
+                "expectedSecurityCodes": ["CHAT_SECURITY_004"],
+                "expectedSecurityResults": [
+                    {
+                        "status": "BLOCKED_UNAUTHORIZED",
+                        "code": "CHAT_SECURITY_004",
+                    }
+                ],
+                "requireRdbEvidence": False,
+                "rdbEvidenceCount": 0,
+                "sourceCount": 0,
+                "urlCount": 0,
+            }
+        ],
+    }
+
+    output = check_rdb_chat_scenarios.format_markdown_result(result)
+
+    assert "# RDB 챗봇 시나리오 점검 결과" in output
+    assert "- 점검 상태: `PASS`" in output
+    assert "| 시나리오 | Role | Intent | 보안 상태 | 보안 코드 |" in output
+    assert (
+        "| operator-financial-blocked | OPERATOR | DELIVERY_RISK | "
+        "BLOCKED_UNAUTHORIZED | CHAT_SECURITY_004 | `false` | 0 | 0 | 0 |"
+    ) in output
+    assert (
+        "- `operator-financial-blocked`: "
+        "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘"
+    ) in output
+
+
 def test_check_rdb_chat_scenarios_main_does_not_expose_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -434,6 +478,57 @@ def test_check_rdb_chat_scenarios_main_does_not_expose_secret(
     output = stdout.getvalue()
     assert exit_code == 0
     assert "status=PASS" in output
+    assert "secret-answer-token" not in output
+
+
+def test_check_rdb_chat_scenarios_main_formats_markdown_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_rdb_chat_scenarios(args) -> dict:
+        return {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "operator-financial-blocked",
+                    "role": "OPERATOR",
+                    "question": "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
+                    "intent": "DELIVERY_RISK",
+                    "securityStatus": "BLOCKED_UNAUTHORIZED",
+                    "securityCode": "CHAT_SECURITY_004",
+                    "expectedSecurityStatuses": ["BLOCKED_UNAUTHORIZED"],
+                    "expectedSecurityCodes": ["CHAT_SECURITY_004"],
+                    "expectedSecurityResults": [
+                        {
+                            "status": "BLOCKED_UNAUTHORIZED",
+                            "code": "CHAT_SECURITY_004",
+                        }
+                    ],
+                    "requireRdbEvidence": False,
+                    "rdbEvidenceCount": 0,
+                    "sourceCount": 0,
+                    "urlCount": 0,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        check_rdb_chat_scenarios,
+        "check_rdb_chat_scenarios",
+        fake_check_rdb_chat_scenarios,
+    )
+    stdout = StringIO()
+
+    exit_code = check_rdb_chat_scenarios.main(
+        ["--token", "secret-answer-token", "--scenario-group", "access", "--markdown"],
+        stdout=stdout,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "# RDB 챗봇 시나리오 점검 결과" in output
+    assert "operator-financial-blocked" in output
+    assert "CHAT_SECURITY_004" in output
     assert "secret-answer-token" not in output
 
 

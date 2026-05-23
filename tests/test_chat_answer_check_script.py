@@ -838,6 +838,78 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
     assert "secret-answer-token" not in output
 
 
+def test_check_chat_answer_script_main_formats_markdown_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_chat_answer(**kwargs) -> dict:
+        return {
+            "checkStatus": "PASS",
+            "url": "http://fastapi.local/api/v1/chat/answer",
+            "intent": "MATERIAL_SHORTAGE",
+            "answer": "핵심 답변: 자재 부족 근거를 확인했습니다.",
+            "expectedIntent": None,
+            "securityStatus": "PASSED",
+            "expectedSecurityStatus": None,
+            "securityCode": None,
+            "expectedSecurityCode": None,
+            "evidenceCount": 1,
+            "minEvidenceCount": 1,
+            "requireRdbEvidence": True,
+            "rdbEvidenceCount": 1,
+            "documentSourceCount": 0,
+            "minDocumentSourceCount": 0,
+            "usedRdbEvidence": True,
+            "usedVectorSearch": False,
+            "requireVectorSearch": False,
+            "vectorSearchSkippedReason": None,
+            "usedLlmGeneration": False,
+            "requireLlmGeneration": False,
+            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "expectedLlmGenerationSkippedReason": None,
+            "sourceCount": 1,
+            "sourceDetails": [
+                {
+                    "sourceOrigin": "RDB",
+                    "sourceType": "MATERIAL",
+                    "title": "MAT-FOAM-ADD 발포 첨가제 SHORTAGE",
+                    "url": "/materials/inventory/711?mode=read",
+                }
+            ],
+            "urlCount": 1,
+            "urlDetails": [
+                {
+                    "type": "MATERIAL",
+                    "label": "MAT-FOAM-ADD 발포 첨가제 SHORTAGE",
+                    "url": "/materials/inventory/711?mode=read",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(check_chat_answer, "check_chat_answer", fake_check_chat_answer)
+    stdout = StringIO()
+
+    exit_code = check_chat_answer.main(
+        [
+            "--base-url",
+            "http://fastapi.local",
+            "--token",
+            "secret-answer-token",
+            "--min-evidence-count",
+            "1",
+            "--require-rdb-evidence",
+            "--markdown",
+        ],
+        stdout=stdout,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "# 챗봇 답변 점검 결과" in output
+    assert "핵심 답변: 자재 부족 근거를 확인했습니다." in output
+    assert "| `RDB` / `MATERIAL` | MAT-FOAM-ADD 발포 첨가제 SHORTAGE |" in output
+    assert "secret-answer-token" not in output
+
+
 def test_check_chat_answer_script_main_returns_one_without_token() -> None:
     stderr = StringIO()
 
