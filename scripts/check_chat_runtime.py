@@ -241,8 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(check_rag_chat_scenarios.RAG_CHAT_SCENARIO_GROUPS),
         help=(
-            "RAG 챗봇 시나리오 그룹입니다. core, access 중 선택하며 "
-            "여러 번 지정할 수 있습니다. 생략하면 core를 실행합니다."
+            "RAG 챗봇 시나리오 그룹입니다. core, access, company 중 선택하며 "
+            "여러 번 지정할 수 있습니다. 생략하면 core/company를 실행합니다."
         ),
     )
     parser.add_argument(

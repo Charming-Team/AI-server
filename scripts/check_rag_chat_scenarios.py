@@ -170,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(RAG_CHAT_SCENARIO_GROUPS),
         help=(
-            "실행할 시나리오 묶음입니다. core, access 중 선택하며 "
+            "실행할 시나리오 묶음입니다. core, access, company 중 선택하며 "
             "여러 번 지정할 수 있습니다. 생략하면 core만 실행합니다."
         ),
     )
