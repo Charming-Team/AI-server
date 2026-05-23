@@ -43,6 +43,13 @@ def _answer_response(
     document_source_count: int = 1,
     used_vector_search: bool = True,
     security_status: str = "PASSED",
+    answer: str = (
+        "핵심 답변: RDB 근거와 Qdrant 문서 근거를 함께 확인했습니다.\n\n"
+        "확인 필요: 위 근거에 없는 내용은 추가 확인이 필요합니다."
+    ),
+    rdb_title: str = "생산계획 근거",
+    rdb_url: str = "/plans/1?mode=read",
+    document_title: str = "LINE-A01 병목 대응 기준",
 ) -> dict:
     security_code = None
     if security_status == "BLOCKED_UNAUTHORIZED":
@@ -51,13 +58,13 @@ def _answer_response(
     sources = []
     urls = []
     if rdb_evidence_count > 0:
-        urls.append({"label": "RDB 근거", "url": "/plans/1?mode=read", "type": "PLAN"})
+        urls.append({"label": "RDB 근거", "url": rdb_url, "type": "PLAN"})
         sources.append(
             {
                 "sourceType": "PLAN",
-                "title": "생산계획 근거",
+                "title": rdb_title,
                 "summary": "RDB View에서 조회한 근거입니다.",
-                "url": "/plans/1?mode=read",
+                "url": rdb_url,
                 "referenceId": 1,
                 "source": "chat_production_plan_evidence_view",
                 "basisTime": "2026-05-12T10:35:00+09:00",
@@ -75,7 +82,7 @@ def _answer_response(
         sources.append(
             {
                 "sourceType": "COMPANY_INFO",
-                "title": "LINE-A01 병목 대응 기준",
+                "title": document_title,
                 "summary": "Qdrant에서 조회한 회사정보 근거입니다.",
                 "url": "/company-info/line-a01-bottleneck-guide",
                 "referenceId": None,
@@ -86,15 +93,17 @@ def _answer_response(
             }
         )
 
+    resolved_answer = (
+        answer
+        if security_status == "PASSED"
+        else "현재 역할 권한으로는 답변할 수 없는 요청입니다."
+    )
+
     return {
         "sessionId": 10,
         "messageId": 24,
         "intent": intent.value,
-        "answer": (
-            "RDB 근거와 Qdrant 문서 근거를 함께 확인했습니다."
-            if security_status == "PASSED"
-            else "현재 역할 권한으로는 답변할 수 없는 요청입니다."
-        ),
+        "answer": resolved_answer,
         "basisTime": "2026-05-12T10:35:00+09:00",
         "urls": urls,
         "sources": sources,
@@ -114,6 +123,24 @@ def _answer_response(
             "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         },
     }
+
+
+def _rdb_title_for_scenario(scenario_id: str) -> str:
+    if scenario_id == "material-shortage-with-company-guide":
+        return "MAT-FOAM-ADD 발포 첨가제 SHORTAGE"
+    if scenario_id == "line-bottleneck-with-company-guide":
+        return "LINE-PE-01 MAINTENANCE"
+    return "납기 위험 RDB 근거"
+
+
+def _document_title_for_scenario(scenario_id: str) -> str:
+    if scenario_id == "company-overview-document-allowed":
+        return "S-Map 회사 개요"
+    if scenario_id == "manager-revenue-company-info-allowed":
+        return "S-Map 매출 구조"
+    if scenario_id == "line-bottleneck-with-company-guide":
+        return "LINE-PE-01 병목 대응 기준"
+    return "S-Map 생산 리스크 문서"
 
 
 def test_select_rag_scenarios_returns_core_by_default() -> None:
@@ -171,7 +198,11 @@ def test_check_rag_chat_scenarios_calls_fastapi_for_each_core_scenario() -> None
             if scenario.question in body:
                 return httpx.Response(
                     200,
-                    json=_answer_response(scenario.intent),
+                    json=_answer_response(
+                        scenario.intent,
+                        rdb_title=_rdb_title_for_scenario(scenario.scenario_id),
+                        document_title=_document_title_for_scenario(scenario.scenario_id),
+                    ),
                     request=request,
                 )
         return httpx.Response(500, json={}, request=request)
@@ -223,6 +254,7 @@ def test_check_rag_chat_scenarios_verifies_access_group() -> None:
                         evidence_count=1,
                         rdb_evidence_count=0,
                         document_source_count=1,
+                        document_title=_document_title_for_scenario(scenario.scenario_id),
                     ),
                     request=request,
                 )
@@ -276,6 +308,7 @@ def test_check_rag_chat_scenarios_verifies_company_group() -> None:
                         evidence_count=1,
                         rdb_evidence_count=0,
                         document_source_count=1,
+                        document_title=_document_title_for_scenario(scenario.scenario_id),
                     ),
                     request=request,
                 )
@@ -361,6 +394,90 @@ def test_check_rag_chat_scenarios_fails_when_vector_search_is_not_used() -> None
 
     assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
     assert "Qdrant Vector Search가 사용되지 않았습니다" in exc_info.value.message
+
+
+def test_check_rag_chat_scenarios_fails_when_company_info_mixes_rdb_evidence() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.REPORT_LOOKUP,
+                evidence_count=2,
+                rdb_evidence_count=1,
+                document_source_count=1,
+                document_title="S-Map 회사 개요",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(scenario=["company-overview-document-allowed"]),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "RDB Evidence 개수가 허용 기준보다 많습니다" in exc_info.value.message
+
+
+def test_check_rag_chat_scenarios_fails_when_rdb_url_is_not_read_only() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                rdb_url="/production-lines/103",
+                document_title="LINE-PE-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(scenario=["line-bottleneck-with-company-guide"]),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "read-only 형식이 아닙니다" in exc_info.value.message
+
+
+def test_check_rag_chat_scenarios_fails_when_required_source_title_is_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                rdb_title="LINE-PP-01 RUNNING",
+                document_title="LINE-PP-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(scenario=["line-bottleneck-with-company-guide"]),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "출처 제목에 필요한 문구가 없습니다" in exc_info.value.message
 
 
 def test_check_rag_chat_scenarios_formats_text_result() -> None:

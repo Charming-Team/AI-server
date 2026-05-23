@@ -129,10 +129,17 @@ class ChatResponseBuilder:
         return deduplicated_sources
 
     def _source_key(self, source: ChatSource) -> tuple:
+        if source.url:
+            return (
+                "url",
+                source.source_origin,
+                source.source_type,
+                source.url,
+            )
         return (
+            "source",
             source.source_type,
             source.reference_id,
-            source.url,
             source.source,
             source.title,
             source.basis_time,

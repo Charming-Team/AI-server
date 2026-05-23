@@ -3,7 +3,7 @@ from app.features.chat.schemas import DocumentSearchResult, EvidenceResult
 
 class GroundedFallbackAnswerBuilder:
     _max_items = 3
-    _max_summary_chars = 180
+    _max_summary_chars = 140
 
     def build(
         self,
@@ -16,10 +16,12 @@ class GroundedFallbackAnswerBuilder:
             sections.append(
                 self._build_section(
                     "RDB 근거",
-                    [
-                        (item.title, item.summary)
-                        for item in evidence_result.items[: self._max_items]
-                    ],
+                    self._select_items(
+                        [
+                            (item.title, item.summary)
+                            for item in evidence_result.items
+                        ],
+                    ),
                 )
             )
 
@@ -27,10 +29,12 @@ class GroundedFallbackAnswerBuilder:
             sections.append(
                 self._build_section(
                     "문서 검색 근거",
-                    [
-                        (source.title, source.summary)
-                        for source in document_result.sources[: self._max_items]
-                    ],
+                    self._select_items(
+                        [
+                            (source.title, source.summary)
+                            for source in document_result.sources
+                        ],
+                    ),
                 )
             )
 
@@ -45,12 +49,12 @@ class GroundedFallbackAnswerBuilder:
         has_rdb_evidence = bool(evidence_result.items)
         has_document_sources = bool(document_result.sources)
         if has_rdb_evidence and has_document_sources:
-            return "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다."
+            return "핵심 답변: 확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다."
         if has_rdb_evidence:
-            return "확인된 RDB 근거 기준으로 요약합니다."
+            return "핵심 답변: 확인된 RDB 근거 기준으로 요약합니다."
         if has_document_sources:
-            return "확인된 문서 검색 근거 기준으로 요약합니다."
-        return "확인된 내부 근거 기준으로 요약합니다."
+            return "핵심 답변: 확인된 문서 검색 근거 기준으로 요약합니다."
+        return "핵심 답변: 확인된 내부 근거 기준으로 요약합니다."
 
     def _build_section(
         self,
@@ -63,6 +67,19 @@ class GroundedFallbackAnswerBuilder:
             for index, (item_title, item_summary) in enumerate(items, start=1)
         )
         return "\n".join(lines)
+
+    def _select_items(self, items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        selected_items: list[tuple[str, str]] = []
+        seen_titles: set[str] = set()
+        for item_title, item_summary in items:
+            normalized_title = item_title.strip().casefold()
+            if normalized_title in seen_titles:
+                continue
+            seen_titles.add(normalized_title)
+            selected_items.append((item_title, item_summary))
+            if len(selected_items) >= self._max_items:
+                break
+        return selected_items
 
     def _truncate(self, text: str) -> str:
         if len(text) <= self._max_summary_chars:
