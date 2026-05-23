@@ -254,6 +254,7 @@ async def check_chat_answer(
         "checkStatus": "PASS",
         "url": url,
         "intent": actual_intent,
+        "answer": answer.answer,
         "expectedIntent": expected_intent,
         "securityStatus": security_status,
         "expectedSecurityStatus": expected_security_status,
@@ -274,7 +275,24 @@ async def check_chat_answer(
         "llmGenerationSkippedReason": llm_skipped_reason,
         "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
         "sourceCount": len(answer.sources),
+        "sourceDetails": [
+            {
+                "sourceType": source.source_type,
+                "title": source.title,
+                "url": source.url,
+                "sourceOrigin": source.source_origin,
+            }
+            for source in answer.sources
+        ],
         "urlCount": len(answer.urls),
+        "urlDetails": [
+            {
+                "label": url_item.label,
+                "url": url_item.url,
+                "type": url_item.type,
+            }
+            for url_item in answer.urls
+        ],
     }
 
 

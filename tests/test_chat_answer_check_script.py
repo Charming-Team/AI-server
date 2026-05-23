@@ -51,6 +51,7 @@ def _answer_response(
     security_status: str = "PASSED",
     security_code: str | None = None,
     intent: str = "MATERIAL_SHORTAGE",
+    answer: str = "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
 ) -> dict:
     resolved_rdb_evidence_count = (
         evidence_count if rdb_evidence_count is None else rdb_evidence_count
@@ -108,7 +109,7 @@ def _answer_response(
         "sessionId": 10,
         "messageId": 24,
         "intent": intent,
-        "answer": "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
+        "answer": answer,
         "basisTime": "2026-05-12T10:35:00+09:00",
         "urls": urls,
         "sources": sources,
@@ -208,6 +209,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "checkStatus": "PASS",
         "url": "http://fastapi.local/api/v1/chat/answer",
         "intent": ChatIntent.MATERIAL_SHORTAGE.value,
+        "answer": "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
         "expectedIntent": None,
         "securityStatus": "PASSED",
         "expectedSecurityStatus": None,
@@ -228,7 +230,22 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         "expectedLlmGenerationSkippedReason": None,
         "sourceCount": 1,
+        "sourceDetails": [
+            {
+                "sourceType": "MATERIAL",
+                "title": "RM-AL-001 알루미늄 원자재 재고 부족",
+                "url": "/materials/inventory/1?mode=read",
+                "sourceOrigin": "RDB",
+            }
+        ],
         "urlCount": 1,
+        "urlDetails": [
+            {
+                "label": "RM-AL-001 알루미늄 원자재 재고 부족",
+                "url": "/materials/inventory/1?mode=read",
+                "type": "MATERIAL",
+            }
+        ],
     }
 
 
