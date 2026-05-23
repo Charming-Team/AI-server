@@ -59,6 +59,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "qdrant_readonly_search_role": "MANUFACTURING_MANAGER",
         "qdrant_readonly_search_min_source_count": 1,
         "json": False,
+        "markdown": False,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -1815,6 +1816,62 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
     assert "readiness: status=FAIL code=CHAT_EVIDENCE_004" in output
     assert "failure=readiness code=CHAT_EVIDENCE_004" in output
     assert "nextAction=RDB Evidence 설정을 확인하세요." in output
+
+
+def test_check_chat_runtime_markdown_output_includes_step_status() -> None:
+    output = check_chat_runtime.format_markdown_result(
+        {
+            "checkStatus": "FAIL",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "requiredComponents": ["rdbEvidence"],
+            "runtimeMode": {
+                "apiPrefix": "/ai/api/v1",
+                "groundingMode": "RDB_QDRANT",
+                "answerMode": "FALLBACK",
+                "ragSearchMode": "ENABLED",
+                "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+                "expectedLlmSkippedReason": (
+                    "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                ),
+            },
+            "summary": {
+                "totalStepCount": 1,
+                "passedStepCount": 0,
+                "failedStepCount": 1,
+                "failedSteps": [
+                    {
+                        "name": "readiness",
+                        "code": "CHAT_EVIDENCE_004",
+                        "message": "RDB Evidence DSN이 설정되지 않았습니다.",
+                        "action": "RDB Evidence 설정을 확인하세요.",
+                    }
+                ],
+                "nextActions": ["RDB Evidence 설정을 확인하세요."],
+            },
+            "steps": [
+                {
+                    "name": "readiness",
+                    "status": "FAIL",
+                    "error": {
+                        "code": "CHAT_EVIDENCE_004",
+                        "message": "RDB Evidence DSN이 설정되지 않았습니다.",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert "# 챗봇 런타임 통합 점검 결과" in output
+    assert "- 점검 상태: `FAIL`" in output
+    assert "| Grounding Mode | RDB_QDRANT |" in output
+    assert "| Step | 상태 | 코드 | 메시지 |" in output
+    assert (
+        "| readiness | `FAIL` | CHAT_EVIDENCE_004 | "
+        "RDB Evidence DSN이 설정되지 않았습니다. |"
+    ) in output
+    assert "## 다음 조치" in output
+    assert "- RDB Evidence 설정을 확인하세요." in output
 
 
 def test_check_chat_runtime_builds_failure_summary_from_result_error() -> None:

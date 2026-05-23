@@ -392,6 +392,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print result as JSON",
     )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
+    )
     return parser
 
 
@@ -1440,6 +1445,129 @@ def format_text_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_markdown_result(result: dict[str, Any]) -> str:
+    summary = result.get("summary", {})
+    required_components = result.get("requiredComponents", [])
+    lines = [
+        "# 챗봇 런타임 통합 점검 결과",
+        "",
+        f"- 점검 상태: `{_markdown_text(result.get('checkStatus'))}`",
+        f"- 모드: `{_markdown_text(result.get('mode'))}`",
+        f"- 네트워크 점검: `{_markdown_text(result.get('networkChecked'))}`",
+        "- 필수 구성요소: "
+        f"`{_markdown_text(', '.join(required_components) or '-')}`",
+        (
+            "- Step 요약: "
+            f"전체 `{summary.get('totalStepCount', len(result['steps']))}`, "
+            f"통과 `{summary.get('passedStepCount', 0)}`, "
+            f"실패 `{summary.get('failedStepCount', 0)}`"
+        ),
+    ]
+
+    runtime_mode = result.get("runtimeMode")
+    if isinstance(runtime_mode, dict):
+        lines.extend(
+            [
+                "",
+                "## 런타임 모드",
+                "",
+                "| 항목 | 값 |",
+                "| --- | --- |",
+                (
+                    "| API Prefix | "
+                    f"{_escape_markdown_cell(runtime_mode.get('apiPrefix'))} |"
+                ),
+                (
+                    "| Grounding Mode | "
+                    f"{_escape_markdown_cell(runtime_mode.get('groundingMode'))} |"
+                ),
+                (
+                    "| Answer Mode | "
+                    f"{_escape_markdown_cell(runtime_mode.get('answerMode'))} |"
+                ),
+                (
+                    "| RAG Search Mode | "
+                    f"{_escape_markdown_cell(runtime_mode.get('ragSearchMode'))} |"
+                ),
+                "| Enabled Grounding Sources | "
+                f"{_format_markdown_list(runtime_mode.get('enabledGroundingSources'))} |",
+            ]
+        )
+        expected_skip = runtime_mode.get("expectedLlmSkippedReason")
+        if expected_skip:
+            lines.append(
+                "| Expected LLM Skip Reason | "
+                f"{_escape_markdown_cell(expected_skip)} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Step 결과",
+            "",
+            "| Step | 상태 | 코드 | 메시지 |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for step in result["steps"]:
+        if step.get("status") == "PASS":
+            code, message = None, "-"
+        else:
+            code, message = extract_failure_reason(step)
+        lines.append(
+            "| "
+            f"{_escape_markdown_cell(step.get('name'))} | "
+            f"`{_escape_markdown_cell(step.get('status'))}` | "
+            f"{_escape_markdown_cell(code)} | "
+            f"{_escape_markdown_cell(message)} |"
+        )
+
+    failed_steps = summary.get("failedSteps", [])
+    if failed_steps:
+        lines.extend(
+            [
+                "",
+                "## 실패 상세",
+                "",
+                "| Step | 코드 | 메시지 |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for item in failed_steps:
+            lines.append(
+                "| "
+                f"{_escape_markdown_cell(item.get('name'))} | "
+                f"{_escape_markdown_cell(item.get('code'))} | "
+                f"{_escape_markdown_cell(item.get('message'))} |"
+            )
+
+    next_actions = summary.get("nextActions", [])
+    if next_actions:
+        lines.extend(["", "## 다음 조치", ""])
+        lines.extend(f"- {action}" for action in next_actions)
+
+    return "\n".join(lines)
+
+
+def _markdown_text(value: object) -> str:
+    if value is None:
+        return "-"
+    return str(value)
+
+
+def _escape_markdown_cell(value: object) -> str:
+    if value is None or value == "":
+        return "-"
+    text = str(value)
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _format_markdown_list(value: object) -> str:
+    if not isinstance(value, list):
+        return _escape_markdown_cell(value)
+    return _escape_markdown_cell(", ".join(str(item) for item in value))
+
+
 def format_json_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -1462,6 +1590,8 @@ def main(
 
     if args.json:
         print(format_json_result(result), file=output)
+    elif args.markdown:
+        print(format_markdown_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
     return 0 if result["checkStatus"] == "PASS" else 2
