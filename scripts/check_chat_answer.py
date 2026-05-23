@@ -87,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[intent.value for intent in ChatIntent],
         help="기대하는 질문 intent. 예: MATERIAL_SHORTAGE, LINE_BOTTLENECK",
     )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -382,6 +387,76 @@ def format_json_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
+def format_markdown_result(result: dict[str, Any]) -> str:
+    lines = [
+        "# 챗봇 답변 점검 결과",
+        "",
+        f"- 점검 상태: `{result['checkStatus']}`",
+        f"- API URL: `{result['url']}`",
+        f"- Intent: `{result['intent']}`",
+        (
+            "- 보안 결과: "
+            f"`{result['securityStatus']}`"
+            f"{_format_optional_code(result['securityCode'])}"
+        ),
+        (
+            "- 근거 수: "
+            f"전체 `{result['evidenceCount']}`, "
+            f"RDB `{result['rdbEvidenceCount']}`, "
+            f"Qdrant `{result['documentSourceCount']}`"
+        ),
+        (
+            "- 생성 상태: "
+            f"LLM `{result['usedLlmGeneration']}`, "
+            f"Vector Search `{result['usedVectorSearch']}`"
+        ),
+    ]
+
+    answer = result.get("answer")
+    if answer:
+        lines.extend(["", "## 답변", "", "```text", answer, "```"])
+
+    source_details = result.get("sourceDetails") or []
+    if source_details:
+        lines.extend(["", "## 출처", "", "| 유형 | 제목 | URL |", "| --- | --- | --- |"])
+        lines.extend(
+            (
+                f"| `{source['sourceOrigin'] or '-'}` / `{source['sourceType']}` "
+                f"| {_escape_markdown_cell(source['title'])} "
+                f"| `{source['url'] or '-'}` |"
+            )
+            for source in source_details
+        )
+
+    url_details = result.get("urlDetails") or []
+    if url_details:
+        lines.extend(
+            ["", "## 화면 이동 URL", "", "| 유형 | 라벨 | URL |", "| --- | --- | --- |"]
+        )
+        lines.extend(
+            (
+                f"| `{url['type']}` "
+                f"| {_escape_markdown_cell(url['label'])} "
+                f"| `{url['url']}` |"
+            )
+            for url in url_details
+        )
+
+    return "\n".join(lines)
+
+
+def _format_optional_code(code: str | None) -> str:
+    if code is None:
+        return ""
+    return f" / `{code}`"
+
+
+def _escape_markdown_cell(value: str | None) -> str:
+    if value is None:
+        return "-"
+    return value.replace("|", "\\|").replace("\n", "<br>")
+
+
 def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
@@ -426,6 +501,8 @@ def main(
 
     if args.json:
         print(format_json_result(result), file=output)
+    elif args.markdown:
+        print(format_markdown_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
     return 0

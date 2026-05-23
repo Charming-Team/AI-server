@@ -34,6 +34,7 @@ def _build_args(**overrides):
         "expected_security_status": None,
         "expected_security_code": None,
         "expected_intent": None,
+        "markdown": False,
         "json": False,
     }
     values.update(overrides)
@@ -700,6 +701,51 @@ def test_check_chat_answer_script_validates_no_llm_skipped_reason() -> None:
 
     assert result["llmGenerationSkippedReason"] is None
     assert result["expectedLlmGenerationSkippedReason"] == "NONE"
+
+
+def test_check_chat_answer_script_formats_markdown_result() -> None:
+    output = check_chat_answer.format_markdown_result(
+        {
+            "checkStatus": "PASS",
+            "url": "http://fastapi.local/api/v1/chat/answer",
+            "intent": "LINE_BOTTLENECK",
+            "securityStatus": "PASSED",
+            "securityCode": None,
+            "evidenceCount": 2,
+            "rdbEvidenceCount": 1,
+            "documentSourceCount": 1,
+            "usedLlmGeneration": False,
+            "usedVectorSearch": True,
+            "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
+            "sourceDetails": [
+                {
+                    "sourceOrigin": "RDB",
+                    "sourceType": "LINE",
+                    "title": "LINE-PE-01 MAINTENANCE",
+                    "url": "/production-lines/103?mode=read",
+                },
+                {
+                    "sourceOrigin": "QDRANT",
+                    "sourceType": "COMPANY_INFO",
+                    "title": "LINE-PE-01 병목 대응 기준",
+                    "url": "/company-info/line-pe-01-bottleneck-guide",
+                },
+            ],
+            "urlDetails": [
+                {
+                    "type": "LINE",
+                    "label": "LINE-PE-01 MAINTENANCE",
+                    "url": "/production-lines/103?mode=read",
+                }
+            ],
+        }
+    )
+
+    assert "# 챗봇 답변 점검 결과" in output
+    assert "Intent: `LINE_BOTTLENECK`" in output
+    assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
+    assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
+    assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
 
 
 def test_check_chat_answer_script_fails_when_llm_skipped_reason_is_unexpected() -> None:
