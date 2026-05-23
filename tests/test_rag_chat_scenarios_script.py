@@ -30,6 +30,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "min_evidence_count": None,
         "min_rdb_evidence_count": None,
         "min_document_source_count": None,
+        "require_llm_generation": False,
         "markdown": False,
         "json": False,
     }
@@ -51,6 +52,7 @@ def _answer_response(
     rdb_title: str = "생산계획 근거",
     rdb_url: str = "/plans/1?mode=read",
     document_title: str = "LINE-A01 병목 대응 기준",
+    used_llm_generation: bool = False,
 ) -> dict:
     security_code = None
     if security_status == "BLOCKED_UNAUTHORIZED":
@@ -116,12 +118,16 @@ def _answer_response(
         "modelResult": {
             "usedVectorSearch": used_vector_search,
             "usedRdbEvidence": rdb_evidence_count > 0,
-            "usedLlmGeneration": False,
+            "usedLlmGeneration": used_llm_generation,
             "rdbEvidenceCount": rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
             "vectorSearchSkippedReason": None if used_vector_search else "Qdrant 미사용",
-            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "llmGenerationSkippedReason": (
+                None
+                if used_llm_generation
+                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+            ),
         },
     }
 
@@ -344,14 +350,14 @@ def test_check_rag_chat_scenarios_fails_when_rdb_count_is_below_minimum() -> Non
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-                json=_answer_response(
-                    ChatIntent.LINE_BOTTLENECK,
-                    evidence_count=2,
-                    rdb_evidence_count=1,
-                    document_source_count=1,
-                ),
-                request=request,
-            )
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                evidence_count=2,
+                rdb_evidence_count=1,
+                document_source_count=1,
+            ),
+            request=request,
+        )
 
     async def run() -> None:
         transport = httpx.MockTransport(handler)
@@ -395,6 +401,67 @@ def test_check_rag_chat_scenarios_fails_when_vector_search_is_not_used() -> None
 
     assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
     assert "Qdrant Vector Search가 사용되지 않았습니다" in exc_info.value.message
+
+
+def test_check_rag_chat_scenarios_verifies_required_llm_generation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+                used_llm_generation=True,
+            ),
+            request=request,
+        )
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(
+                    scenario=["line-bottleneck-with-company-guide"],
+                    require_llm_generation=True,
+                ),
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["scenarios"][0]["requireLlmGeneration"] is True
+    assert result["scenarios"][0]["usedLlmGeneration"] is True
+
+
+def test_check_rag_chat_scenarios_fails_when_llm_generation_is_required() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(
+                    scenario=["line-bottleneck-with-company-guide"],
+                    require_llm_generation=True,
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 답변 생성이 사용되지 않았습니다" in exc_info.value.message
 
 
 def test_check_rag_chat_scenarios_fails_when_company_info_mixes_rdb_evidence() -> None:
@@ -498,6 +565,8 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
                     "rdbEvidenceCount": 1,
                     "documentSourceCount": 1,
                     "usedVectorSearch": True,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -508,6 +577,8 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
     assert "status=PASS" in output
     assert "scenario=line-bottleneck-with-company-guide" in output
     assert "requireVectorSearch=True" in output
+    assert "requireLlmGeneration=False" in output
+    assert "usedLlmGeneration=False" in output
     assert "documentSourceCount=1" in output
 
 
@@ -527,6 +598,8 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
                     "evidenceCount": 2,
                     "rdbEvidenceCount": 1,
                     "documentSourceCount": 1,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
                     "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
                     "sourceDetails": [
                         {
@@ -557,6 +630,7 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
     assert "# RAG 챗봇 시나리오 점검 결과" in output
     assert "## line-bottleneck-with-company-guide" in output
     assert "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘" in output
+    assert "- LLM 생성: 요구 `False`, 사용 `False`" in output
     assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
     assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
     assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
@@ -581,6 +655,8 @@ def test_check_rag_chat_scenarios_main_does_not_expose_secret(
                     "rdbEvidenceCount": 1,
                     "documentSourceCount": 1,
                     "usedVectorSearch": True,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -625,6 +701,8 @@ def test_check_rag_chat_scenarios_main_formats_markdown_without_secret(
                     "rdbEvidenceCount": 1,
                     "documentSourceCount": 1,
                     "usedVectorSearch": True,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                     "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",

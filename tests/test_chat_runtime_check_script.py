@@ -551,6 +551,7 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
     ]
     assert result["steps"][3]["result"]["scenarioGroups"] == ["core", "company"]
     assert result["steps"][3]["result"]["scenarioCount"] == 6
+    assert result["steps"][3]["result"]["requireLlmGeneration"] is False
     assert result["steps"][7]["result"]["minDocumentSourceCount"] == 1
     assert result["steps"][7]["result"]["requireRdbEvidence"] is True
     assert result["steps"][7]["result"]["requireVectorSearch"] is True
@@ -633,6 +634,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "failedSteps": [],
         "nextActions": [],
     }
+    assert result["steps"][5]["result"]["requireLlmGeneration"] is True
 
 
 def test_check_chat_runtime_validate_only_checks_answer_output_policy_smoke() -> None:
@@ -789,6 +791,62 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
         "token": "answer-token",
         "scenario_group": ["access"],
         "scenario": ["operator-financial-blocked"],
+    }
+
+
+def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(
+        network=True,
+        require_llm_generation=True,
+        rag_chat_scenario_group=["core"],
+        rag_chat_scenario=["line-bottleneck-with-company-guide"],
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_rag_chat_scenarios(scenario_args):
+        captured["base_url"] = scenario_args.base_url
+        captured["path"] = scenario_args.path
+        captured["token"] = scenario_args.token
+        captured["scenario_group"] = scenario_args.scenario_group
+        captured["scenario"] = scenario_args.scenario
+        captured["require_llm_generation"] = scenario_args.require_llm_generation
+        return {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "line-bottleneck-with-company-guide",
+                    "requireLlmGeneration": True,
+                    "usedLlmGeneration": True,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_rag_chat_scenarios,
+        "check_rag_chat_scenarios",
+        fake_rag_chat_scenarios,
+    )
+
+    result = anyio.run(check_chat_runtime.run_rag_chat_scenarios, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert captured == {
+        "base_url": "http://fastapi.local",
+        "path": "/api/v1/chat/answer",
+        "token": "answer-token",
+        "scenario_group": ["core"],
+        "scenario": ["line-bottleneck-with-company-guide"],
+        "require_llm_generation": True,
     }
 
 

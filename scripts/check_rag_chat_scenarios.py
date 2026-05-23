@@ -213,6 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="모든 시나리오에 적용할 최소 Qdrant 문서 출처 개수",
     )
     parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="챗봇 응답이 fallback이 아니라 LLM 생성 답변을 사용했는지 검증합니다.",
+    )
+    parser.add_argument(
         "--markdown",
         action="store_true",
         help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
@@ -279,6 +284,7 @@ async def check_rag_chat_scenarios(
                 scenario,
             ),
             require_vector_search=scenario.require_vector_search,
+            require_llm_generation=args.require_llm_generation,
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
             expected_intent=scenario.intent.value,
@@ -455,6 +461,8 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"maxRdbEvidenceCount={scenario.get('maxRdbEvidenceCount')} "
             f"documentSourceCount={scenario['documentSourceCount']} "
             f"usedVectorSearch={scenario['usedVectorSearch']} "
+            f"requireLlmGeneration={scenario['requireLlmGeneration']} "
+            f"usedLlmGeneration={scenario['usedLlmGeneration']} "
             f"sourceCount={scenario['sourceCount']} "
             f"urlCount={scenario['urlCount']}"
         )
@@ -492,6 +500,11 @@ def format_markdown_result(result: dict[str, Any]) -> str:
                     f"전체 `{scenario['evidenceCount']}`, "
                     f"RDB `{scenario['rdbEvidenceCount']}`, "
                     f"Qdrant `{scenario['documentSourceCount']}`"
+                ),
+                (
+                    "- LLM 생성: "
+                    f"요구 `{scenario['requireLlmGeneration']}`, "
+                    f"사용 `{scenario['usedLlmGeneration']}`"
                 ),
             ]
         )

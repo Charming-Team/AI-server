@@ -1017,6 +1017,7 @@ async def run_rag_chat_scenarios(
             "scenarioGroups": scenario_groups,
             "scenarioCount": len(scenarios),
             "scenarioIds": [scenario.scenario_id for scenario in scenarios],
+            "requireLlmGeneration": bool(args.require_llm_generation),
         }
 
     scenario_args = argparse.Namespace(
@@ -1036,7 +1037,9 @@ async def run_rag_chat_scenarios(
         min_evidence_count=None,
         min_rdb_evidence_count=None,
         min_document_source_count=None,
+        require_llm_generation=bool(args.require_llm_generation),
         json=False,
+        markdown=False,
     )
     return await check_rag_chat_scenarios.check_rag_chat_scenarios(scenario_args)
 
