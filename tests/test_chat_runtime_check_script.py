@@ -43,6 +43,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "answer_api_min_evidence_count": 0,
         "answer_api_min_document_source_count": 0,
         "answer_api_expected_llm_skipped_reason": None,
+        "answer_api_max_llm_total_tokens": None,
         "recommendation_api_base_url": "http://fastapi.local",
         "recommendation_api_keyword": "라인",
         "recommendation_api_role": "MANUFACTURING_MANAGER",
@@ -827,6 +828,7 @@ def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
     args = _build_args(
         network=True,
         require_llm_generation=True,
+        answer_api_max_llm_total_tokens=200,
         rag_chat_scenario_group=["core"],
         rag_chat_scenario=["line-bottleneck-with-company-guide"],
     )
@@ -839,6 +841,7 @@ def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
         captured["scenario_group"] = scenario_args.scenario_group
         captured["scenario"] = scenario_args.scenario
         captured["require_llm_generation"] = scenario_args.require_llm_generation
+        captured["max_llm_total_tokens"] = scenario_args.max_llm_total_tokens
         return {
             "checkStatus": "PASS",
             "scenarioCount": 1,
@@ -868,6 +871,7 @@ def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
         "scenario_group": ["core"],
         "scenario": ["line-bottleneck-with-company-guide"],
         "require_llm_generation": True,
+        "max_llm_total_tokens": 200,
     }
 
 
@@ -1400,6 +1404,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
     args = _build_args(
         include_answer_api_smoke=True,
         answer_api_min_evidence_count=1,
+        answer_api_max_llm_total_tokens=200,
     )
 
     result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
@@ -1422,6 +1427,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "minDocumentSourceCount": 0,
         "requireVectorSearch": False,
         "requireLlmGeneration": False,
+        "maxLlmTotalTokens": 200,
         "expectedLlmGenerationSkippedReason": None,
     }
 
@@ -1627,6 +1633,7 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
         include_answer_api_smoke=True,
         require_llm_generation=True,
         answer_api_expected_llm_skipped_reason="NONE",
+        answer_api_max_llm_total_tokens=200,
     )
     captured: dict[str, Any] = {}
 
@@ -1638,6 +1645,7 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
         captured["expected_llm_skipped_reason"] = kwargs[
             "expected_llm_skipped_reason"
         ]
+        captured["max_llm_total_tokens"] = kwargs["max_llm_total_tokens"]
         return {
             "checkStatus": "PASS",
             "usedLlmGeneration": kwargs["require_llm_generation"],
@@ -1662,6 +1670,7 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
     assert captured == {
         "require_llm_generation": True,
         "expected_llm_skipped_reason": "NONE",
+        "max_llm_total_tokens": 200,
     }
 
 
