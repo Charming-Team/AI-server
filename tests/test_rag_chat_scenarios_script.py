@@ -31,6 +31,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "min_rdb_evidence_count": None,
         "min_document_source_count": None,
         "require_llm_generation": False,
+        "max_llm_total_tokens": None,
         "markdown": False,
         "json": False,
     }
@@ -233,6 +234,42 @@ def test_check_rag_chat_scenarios_calls_fastapi_for_each_core_scenario() -> None
     assert all(scenario["usedRdbEvidence"] is True for scenario in result["scenarios"])
     assert all(scenario["usedVectorSearch"] is True for scenario in result["scenarios"])
     assert all(scenario["documentSourceCount"] == 1 for scenario in result["scenarios"])
+
+
+def test_check_rag_chat_scenarios_applies_llm_total_token_limit() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                used_llm_generation=True,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(
+                    scenario=["line-bottleneck-with-company-guide"],
+                    max_llm_total_tokens=100,
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "expected<=100, actual=152" in exc_info.value.message
 
 
 def test_check_rag_chat_scenarios_verifies_access_group() -> None:
@@ -576,6 +613,7 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
                         "completionTokens": 32,
                         "totalTokens": 152,
                     },
+                    "maxLlmTotalTokens": 200,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -590,6 +628,7 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
     assert "usedLlmGeneration=False" in output
     assert "llmCacheHit=False" in output
     assert "llmUsage=prompt=120, completion=32, total=152" in output
+    assert "maxLlmTotalTokens=200" in output
     assert "documentSourceCount=1" in output
 
 
@@ -617,6 +656,7 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
                         "completionTokens": 32,
                         "totalTokens": 152,
                     },
+                    "maxLlmTotalTokens": 200,
                     "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
                     "sourceDetails": [
                         {
@@ -649,7 +689,7 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
     assert "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘" in output
     assert (
         "- LLM 생성: 요구 `False`, 사용 `False`, 캐시 `False`, "
-        "토큰 `prompt=120, completion=32, total=152`"
+        "토큰 `prompt=120, completion=32, total=152`, 최대 `200`"
     ) in output
     assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
     assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output

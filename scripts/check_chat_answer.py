@@ -66,6 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="LLM 답변 생성이 실제로 수행됐는지 검증합니다.",
     )
     parser.add_argument(
+        "--max-llm-total-tokens",
+        type=int,
+        default=None,
+        help="LLM total token 사용량의 최대 허용값입니다.",
+    )
+    parser.add_argument(
         "--expected-llm-skipped-reason",
         help=(
             "기대하는 LLM 생성 스킵 사유입니다. 스킵 사유가 없어야 하면 NONE을 "
@@ -138,6 +144,7 @@ async def check_chat_answer(
     min_document_source_count: int = 0,
     require_vector_search: bool = False,
     require_llm_generation: bool = False,
+    max_llm_total_tokens: int | None = None,
     expected_llm_skipped_reason: str | None = None,
     expected_security_status: str | None = None,
     expected_security_code: str | None = None,
@@ -237,6 +244,9 @@ async def check_chat_answer(
             message="FastAPI 챗봇 응답에 LLM 답변 생성이 사용되지 않았습니다.",
         )
 
+    llm_usage = _dump_llm_usage(answer)
+    _validate_max_llm_total_tokens(llm_usage, max_llm_total_tokens)
+
     llm_skipped_reason = answer.model_result.llm_generation_skipped_reason
     expected_llm_skipped_reason_value = _resolve_expected_optional_text(
         expected_llm_skipped_reason
@@ -277,7 +287,8 @@ async def check_chat_answer(
         "vectorSearchSkippedReason": answer.model_result.vector_search_skipped_reason,
         "usedLlmGeneration": answer.model_result.used_llm_generation,
         "llmCacheHit": answer.model_result.llm_cache_hit,
-        "llmUsage": _dump_llm_usage(answer),
+        "llmUsage": llm_usage,
+        "maxLlmTotalTokens": max_llm_total_tokens,
         "requireLlmGeneration": require_llm_generation,
         "llmGenerationSkippedReason": llm_skipped_reason,
         "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
@@ -375,6 +386,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"usedLlmGeneration={result['usedLlmGeneration']}",
         f"llmCacheHit={result['llmCacheHit']}",
         f"llmUsage={format_llm_usage(result.get('llmUsage'))}",
+        f"maxLlmTotalTokens={result.get('maxLlmTotalTokens')}",
         f"requireLlmGeneration={result['requireLlmGeneration']}",
         f"llmGenerationSkippedReason={result['llmGenerationSkippedReason']}",
         (
@@ -416,6 +428,7 @@ def format_markdown_result(result: dict[str, Any]) -> str:
             f"Vector Search `{result['usedVectorSearch']}`"
         ),
         f"- LLM 토큰 사용량: `{format_llm_usage(result.get('llmUsage'))}`",
+        f"- LLM 최대 토큰 기준: `{result.get('maxLlmTotalTokens') or '-'}`",
     ]
 
     answer = result.get("answer")
@@ -473,6 +486,27 @@ def format_llm_usage(usage: dict[str, Any] | None) -> str:
     )
 
 
+def _validate_max_llm_total_tokens(
+    llm_usage: dict[str, int] | None,
+    max_llm_total_tokens: int | None,
+) -> None:
+    if max_llm_total_tokens is None or llm_usage is None:
+        return
+
+    total_tokens = llm_usage["totalTokens"]
+    if total_tokens <= max_llm_total_tokens:
+        return
+
+    raise ChatServiceError(
+        status_code=500,
+        code=ChatErrorCode.CHAT_LLM_004,
+        message=(
+            "FastAPI 챗봇 응답의 LLM total token 사용량이 최대 허용값을 "
+            f"초과했습니다. expected<={max_llm_total_tokens}, actual={total_tokens}"
+        ),
+    )
+
+
 def _escape_markdown_cell(value: str | None) -> str:
     if value is None:
         return "-"
@@ -505,6 +539,7 @@ def main(
                 min_document_source_count=args.min_document_source_count,
                 require_vector_search=args.require_vector_search,
                 require_llm_generation=args.require_llm_generation,
+                max_llm_total_tokens=args.max_llm_total_tokens,
                 expected_llm_skipped_reason=args.expected_llm_skipped_reason,
                 expected_security_status=args.expected_security_status,
                 expected_security_code=args.expected_security_code,

@@ -30,6 +30,7 @@ def _build_args(**overrides):
         "min_document_source_count": 0,
         "require_vector_search": False,
         "require_llm_generation": False,
+        "max_llm_total_tokens": None,
         "expected_llm_skipped_reason": None,
         "expected_security_status": None,
         "expected_security_code": None,
@@ -232,6 +233,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "usedLlmGeneration": False,
         "llmCacheHit": False,
         "llmUsage": None,
+        "maxLlmTotalTokens": None,
         "requireLlmGeneration": False,
         "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         "expectedLlmGenerationSkippedReason": None,
@@ -293,6 +295,41 @@ def test_check_chat_answer_script_exposes_llm_usage() -> None:
         "completionTokens": 32,
         "totalTokens": 152,
     }
+
+
+def test_check_chat_answer_script_fails_when_llm_total_tokens_exceed_limit() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                used_llm_generation=True,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                max_llm_total_tokens=100,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "expected<=100, actual=152" in exc_info.value.message
 
 
 def test_check_chat_answer_script_fails_when_evidence_count_is_below_minimum() -> None:
@@ -766,6 +803,7 @@ def test_check_chat_answer_script_formats_markdown_result() -> None:
                 "completionTokens": 32,
                 "totalTokens": 152,
             },
+            "maxLlmTotalTokens": 200,
             "usedVectorSearch": True,
             "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
             "sourceDetails": [
@@ -796,6 +834,7 @@ def test_check_chat_answer_script_formats_markdown_result() -> None:
     assert "Intent: `LINE_BOTTLENECK`" in output
     assert "LLM Cache `False`" in output
     assert "- LLM 토큰 사용량: `prompt=120, completion=32, total=152`" in output
+    assert "- LLM 최대 토큰 기준: `200`" in output
     assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
     assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
     assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
