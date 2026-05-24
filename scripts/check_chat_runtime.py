@@ -348,6 +348,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--answer-api-require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "챗봇 답변 API와 RAG 시나리오 smoke check에서 LLM 캐시가 아니라 "
+            "실제 생성 경로를 탔는지 검증합니다. 배포 직후 연결 확인용입니다."
+        ),
+    )
+    parser.add_argument(
         "--document-api-base-url",
         default=check_document_index_api.DEFAULT_BASE_URL,
         help="문서 인덱싱/삭제 API smoke check에 사용할 FastAPI base URL",
@@ -1028,6 +1036,7 @@ async def run_rag_chat_scenarios(
             "scenarioIds": [scenario.scenario_id for scenario in scenarios],
             "requireLlmGeneration": bool(args.require_llm_generation),
             "maxLlmTotalTokens": args.answer_api_max_llm_total_tokens,
+            "requireLlmCacheMiss": bool(args.answer_api_require_llm_cache_miss),
         }
 
     scenario_args = argparse.Namespace(
@@ -1048,6 +1057,7 @@ async def run_rag_chat_scenarios(
         min_rdb_evidence_count=None,
         min_document_source_count=None,
         require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
         max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
         json=False,
         markdown=False,
@@ -1338,6 +1348,7 @@ async def run_answer_api_smoke(
             "requireVectorSearch": require_vector_search,
             "requireLlmGeneration": bool(args.require_llm_generation),
             "maxLlmTotalTokens": args.answer_api_max_llm_total_tokens,
+            "requireLlmCacheMiss": bool(args.answer_api_require_llm_cache_miss),
             "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
         }
 
@@ -1352,6 +1363,7 @@ async def run_answer_api_smoke(
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
         require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
         max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
         expected_llm_skipped_reason=expected_llm_skipped_reason,
         expected_intent=args.answer_api_expected_intent,

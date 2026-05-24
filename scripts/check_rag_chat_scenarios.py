@@ -218,6 +218,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="챗봇 응답이 fallback이 아니라 LLM 생성 답변을 사용했는지 검증합니다.",
     )
     parser.add_argument(
+        "--require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "LLM 답변이 캐시가 아니라 실제 생성 경로에서 만들어졌는지 검증합니다. "
+            "배포 직후 LLM 연결 확인용으로만 사용합니다."
+        ),
+    )
+    parser.add_argument(
         "--max-llm-total-tokens",
         type=int,
         default=None,
@@ -291,6 +299,7 @@ async def check_rag_chat_scenarios(
             ),
             require_vector_search=scenario.require_vector_search,
             require_llm_generation=args.require_llm_generation,
+            require_llm_cache_miss=args.require_llm_cache_miss,
             max_llm_total_tokens=args.max_llm_total_tokens,
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
@@ -317,6 +326,7 @@ async def check_rag_chat_scenarios(
                     scenario,
                 ),
                 "maxLlmTotalTokens": args.max_llm_total_tokens,
+                "requireLlmCacheMiss": args.require_llm_cache_miss,
                 **result,
             }
         )
@@ -472,6 +482,7 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"requireLlmGeneration={scenario['requireLlmGeneration']} "
             f"usedLlmGeneration={scenario['usedLlmGeneration']} "
             f"llmCacheHit={scenario.get('llmCacheHit', False)} "
+            f"requireLlmCacheMiss={scenario.get('requireLlmCacheMiss', False)} "
             f"llmUsage={check_chat_answer.format_llm_usage(scenario.get('llmUsage'))} "
             f"maxLlmTotalTokens={scenario.get('maxLlmTotalTokens')} "
             f"sourceCount={scenario['sourceCount']} "
@@ -517,6 +528,7 @@ def format_markdown_result(result: dict[str, Any]) -> str:
                     f"요구 `{scenario['requireLlmGeneration']}`, "
                     f"사용 `{scenario['usedLlmGeneration']}`, "
                     f"캐시 `{scenario.get('llmCacheHit', False)}`, "
+                    f"캐시 미스 요구 `{scenario.get('requireLlmCacheMiss', False)}`, "
                     "토큰 "
                     f"`{check_chat_answer.format_llm_usage(scenario.get('llmUsage'))}`, "
                     f"최대 `{scenario.get('maxLlmTotalTokens') or '-'}`"

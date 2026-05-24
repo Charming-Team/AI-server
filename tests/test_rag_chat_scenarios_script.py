@@ -31,6 +31,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "min_rdb_evidence_count": None,
         "min_document_source_count": None,
         "require_llm_generation": False,
+        "require_llm_cache_miss": False,
         "max_llm_total_tokens": None,
         "markdown": False,
         "json": False,
@@ -472,6 +473,54 @@ def test_check_rag_chat_scenarios_verifies_required_llm_generation() -> None:
     assert result["checkStatus"] == "PASS"
     assert result["scenarios"][0]["requireLlmGeneration"] is True
     assert result["scenarios"][0]["usedLlmGeneration"] is True
+    assert result["scenarios"][0]["requireLlmCacheMiss"] is False
+
+
+def test_check_rag_chat_scenarios_carries_llm_cache_miss_requirement() -> None:
+    captured: dict[str, bool] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                used_llm_generation=True,
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            original_check = check_rag_chat_scenarios.check_chat_answer.check_chat_answer
+
+            async def wrapped_check_chat_answer(**kwargs):
+                captured["require_llm_cache_miss"] = kwargs["require_llm_cache_miss"]
+                return await original_check(**kwargs)
+
+            check_rag_chat_scenarios.check_chat_answer.check_chat_answer = (
+                wrapped_check_chat_answer
+            )
+            try:
+                return await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                    _build_args(
+                        scenario=["line-bottleneck-with-company-guide"],
+                        require_llm_generation=True,
+                        require_llm_cache_miss=True,
+                    ),
+                    http_client=http_client,
+                )
+            finally:
+                check_rag_chat_scenarios.check_chat_answer.check_chat_answer = (
+                    original_check
+                )
+
+    result = anyio.run(run)
+
+    assert captured == {"require_llm_cache_miss": True}
+    assert result["scenarios"][0]["requireLlmCacheMiss"] is True
 
 
 def test_check_rag_chat_scenarios_fails_when_llm_generation_is_required() -> None:
@@ -608,6 +657,7 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
                     "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
                     "llmUsage": {
                         "promptTokens": 120,
                         "completionTokens": 32,
@@ -627,6 +677,7 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
     assert "requireLlmGeneration=False" in output
     assert "usedLlmGeneration=False" in output
     assert "llmCacheHit=False" in output
+    assert "requireLlmCacheMiss=False" in output
     assert "llmUsage=prompt=120, completion=32, total=152" in output
     assert "maxLlmTotalTokens=200" in output
     assert "documentSourceCount=1" in output
@@ -651,6 +702,7 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
                     "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
                     "llmUsage": {
                         "promptTokens": 120,
                         "completionTokens": 32,
@@ -689,7 +741,8 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
     assert "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘" in output
     assert (
         "- LLM 생성: 요구 `False`, 사용 `False`, 캐시 `False`, "
-        "토큰 `prompt=120, completion=32, total=152`, 최대 `200`"
+        "캐시 미스 요구 `False`, 토큰 `prompt=120, completion=32, total=152`, "
+        "최대 `200`"
     ) in output
     assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
     assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
@@ -718,6 +771,7 @@ def test_check_rag_chat_scenarios_main_does_not_expose_secret(
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
                     "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -765,6 +819,7 @@ def test_check_rag_chat_scenarios_main_formats_markdown_without_secret(
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
                     "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                     "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
