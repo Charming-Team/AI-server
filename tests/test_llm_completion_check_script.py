@@ -60,10 +60,10 @@ def test_check_llm_completion_validate_only_result_does_not_expose_model_value()
         "apiKeyConfigured": True,
         "openaiNetworkRequiresConfirmation": False,
         "openaiCostGuardrailPassed": True,
-        "runtimeMaxTokens": 512,
+        "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiMaxTokensLimit": 1024,
-        "promptMaxTotalChars": 6000,
+        "promptMaxTotalChars": 3000,
         "openaiMaxPromptCharsLimit": 8000,
         "responseCacheEnabled": True,
     }
@@ -249,7 +249,7 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         "modelAllowed": True,
         "apiKeyConfigured": True,
         "maxTokensUsed": 64,
-        "runtimeMaxTokens": 512,
+        "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
@@ -344,7 +344,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
         "modelAllowed": True,
         "apiKeyConfigured": False,
         "maxTokensUsed": 64,
-        "runtimeMaxTokens": 512,
+        "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
@@ -365,7 +365,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
     assert "modelAllowlistConfigured=False" in output
     assert "modelAllowed=True" in output
     assert "openaiCostGuardrailPassed=True" in output
-    assert "runtimeMaxTokens=512" in output
+    assert "runtimeMaxTokens=1024" in output
     assert "reasoningEffort=minimal" in output
     assert "provider=openai_compatible" in output
 

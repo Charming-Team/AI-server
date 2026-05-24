@@ -167,10 +167,10 @@ def test_check_chat_runtime_llm_preset_runs_only_llm_checks() -> None:
         "apiKeyConfigured": False,
         "openaiNetworkRequiresConfirmation": False,
         "openaiCostGuardrailPassed": True,
-        "runtimeMaxTokens": 512,
+        "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiMaxTokensLimit": 1024,
-        "promptMaxTotalChars": 6000,
+        "promptMaxTotalChars": 3000,
         "openaiMaxPromptCharsLimit": 8000,
         "responseCacheEnabled": True,
     }
@@ -686,7 +686,7 @@ def test_check_chat_runtime_post_deploy_preset_runs_cost_limited_checks() -> Non
     assert result["steps"][6]["result"]["requireRdbEvidence"] is True
     assert result["steps"][6]["result"]["requireVectorSearch"] is True
     assert result["steps"][6]["result"]["requireLlmGeneration"] is True
-    assert result["steps"][6]["result"]["maxLlmTotalTokens"] == 2500
+    assert result["steps"][6]["result"]["maxLlmTotalTokens"] == 3500
     assert result["steps"][6]["result"]["requireLlmCacheMiss"] is False
 
 
@@ -761,10 +761,10 @@ def test_check_chat_runtime_validate_only_checks_llm_completion_smoke() -> None:
         "apiKeyConfigured": False,
         "openaiNetworkRequiresConfirmation": False,
         "openaiCostGuardrailPassed": True,
-        "runtimeMaxTokens": 512,
+        "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiMaxTokensLimit": 1024,
-        "promptMaxTotalChars": 6000,
+        "promptMaxTotalChars": 3000,
         "openaiMaxPromptCharsLimit": 8000,
         "responseCacheEnabled": True,
     }

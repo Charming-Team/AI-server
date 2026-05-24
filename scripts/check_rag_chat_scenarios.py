@@ -36,7 +36,9 @@ class RagChatScenario:
     max_rdb_evidence_count: int | None = None
     min_document_source_count: int = 1
     required_answer_fragments: tuple[str, ...] = ()
+    forbidden_answer_fragments: tuple[str, ...] = ()
     required_source_title_fragments: tuple[str, ...] = ()
+    required_url_fragments: tuple[str, ...] = ()
     forbidden_source_origins: tuple[str, ...] = ()
     require_rdb_urls_read_only: bool = True
 
@@ -142,10 +144,54 @@ COMPANY_INFO_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
     ),
 )
 
+ROLE_QUALITY_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
+    RagChatScenario(
+        scenario_id="operator-line-status-allowed",
+        intent=ChatIntent.LINE_BOTTLENECK,
+        question="OPERATOR 기준으로 LINE-ABS-01 현재 병목과 조회 가능한 조치를 알려줘",
+        role="OPERATOR",
+        required_answer_fragments=("핵심 답변", "근거", "확인 필요"),
+        forbidden_answer_fragments=("계약 금액", "패널티", "매출", "비용", "원가", "수익"),
+        required_source_title_fragments=("LINE-ABS-01",),
+        required_url_fragments=("/production-lines/", "mode=read"),
+    ),
+    RagChatScenario(
+        scenario_id="manager-material-shortage-action-allowed",
+        intent=ChatIntent.MATERIAL_SHORTAGE,
+        question="MAT-FOAM-ADD 부족 원인과 생산 대응 기준 알려줘",
+        role="MANUFACTURING_MANAGER",
+        required_answer_fragments=("핵심 답변", "근거", "확인 필요"),
+        required_source_title_fragments=("MAT-FOAM-ADD",),
+        required_url_fragments=("/materials/", "mode=read"),
+    ),
+    RagChatScenario(
+        scenario_id="executive-delivery-risk-summary-allowed",
+        intent=ChatIntent.DELIVERY_RISK,
+        question="경영진 기준으로 납기 위험 주문과 핵심 원인 요약해줘",
+        role="EXECUTIVE",
+        required_answer_fragments=("핵심 답변", "근거", "확인 필요"),
+        required_url_fragments=("mode=read",),
+    ),
+    RagChatScenario(
+        scenario_id="operator-financial-detail-blocked",
+        intent=ChatIntent.DELIVERY_RISK,
+        question="납기 지연 시 계약 금액과 패널티 영향 알려줘",
+        role="OPERATOR",
+        expected_security_results=(("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),),
+        require_rdb_evidence=False,
+        require_vector_search=False,
+        min_evidence_count=0,
+        min_rdb_evidence_count=0,
+        min_document_source_count=0,
+        require_rdb_urls_read_only=False,
+    ),
+)
+
 RAG_CHAT_SCENARIO_GROUPS = {
     "core": CORE_RAG_CHAT_SCENARIOS,
     "access": ACCESS_RAG_CHAT_SCENARIOS,
     "company": COMPANY_INFO_RAG_CHAT_SCENARIOS,
+    "role": ROLE_QUALITY_RAG_CHAT_SCENARIOS,
 }
 ALL_RAG_CHAT_SCENARIOS = tuple(
     scenario
@@ -190,7 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(RAG_CHAT_SCENARIO_GROUPS),
         help=(
-            "실행할 시나리오 묶음입니다. core, access, company 중 선택하며 "
+            "실행할 시나리오 묶음입니다. core, access, company, role 중 선택하며 "
             "여러 번 지정할 수 있습니다. 생략하면 core만 실행합니다."
         ),
     )
@@ -432,6 +478,17 @@ def validate_scenario_result(
                 ),
             )
 
+    for fragment in scenario.forbidden_answer_fragments:
+        if _has_answer_fragment(result, fragment):
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message=(
+                    "RAG 챗봇 응답 답변에 포함되면 안 되는 문구가 있습니다. "
+                    f"scenario={scenario.scenario_id}, fragment={fragment}"
+                ),
+            )
+
     for fragment in scenario.required_source_title_fragments:
         if not _has_source_title_fragment(result, fragment):
             raise ChatServiceError(
@@ -439,6 +496,17 @@ def validate_scenario_result(
                 code=ChatErrorCode.CHAT_EVIDENCE_001,
                 message=(
                     "RAG 챗봇 응답 출처 제목에 필요한 문구가 없습니다. "
+                    f"scenario={scenario.scenario_id}, fragment={fragment}"
+                ),
+            )
+
+    for fragment in scenario.required_url_fragments:
+        if not _has_url_fragment(result, fragment):
+            raise ChatServiceError(
+                status_code=500,
+                code=ChatErrorCode.CHAT_EVIDENCE_001,
+                message=(
+                    "RAG 챗봇 응답 화면 이동 URL에 필요한 문구가 없습니다. "
                     f"scenario={scenario.scenario_id}, fragment={fragment}"
                 ),
             )
@@ -663,6 +731,18 @@ def _has_source_title_fragment(result: dict[str, Any], fragment: str) -> bool:
     return any(
         normalized_fragment in source["title"].casefold()
         for source in result["sourceDetails"]
+    )
+
+
+def _has_answer_fragment(result: dict[str, Any], fragment: str) -> bool:
+    return fragment.casefold() in result["answer"].casefold()
+
+
+def _has_url_fragment(result: dict[str, Any], fragment: str) -> bool:
+    normalized_fragment = fragment.casefold()
+    return any(
+        normalized_fragment in (url["url"] or "").casefold()
+        for url in result["urlDetails"]
     )
 
 

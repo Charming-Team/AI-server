@@ -40,13 +40,16 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.document_chunk_size == 800
     assert settings.document_chunk_overlap == 80
     assert settings.embedding_dimension == 1024
-    assert settings.llm_max_tokens == 512
+    assert settings.llm_max_tokens == 1024
     assert settings.llm_response_cache_enabled is True
     assert settings.llm_response_cache_ttl_seconds == 60.0
     assert settings.llm_response_cache_max_entries == 128
-    assert settings.answer_max_chars == 2000
+    assert settings.answer_max_chars == 900
     assert settings.rdb_evidence_max_limit == 20
-    assert settings.prompt_max_total_chars == 6000
+    assert settings.prompt_max_evidence_items == 3
+    assert settings.prompt_max_document_sources == 2
+    assert settings.prompt_max_summary_chars == 280
+    assert settings.prompt_max_total_chars == 3000
 
 
 def test_settings_accepts_comma_separated_cors_origins_from_env(
@@ -116,7 +119,6 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
         prompt_max_evidence_items=20,
         prompt_max_document_sources=20,
         prompt_max_summary_chars=2_000,
-        prompt_max_data_chars=5_000,
         prompt_max_total_chars=20_000,
         rdb_evidence_max_limit=100,
     )
@@ -134,7 +136,6 @@ def test_settings_accepts_chat_cost_guardrail_limits() -> None:
     assert settings.prompt_max_evidence_items == 20
     assert settings.prompt_max_document_sources == 20
     assert settings.prompt_max_summary_chars == 2_000
-    assert settings.prompt_max_data_chars == 5_000
     assert settings.prompt_max_total_chars == 20_000
     assert settings.rdb_evidence_max_limit == 100
 
@@ -176,8 +177,6 @@ def test_settings_default_internal_tokens_are_optional() -> None:
         ("prompt_max_document_sources", 21),
         ("prompt_max_summary_chars", 0),
         ("prompt_max_summary_chars", 2_001),
-        ("prompt_max_data_chars", 0),
-        ("prompt_max_data_chars", 5_001),
         ("prompt_max_total_chars", 999),
         ("prompt_max_total_chars", 20_001),
         ("rdb_evidence_max_limit", 0),

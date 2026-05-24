@@ -45,14 +45,24 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "일반 상식" in prompt.system_prompt
     assert "핵심 답변, 근거, 확인 필요 순서" in prompt.system_prompt
     assert "근거 원천(RDB 또는 QDRANT)" in prompt.system_prompt
+    assert "700~900자 안쪽" in prompt.system_prompt
+    assert "원천 JSON, 전체 데이터 덤프" in prompt.system_prompt
+    assert "현재 상태, 수치, 진행률은 RDB 근거를 우선" in prompt.system_prompt
     assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
     assert "역할별 응답 제한:" in prompt.user_prompt
     assert "RDB 근거:\n없음" in prompt.user_prompt
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
     assert "수치, 상태, 날짜는 RDB 근거 또는 문서 검색 근거" in prompt.user_prompt
+    assert "현재 상태 판단은 RDB 근거를 우선" in prompt.user_prompt
+    assert "사용자 역할에서 제한되는 내용은 근거에 있어도 답변하지 않는다" in (
+        prompt.user_prompt
+    )
+    assert "전체 답변은 700~900자 안쪽" in prompt.user_prompt
+    assert "원천 JSON, 전체 데이터 덤프" in prompt.user_prompt
     assert "근거 섹션에는 최소 1개 이상의 출처 제목" in prompt.user_prompt
     assert "답변 형식은 핵심 답변, 근거, 확인 필요 순서" in prompt.user_prompt
     assert "[RDB 또는 QDRANT] 출처 제목" in prompt.user_prompt
+    assert "최대 2개만 작성" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
@@ -111,7 +121,8 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
     prompt = builder.build(request, evidence_result, document_result)
 
     assert "ORD-202605-001 납기 지연 위험" in prompt.user_prompt
-    assert '"orderNo": "ORD-202605-001"' in prompt.user_prompt
+    assert "원천 데이터" not in prompt.user_prompt
+    assert '"orderNo": "ORD-202605-001"' not in prompt.user_prompt
     assert "근거 원천: RDB" in prompt.user_prompt
     assert "2026년 5월 생산 리스크 보고서" in prompt.user_prompt
     assert "report-202605:summary" in prompt.user_prompt
@@ -178,7 +189,7 @@ def test_grounded_prompt_builder_sanitizes_data_urls_before_prompt() -> None:
             EvidenceItem(
                 type="REPORT",
                 title="월간 생산 리스크 보고서",
-                summary="원천 데이터 URL도 내부 경로만 프롬프트에 남습니다.",
+                summary="데이터 URL은 답변 프롬프트에 그대로 들어가면 안 됩니다.",
                 source="reports",
                 data={
                     "reportUrl": "/reports/20?mode=read",
@@ -204,9 +215,10 @@ def test_grounded_prompt_builder_sanitizes_data_urls_before_prompt() -> None:
 
     assert "https://evil.example" not in prompt.user_prompt
     assert "javascript:alert" not in prompt.user_prompt
-    assert '"reportUrl": "/reports/20?mode=read"' in prompt.user_prompt
-    assert '"detailUrl": "/lines/1?mode=read"' in prompt.user_prompt
-    assert '"relatedUrls": ["/materials/11?mode=read", null]' in prompt.user_prompt
+    assert "원천 데이터" not in prompt.user_prompt
+    assert '"reportUrl": "/reports/20?mode=read"' not in prompt.user_prompt
+    assert '"detailUrl": "/lines/1?mode=read"' not in prompt.user_prompt
+    assert '"relatedUrls": ["/materials/11?mode=read", null]' not in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_redacts_sensitive_data_before_prompt() -> None:
@@ -219,7 +231,7 @@ def test_grounded_prompt_builder_redacts_sensitive_data_before_prompt() -> None:
             EvidenceItem(
                 type="REPORT",
                 title="월간 생산 리스크 보고서",
-                summary="민감 패턴은 프롬프트 원천 데이터에서 마스킹됩니다.",
+                summary="민감 패턴은 답변 프롬프트에 들어가면 안 됩니다.",
                 source="reports",
                 data={
                     "riskLevel": "WARNING",
@@ -251,13 +263,10 @@ def test_grounded_prompt_builder_redacts_sensitive_data_before_prompt() -> None:
     assert "short-token-value" not in prompt.user_prompt
     assert "Bearer abcDEF" not in prompt.user_prompt
     assert "short-password" not in prompt.user_prompt
-    assert '"apiKey": "[보안 제한]"' in prompt.user_prompt
-    assert '"accessToken": "[보안 제한]"' in prompt.user_prompt
-    assert '"notes": ["운영 확인 필요", "[보안 제한]"]' in prompt.user_prompt
-    assert '"nested": {"lineCode": "LINE-A01", "password": "[보안 제한]"}' in (
-        prompt.user_prompt
-    )
-    assert '"riskLevel": "WARNING"' in prompt.user_prompt
+    assert "원천 데이터" not in prompt.user_prompt
+    assert '"apiKey": "[보안 제한]"' not in prompt.user_prompt
+    assert '"accessToken": "[보안 제한]"' not in prompt.user_prompt
+    assert '"riskLevel": "WARNING"' not in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
@@ -266,7 +275,6 @@ def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
             prompt_max_evidence_items=1,
             prompt_max_document_sources=1,
             prompt_max_summary_chars=20,
-            prompt_max_data_chars=25,
         )
     )
     request = _build_request()
@@ -323,7 +331,6 @@ def test_grounded_prompt_builder_limits_total_prompt_length() -> None:
             prompt_max_evidence_items=20,
             prompt_max_document_sources=20,
             prompt_max_summary_chars=500,
-            prompt_max_data_chars=500,
             prompt_max_total_chars=1000,
         )
     )
