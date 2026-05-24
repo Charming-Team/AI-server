@@ -6,6 +6,10 @@ from app.features.chat.grounded_fallback_answer_builder import (
 )
 from app.features.chat.grounded_prompt_builder import GroundedPrompt, GroundedPromptBuilder
 from app.features.chat.llm_client import LlmClient, validate_llm_settings
+from app.features.chat.llm_response_cache import (
+    LlmResponseCache,
+    build_llm_response_cache_key,
+)
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
@@ -36,6 +40,7 @@ class AnswerGenerationService:
         fallback_answer_builder: GroundedFallbackAnswerBuilder | None = None,
         output_policy: AnswerOutputPolicy | None = None,
         llm_client: LlmClient | None = None,
+        llm_response_cache: LlmResponseCache | None = None,
     ) -> None:
         self.settings = settings
         self.prompt_builder = prompt_builder or GroundedPromptBuilder(settings)
@@ -44,6 +49,11 @@ class AnswerGenerationService:
         )
         self.output_policy = output_policy or AnswerOutputPolicy()
         self.llm_client = llm_client or LlmClient(settings)
+        self.llm_response_cache = llm_response_cache or LlmResponseCache(
+            enabled=settings.llm_response_cache_enabled,
+            ttl_seconds=settings.llm_response_cache_ttl_seconds,
+            max_entries=settings.llm_response_cache_max_entries,
+        )
 
     async def generate_answer(
         self,
@@ -69,6 +79,15 @@ class AnswerGenerationService:
 
         validate_llm_settings(self.settings)
         prompt = self.build_prompt(request, evidence_result, document_result)
+        cache_key = self._build_cache_key(prompt)
+        if cached_answer := self.llm_response_cache.get(cache_key):
+            return self._build_generated_result_from_llm_answer(
+                cached_answer,
+                role=request.user.role,
+                evidence_result=evidence_result,
+                document_result=document_result,
+            )
+
         try:
             answer = await self.llm_client.generate(prompt)
         except ChatExternalServiceError:
@@ -80,6 +99,24 @@ class AnswerGenerationService:
                 skipped_reason=LLM_UNAVAILABLE,
             )
 
+        result = self._build_generated_result_from_llm_answer(
+            answer,
+            role=request.user.role,
+            evidence_result=evidence_result,
+            document_result=document_result,
+        )
+        if result.was_generated and result.security_result is None:
+            self.llm_response_cache.put(cache_key, answer)
+        return result
+
+    def _build_generated_result_from_llm_answer(
+        self,
+        answer: str,
+        *,
+        role: str,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
         if not answer:
             return AnswerGenerationResult(
                 answer="LLM 답변 생성 결과가 비어 있습니다.",
@@ -95,8 +132,17 @@ class AnswerGenerationService:
         answer = self._ensure_source_titles(answer, evidence_result, document_result)
         return self._build_output_checked_result(
             answer,
-            role=request.user.role,
+            role=role,
             was_generated=True,
+        )
+
+    def _build_cache_key(self, prompt: GroundedPrompt) -> str:
+        return build_llm_response_cache_key(
+            prompt,
+            provider=self.settings.llm_provider,
+            model=self.settings.llm_model,
+            max_tokens=self.settings.llm_max_tokens,
+            temperature=self.settings.llm_temperature,
         )
 
     def _build_output_checked_result(

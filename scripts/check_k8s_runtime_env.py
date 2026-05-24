@@ -24,6 +24,9 @@ REQUIRED_EXACT_VALUES = {
     "LLM_PROVIDER": "openai",
     "LLM_BASE_URL": "https://api.openai.com/v1",
     "LLM_MAX_TOKENS": "512",
+    "LLM_RESPONSE_CACHE_ENABLED": "true",
+    "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
+    "LLM_RESPONSE_CACHE_MAX_ENTRIES": "128",
     "PROMPT_MAX_TOTAL_CHARS": "6000",
 }
 

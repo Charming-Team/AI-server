@@ -31,8 +31,10 @@ class FakeLlmClient:
     ) -> None:
         self.answer = answer
         self.prompt: GroundedPrompt | None = None
+        self.call_count = 0
 
     async def generate(self, prompt: GroundedPrompt) -> str:
+        self.call_count += 1
         self.prompt = prompt
         return self.answer
 
@@ -285,6 +287,93 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     assert "확인 필요:" in result.answer
     assert llm_client.prompt is not None
     assert "2026년 5월 생산 리스크 보고서" in llm_client.prompt.user_prompt
+    assert llm_client.call_count == 1
+
+
+def test_answer_generation_reuses_cached_llm_answer_for_same_grounded_prompt() -> None:
+    llm_client = FakeLlmClient(
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+    )
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    first_result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+    second_result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert first_result.was_generated is True
+    assert second_result.was_generated is True
+    assert first_result.answer == second_result.answer
+    assert llm_client.call_count == 1
+
+
+def test_answer_generation_skips_llm_cache_when_disabled() -> None:
+    llm_client = FakeLlmClient(
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+    )
+    service = AnswerGenerationService(
+        Settings(
+            llm_enabled=True,
+            llm_response_cache_enabled=False,
+        ),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+    anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert llm_client.call_count == 2
 
 
 def test_answer_generation_keeps_structured_llm_answer() -> None:
@@ -494,6 +583,18 @@ def test_answer_generation_blocks_sensitive_llm_output() -> None:
     assert result.skipped_reason == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
     assert result.security_result is not None
     assert result.security_result.code == "CHAT_SECURITY_002"
+    assert llm_client.call_count == 1
+
+    second_result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert second_result.was_generated is False
+    assert second_result.security_result is not None
+    assert llm_client.call_count == 2
 
 
 def test_answer_generation_blocks_prompt_injection_llm_output() -> None:

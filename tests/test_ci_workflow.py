@@ -47,6 +47,9 @@ def test_docker_build_workflow_configures_chat_runtime_gate() -> None:
     assert env["LLM_BASE_URL"] == "http://localhost:8001/v1"
     assert env["LLM_MODEL"] == "local-open-source-model"
     assert env["LLM_MAX_TOKENS"] == "512"
+    assert env["LLM_RESPONSE_CACHE_ENABLED"] == "true"
+    assert env["LLM_RESPONSE_CACHE_TTL_SECONDS"] == "60.0"
+    assert env["LLM_RESPONSE_CACHE_MAX_ENTRIES"] == "128"
     assert env["PROMPT_MAX_TOTAL_CHARS"] == "6000"
 
 

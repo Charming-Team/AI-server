@@ -62,6 +62,9 @@ jobs:
           LLM_BASE_URL: http://localhost:8001/v1
           LLM_MODEL: local-open-source-model
           LLM_MAX_TOKENS: "512"
+          LLM_RESPONSE_CACHE_ENABLED: "true"
+          LLM_RESPONSE_CACHE_TTL_SECONDS: "60.0"
+          LLM_RESPONSE_CACHE_MAX_ENTRIES: "128"
           PROMPT_MAX_TOTAL_CHARS: "6000"
         run: python -m scripts.check_chat_runtime --preset full --json
 
