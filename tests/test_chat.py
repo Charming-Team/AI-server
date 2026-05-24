@@ -262,6 +262,7 @@ def test_chat_answer_returns_insufficient_evidence_until_integrations_are_connec
     assert body["modelResult"]["usedVectorSearch"] is False
     assert body["modelResult"]["usedRdbEvidence"] is False
     assert body["modelResult"]["usedLlmGeneration"] is False
+    assert body["modelResult"]["llmCacheHit"] is False
     assert body["modelResult"]["rdbEvidenceCount"] == 0
     assert body["modelResult"]["documentSourceCount"] == 0
     assert body["modelResult"]["evidenceCount"] == 0
@@ -560,6 +561,8 @@ def test_chat_answer_returns_grounded_answer_with_sources_and_urls() -> None:
         "usedVectorSearch": True,
         "usedRdbEvidence": True,
         "usedLlmGeneration": True,
+        "llmCacheHit": False,
+        "llmUsage": None,
         "rdbEvidenceCount": 1,
         "documentSourceCount": 1,
         "evidenceCount": 2,

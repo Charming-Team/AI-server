@@ -57,6 +57,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="FastAPI 답변에서 RDB Evidence 사용 여부를 필수로 보지 않습니다.",
     )
+    parser.add_argument(
+        "--max-llm-total-tokens",
+        type=int,
+        default=None,
+        help="FastAPI 챗봇 답변에서 허용할 LLM total token 최대값입니다.",
+    )
+    parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="FastAPI 챗봇 답변이 fallback이 아니라 LLM 생성 답변을 사용했는지 검증합니다.",
+    )
+    parser.add_argument(
+        "--require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "LLM 답변이 캐시가 아니라 실제 생성 경로에서 만들어졌는지 검증합니다. "
+            "배포 직후 LLM 연결 확인용으로만 사용합니다."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -120,6 +139,9 @@ async def check_chat_grounding(
         timeout_seconds=args.timeout_seconds,
         min_evidence_count=args.min_evidence_count,
         require_rdb_evidence=not args.allow_non_rdb_evidence,
+        max_llm_total_tokens=args.max_llm_total_tokens,
+        require_llm_generation=args.require_llm_generation,
+        require_llm_cache_miss=args.require_llm_cache_miss,
         http_client=fastapi_http_client,
     )
 
@@ -127,6 +149,9 @@ async def check_chat_grounding(
         "checkStatus": "PASS",
         "intent": intent.value,
         "minEvidenceCount": args.min_evidence_count,
+        "maxLlmTotalTokens": args.max_llm_total_tokens,
+        "requireLlmGeneration": args.require_llm_generation,
+        "requireLlmCacheMiss": args.require_llm_cache_miss,
         "springEvidence": evidence_result,
         "fastapiAnswer": answer_result,
     }
@@ -139,6 +164,9 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"status={result['checkStatus']}",
         f"intent={result['intent']}",
         f"minEvidenceCount={result['minEvidenceCount']}",
+        f"maxLlmTotalTokens={result.get('maxLlmTotalTokens')}",
+        f"requireLlmGeneration={result.get('requireLlmGeneration')}",
+        f"requireLlmCacheMiss={result.get('requireLlmCacheMiss')}",
         f"spring.url={spring_result['url']}",
         f"spring.itemCount={spring_result['itemCount']}",
         f"spring.sourceTypes={','.join(spring_result['sourceTypes'])}",
@@ -146,6 +174,8 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"fastapi.securityStatus={answer_result['securityStatus']}",
         f"fastapi.evidenceCount={answer_result['evidenceCount']}",
         f"fastapi.usedRdbEvidence={answer_result['usedRdbEvidence']}",
+        f"fastapi.usedLlmGeneration={answer_result.get('usedLlmGeneration')}",
+        f"fastapi.llmCacheHit={answer_result.get('llmCacheHit')}",
         f"fastapi.sourceCount={answer_result['sourceCount']}",
         f"fastapi.urlCount={answer_result['urlCount']}",
     ]

@@ -7,10 +7,12 @@ from urllib.parse import urlparse
 
 K8S_ENV_EXAMPLE_PATH = "deploy/kubernetes/fastapi-chat-runtime.env.example"
 PLACEHOLDER_PREFIX = "__SET_BY_SECRET"
+CONFIG_PLACEHOLDER_PREFIX = "__SET_"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 REQUIRED_EXACT_VALUES = {
     "ENVIRONMENT": "kubernetes",
+    "API_V1_PREFIX": "/ai/api/v1",
     "RDB_EVIDENCE_ENABLED": "true",
     "QDRANT_SEARCH_ENABLED": "true",
     "QDRANT_COLLECTION": "smap_internal_documents",
@@ -18,12 +20,31 @@ REQUIRED_EXACT_VALUES = {
     "EMBEDDING_PATH": "/embed",
     "EMBEDDING_MODEL": "BAAI/bge-m3",
     "EMBEDDING_DIMENSION": "1024",
+    "LLM_ENABLED": "true",
+    "LLM_PROVIDER": "openai",
+    "LLM_BASE_URL": "https://api.openai.com/v1",
+    "LLM_MAX_TOKENS": "512",
+    "LLM_REASONING_EFFORT": "minimal",
+    "LLM_RESPONSE_CACHE_ENABLED": "true",
+    "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
+    "LLM_RESPONSE_CACHE_MAX_ENTRIES": "128",
+    "PROMPT_MAX_TOTAL_CHARS": "6000",
 }
 
 REQUIRED_SECRET_KEYS = {
     "CHAT_ANSWER_INTERNAL_TOKEN",
     "CHAT_RECOMMENDATION_INTERNAL_TOKEN",
+    "DOCUMENT_INDEX_INTERNAL_TOKEN",
     "RDB_EVIDENCE_DSN",
+}
+
+REQUIRED_SECRET_KEY_GROUPS = {
+    "OPENAI_API_KEY": ("LLM_API_KEY", "OPENAI_API_KEY"),
+}
+
+REQUIRED_CONFIG_KEYS = {
+    "LLM_ALLOWED_MODELS",
+    "LLM_MODEL",
 }
 
 K8S_SERVICE_URL_KEYS = {
@@ -76,6 +97,9 @@ def check_k8s_runtime_env(
     checks = []
     checks.extend(_check_exact_values(values))
     checks.extend(_check_secret_values(values, allow_placeholders))
+    checks.extend(_check_secret_value_groups(values, allow_placeholders))
+    checks.extend(_check_config_values(values, allow_placeholders))
+    checks.extend(_check_openai_model_allowlist(values, allow_placeholders))
     checks.extend(_check_k8s_service_urls(values))
     checks.extend(_check_disabled_spring_evidence_lookup(values))
 
@@ -133,6 +157,114 @@ def _check_secret_values(
     return checks
 
 
+def _check_secret_value_groups(
+    values: dict[str, str],
+    allow_placeholders: bool,
+) -> list[dict]:
+    checks: list[dict] = []
+    for group_name, keys in REQUIRED_SECRET_KEY_GROUPS.items():
+        configured_values = {
+            key: values.get(key, "")
+            for key in keys
+        }
+        is_valid = any(
+            _is_valid_secret_value(
+                value,
+                allow_placeholders=allow_placeholders,
+            )
+            for value in configured_values.values()
+        )
+        checks.append(
+            _build_check(
+                name=group_name,
+                status="PASS" if is_valid else "FAIL",
+                reason=(
+                    None
+                    if is_valid
+                    else (
+                        f"{', '.join(keys)} 중 하나는 Kubernetes Secret에서 "
+                        "주입되어야 합니다."
+                    )
+                ),
+                expected="one non-empty secret reference",
+                actual=_mask_secret_group_value(configured_values),
+            )
+        )
+    return checks
+
+
+def _check_config_values(
+    values: dict[str, str],
+    allow_placeholders: bool,
+) -> list[dict]:
+    checks: list[dict] = []
+    for key in sorted(REQUIRED_CONFIG_KEYS):
+        value = values.get(key, "")
+        is_placeholder = value.startswith(CONFIG_PLACEHOLDER_PREFIX)
+        is_valid = bool(value) and (allow_placeholders or not is_placeholder)
+        checks.append(
+            _build_check(
+                name=key,
+                status="PASS" if is_valid else "FAIL",
+                reason=_build_config_failure_reason(
+                    key,
+                    value=value,
+                    allow_placeholders=allow_placeholders,
+                    is_placeholder=is_placeholder,
+                ),
+                expected="non-empty runtime value",
+                actual=_mask_config_value(value),
+            )
+        )
+    return checks
+
+
+def _check_openai_model_allowlist(
+    values: dict[str, str],
+    allow_placeholders: bool,
+) -> list[dict]:
+    model = values.get("LLM_MODEL", "")
+    allowed_models_value = values.get("LLM_ALLOWED_MODELS", "")
+    model_is_placeholder = model.startswith(CONFIG_PLACEHOLDER_PREFIX)
+    allowed_is_placeholder = allowed_models_value.startswith(CONFIG_PLACEHOLDER_PREFIX)
+    should_skip_placeholder = (
+        allow_placeholders
+        and model_is_placeholder
+        and allowed_is_placeholder
+    )
+    allowed_models = _parse_config_list(allowed_models_value)
+    is_valid = (
+        should_skip_placeholder
+        or (
+            bool(model)
+            and not model_is_placeholder
+            and bool(allowed_models)
+            and model in allowed_models
+        )
+    )
+    return [
+        _build_check(
+            name="LLM_MODEL_ALLOWLIST",
+            status="PASS" if is_valid else "FAIL",
+            reason=(
+                None
+                if is_valid
+                else "LLM_MODEL 값은 LLM_ALLOWED_MODELS에 포함되어야 합니다."
+            ),
+            expected="LLM_MODEL included in LLM_ALLOWED_MODELS",
+            actual=_mask_config_value(allowed_models_value),
+        )
+    ]
+
+
+def _parse_config_list(value: str) -> set[str]:
+    return {
+        item.strip()
+        for item in value.split(",")
+        if item.strip()
+    }
+
+
 def _build_secret_failure_reason(
     key: str,
     value: str,
@@ -143,6 +275,24 @@ def _build_secret_failure_reason(
         return None
     if not value:
         return f"{key} 값은 Kubernetes Secret에서 주입되어야 합니다."
+    return f"{key} placeholder는 실제 배포 env에서 사용할 수 없습니다."
+
+
+def _is_valid_secret_value(value: str, allow_placeholders: bool) -> bool:
+    is_placeholder = value.startswith(PLACEHOLDER_PREFIX)
+    return bool(value) and (allow_placeholders or not is_placeholder)
+
+
+def _build_config_failure_reason(
+    key: str,
+    value: str,
+    allow_placeholders: bool,
+    is_placeholder: bool,
+) -> str | None:
+    if value and (allow_placeholders or not is_placeholder):
+        return None
+    if not value:
+        return f"{key} 값은 실제 런타임 설정으로 주입되어야 합니다."
     return f"{key} placeholder는 실제 배포 env에서 사용할 수 없습니다."
 
 
@@ -218,6 +368,25 @@ def _mask_secret_value(value: str) -> str:
     if not value:
         return ""
     if value.startswith(PLACEHOLDER_PREFIX):
+        return value
+    return "<set>"
+
+
+def _mask_secret_group_value(values: dict[str, str]) -> str:
+    configured_keys = [
+        key
+        for key, value in values.items()
+        if value
+    ]
+    if not configured_keys:
+        return "<empty>"
+    return ",".join(configured_keys)
+
+
+def _mask_config_value(value: str) -> str:
+    if not value:
+        return ""
+    if value.startswith(CONFIG_PLACEHOLDER_PREFIX):
         return value
     return "<set>"
 

@@ -7,7 +7,17 @@ import pytest
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
-from app.features.chat.llm_client import LlmClient
+from app.features.chat.llm_client import (
+    LlmClient,
+    LlmCompletion,
+    resolve_llm_api_key,
+    resolve_llm_base_url,
+    should_use_max_completion_tokens,
+    validate_llm_settings,
+    validate_openai_cost_guardrails,
+    validate_openai_model_allowlist,
+    validate_openai_reasoning_effort,
+)
 from app.features.chat.schemas import ChatErrorCode
 
 
@@ -55,6 +65,155 @@ def test_llm_client_builds_url_and_optional_auth_header() -> None:
     }
 
 
+def test_llm_client_resolves_openai_base_url_and_requires_api_key() -> None:
+    settings = Settings(
+        llm_provider="openai",
+        llm_model="gpt-test",
+        llm_allowed_models=["gpt-test"],
+        llm_api_key="openai-secret-token",
+    )
+    client = LlmClient(settings)
+
+    assert resolve_llm_base_url(settings) == "https://api.openai.com/v1"
+    assert client._chat_completions_url == "https://api.openai.com/v1/chat/completions"
+    assert client._headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer openai-secret-token",
+    }
+
+
+def test_llm_client_accepts_standard_openai_api_key_env_name() -> None:
+    settings = Settings(
+        llm_provider="openai",
+        llm_model="gpt-test",
+        llm_allowed_models=["gpt-test"],
+        llm_api_key=None,
+        openai_api_key="standard-openai-token",
+    )
+    client = LlmClient(settings)
+
+    validate_llm_settings(settings)
+
+    assert resolve_llm_api_key(settings) == "standard-openai-token"
+    assert client._headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer standard-openai-token",
+    }
+
+
+def test_llm_client_builds_gpt5_openai_payload_with_max_completion_tokens() -> None:
+    settings = Settings(
+        llm_provider="openai",
+        llm_model="gpt-5-nano",
+        llm_allowed_models=["gpt-5-nano"],
+        openai_api_key="standard-openai-token",
+        llm_temperature=0.1,
+        llm_max_tokens=512,
+    )
+    client = LlmClient(settings)
+
+    payload = client._build_payload(_build_prompt())
+
+    assert should_use_max_completion_tokens(settings) is True
+    assert payload["max_completion_tokens"] == 512
+    assert payload["reasoning_effort"] == "minimal"
+    assert "max_tokens" not in payload
+    assert "temperature" not in payload
+
+
+def test_llm_client_rejects_invalid_openai_reasoning_effort() -> None:
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        validate_openai_reasoning_effort(
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-5-nano",
+                llm_allowed_models=["gpt-5-nano"],
+                openai_api_key="standard-openai-token",
+                llm_reasoning_effort="expensive",
+            )
+        )
+
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_001
+    assert "llm_reasoning_effort" in exc_info.value.message
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_message"),
+    [
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_max_tokens=2048,
+            ),
+            "llm_max_tokens<=1024",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                prompt_max_total_chars=12_000,
+            ),
+            "prompt_max_total_chars<=8000",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_response_cache_enabled=False,
+            ),
+            "llm_response_cache_enabled=true",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_response_cache_ttl_seconds=0.0,
+            ),
+            "llm_response_cache_ttl_seconds>=1",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_response_cache_max_entries=0,
+            ),
+            "llm_response_cache_max_entries>=1",
+        ),
+    ],
+)
+def test_llm_client_rejects_openai_cost_guardrail_violations(
+    settings: Settings,
+    expected_message: str,
+) -> None:
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        validate_openai_cost_guardrails(settings)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_001
+    assert "OpenAI 비용 가드레일" in exc_info.value.message
+    assert expected_message in exc_info.value.message
+
+
+def test_llm_client_does_not_apply_openai_cost_guardrail_to_compatible_provider() -> None:
+    validate_openai_cost_guardrails(
+        Settings(
+            llm_provider="openai_compatible",
+            llm_model="qwen-test",
+            llm_max_tokens=4096,
+            prompt_max_total_chars=20_000,
+            llm_response_cache_enabled=False,
+            llm_response_cache_ttl_seconds=0.0,
+            llm_response_cache_max_entries=0,
+        )
+    )
+
+
 def test_llm_client_generate_parses_chat_completion_response() -> None:
     captured_request: dict = {}
 
@@ -64,6 +223,11 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
         return httpx.Response(
             200,
             json={
+                "usage": {
+                    "prompt_tokens": 120,
+                    "completion_tokens": 32,
+                    "total_tokens": 152,
+                },
                 "choices": [
                     {
                         "message": {
@@ -88,6 +252,37 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
     assert captured_request["body"]["model"] == "qwen-test"
 
 
+def test_llm_client_generate_completion_parses_usage() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": "연결 정상입니다."}},
+                ],
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 5,
+                    "total_tokens": 25,
+                },
+            },
+        )
+
+    async def run_generate() -> LlmCompletion:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = LlmClient(Settings(llm_model="qwen-test"), http_client=http_client)
+            return await client.generate_completion(_build_prompt())
+
+    completion = anyio.run(run_generate)
+
+    assert completion.answer == "연결 정상입니다."
+    assert completion.usage is not None
+    assert completion.usage.prompt_tokens == 20
+    assert completion.usage.completion_tokens == 5
+    assert completion.usage.total_tokens == 25
+
+
 @pytest.mark.parametrize(
     ("settings", "expected_message"),
     [
@@ -102,6 +297,31 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
         (
             Settings(llm_base_url=" ", llm_model=" "),
             "LLM 필수 설정이 누락되었습니다: llm_base_url, llm_model",
+        ),
+        (
+            Settings(llm_provider="openai", llm_model="gpt-test", llm_api_key=None),
+            "LLM 필수 설정이 누락되었습니다: llm_api_key",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+            ),
+            "OpenAI 모델 allowlist가 설정되지 않았습니다: llm_allowed_models",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_allowed_models=["gpt-other"],
+                llm_api_key="openai-secret-token",
+            ),
+            "OpenAI 허용 모델이 아닙니다: llm_model",
+        ),
+        (
+            Settings(llm_provider="unsupported", llm_model="gpt-test"),
+            "지원하지 않는 LLM provider입니다: unsupported",
         ),
     ],
 )
@@ -131,6 +351,27 @@ def test_llm_client_requires_settings_before_request(
     assert called is False
 
 
+def test_llm_client_accepts_openai_model_when_allowlisted() -> None:
+    validate_llm_settings(
+        Settings(
+            llm_provider="openai",
+            llm_model="gpt-test",
+            llm_allowed_models=["gpt-test", "gpt-fallback"],
+            llm_api_key="openai-secret-token",
+        )
+    )
+
+
+def test_llm_client_does_not_apply_openai_model_allowlist_to_compatible_provider() -> None:
+    validate_openai_model_allowlist(
+        Settings(
+            llm_provider="openai_compatible",
+            llm_model="qwen-test",
+            llm_allowed_models=[],
+        )
+    )
+
+
 def test_llm_client_raises_external_error_on_http_failure() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"error": "llm failed"})
@@ -146,7 +387,7 @@ def test_llm_client_raises_external_error_on_http_failure() -> None:
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.code == ChatErrorCode.CHAT_LLM_003
-    assert exc_info.value.message == "LLM 서버 호출에 실패했습니다."
+    assert exc_info.value.message == "LLM 서버 호출에 실패했습니다. status=500, reason=unknown"
 
 
 def test_llm_client_raises_external_error_on_invalid_response_body() -> None:
@@ -201,4 +442,34 @@ def test_llm_client_returns_empty_answer_on_missing_content() -> None:
         json={"choices": [{"message": {"content": None}}]},
     )
 
-    assert client._parse_response(response) == ""
+    assert client._parse_response(response) == LlmCompletion(answer="")
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        "not-a-dict",
+        {"prompt_tokens": "20", "completion_tokens": 5, "total_tokens": 25},
+        {"prompt_tokens": -1, "completion_tokens": 5, "total_tokens": 25},
+        {"prompt_tokens": True, "completion_tokens": 5, "total_tokens": 25},
+    ],
+)
+def test_llm_client_raises_external_error_on_invalid_usage_shape(
+    usage: object,
+) -> None:
+    client = LlmClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://llm.local/chat/completions"),
+        json={
+            "choices": [{"message": {"content": "정상 응답"}}],
+            "usage": usage,
+        },
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        client._parse_response(response)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_002
+    assert exc_info.value.message == "LLM 응답 형식이 올바르지 않습니다."

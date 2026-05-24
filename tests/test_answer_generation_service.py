@@ -7,6 +7,8 @@ from app.core.config import Settings
 from app.features.chat.answer_generation_service import AnswerGenerationService
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
+from app.features.chat.llm_client import LlmCompletion
+from app.features.chat.llm_response_cache import LlmResponseCache
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
@@ -16,6 +18,7 @@ from app.features.chat.schemas import (
     DocumentSearchResult,
     EvidenceItem,
     EvidenceResult,
+    LlmUsage,
 )
 
 BLOCKED_GENERATED_ANSWER = (
@@ -28,20 +31,28 @@ class FakeLlmClient:
     def __init__(
         self,
         answer: str = "보고서 근거에 따르면 자재 부족이 주요 리스크입니다.",
+        usage: LlmUsage | None = None,
     ) -> None:
         self.answer = answer
+        self.usage = usage
         self.prompt: GroundedPrompt | None = None
+        self.call_count = 0
 
     async def generate(self, prompt: GroundedPrompt) -> str:
+        completion = await self.generate_completion(prompt)
+        return completion.answer
+
+    async def generate_completion(self, prompt: GroundedPrompt) -> LlmCompletion:
+        self.call_count += 1
         self.prompt = prompt
-        return self.answer
+        return LlmCompletion(answer=self.answer, usage=self.usage)
 
 
 class FakeFailingLlmClient:
     def __init__(self) -> None:
         self.prompt: GroundedPrompt | None = None
 
-    async def generate(self, prompt: GroundedPrompt) -> str:
+    async def generate_completion(self, prompt: GroundedPrompt) -> LlmCompletion:
         self.prompt = prompt
         raise ChatExternalServiceError(
             status_code=503,
@@ -247,7 +258,8 @@ def test_answer_generation_prompt_includes_rdb_evidence_source_data() -> None:
 
 def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     llm_client = FakeLlmClient(
-        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다.",
+        usage=LlmUsage(promptTokens=120, completionTokens=32, totalTokens=152),
     )
     service = AnswerGenerationService(
         Settings(llm_enabled=True),
@@ -277,12 +289,202 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     )
 
     assert result.was_generated is True
-    assert (
-        result.answer
-        == "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+    assert result.llm_cache_hit is False
+    assert result.llm_usage is not None
+    assert result.llm_usage.prompt_tokens == 120
+    assert result.llm_usage.completion_tokens == 32
+    assert result.llm_usage.total_tokens == 152
+    assert result.answer.startswith(
+        "핵심 답변:\n"
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
     )
+    assert "근거:\n- [QDRANT] 2026년 5월 생산 리스크 보고서" in result.answer
+    assert "확인 필요:" in result.answer
     assert llm_client.prompt is not None
     assert "2026년 5월 생산 리스크 보고서" in llm_client.prompt.user_prompt
+    assert llm_client.call_count == 1
+
+
+def test_answer_generation_reuses_cached_llm_answer_for_same_grounded_prompt() -> None:
+    llm_client = FakeLlmClient(
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+    )
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    first_result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+    second_result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert first_result.was_generated is True
+    assert first_result.llm_cache_hit is False
+    assert second_result.was_generated is True
+    assert second_result.llm_cache_hit is True
+    assert second_result.llm_usage is not None
+    assert second_result.llm_usage.total_tokens == 0
+    assert first_result.answer == second_result.answer
+    assert llm_client.call_count == 1
+
+
+def test_answer_generation_cache_key_changes_by_reasoning_effort() -> None:
+    cache = LlmResponseCache(ttl_seconds=60.0, max_entries=10)
+    first_llm_client = FakeLlmClient("minimal reasoning 답변입니다.")
+    second_llm_client = FakeLlmClient("low reasoning 답변입니다.")
+    first_service = AnswerGenerationService(
+        Settings(llm_enabled=True, llm_reasoning_effort="minimal"),
+        llm_client=first_llm_client,
+        llm_response_cache=cache,
+    )
+    second_service = AnswerGenerationService(
+        Settings(llm_enabled=True, llm_reasoning_effort="low"),
+        llm_client=second_llm_client,
+        llm_response_cache=cache,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    first_result = anyio.run(
+        first_service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+    second_result = anyio.run(
+        second_service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert first_result.llm_cache_hit is False
+    assert second_result.llm_cache_hit is False
+    assert "minimal reasoning 답변입니다." in first_result.answer
+    assert "low reasoning 답변입니다." in second_result.answer
+    assert first_llm_client.call_count == 1
+    assert second_llm_client.call_count == 1
+
+
+def test_answer_generation_skips_llm_cache_when_disabled() -> None:
+    llm_client = FakeLlmClient(
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+    )
+    service = AnswerGenerationService(
+        Settings(
+            llm_enabled=True,
+            llm_response_cache_enabled=False,
+        ),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+    anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert llm_client.call_count == 2
+
+
+def test_answer_generation_keeps_structured_llm_answer() -> None:
+    structured_answer = (
+        "핵심 답변:\n"
+        "2026년 5월 생산 리스크 보고서 기준으로 자재 부족이 주요 리스크입니다.\n\n"
+        "근거:\n"
+        "- 2026년 5월 생산 리스크 보고서\n\n"
+        "확인 필요:\n"
+        "- 근거에 없는 원인은 추가 확인이 필요합니다."
+    )
+    llm_client = FakeLlmClient(structured_answer)
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is True
+    assert result.answer == structured_answer
 
 
 def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> None:
@@ -334,7 +536,7 @@ def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> No
     assert llm_client.prompt is not None
 
 
-def test_answer_generation_appends_source_titles_when_answer_omits_them() -> None:
+def test_answer_generation_wraps_unstructured_llm_answer_with_source_titles() -> None:
     llm_client = FakeLlmClient("근거에 따르면 자재 부족이 주요 리스크입니다.")
     service = AnswerGenerationService(
         Settings(llm_enabled=True),
@@ -372,8 +574,13 @@ def test_answer_generation_appends_source_titles_when_answer_omits_them() -> Non
 
     assert result.was_generated is True
     assert result.answer == (
+        "핵심 답변:\n"
         "근거에 따르면 자재 부족이 주요 리스크입니다.\n\n"
-        "참조 근거: 월간 생산 리스크, 2026년 5월 생산 리스크 보고서"
+        "근거:\n"
+        "- [RDB] 월간 생산 리스크\n"
+        "- [QDRANT] 2026년 5월 생산 리스크 보고서\n\n"
+        "확인 필요:\n"
+        "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
     )
 
 
@@ -446,6 +653,18 @@ def test_answer_generation_blocks_sensitive_llm_output() -> None:
     assert result.skipped_reason == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
     assert result.security_result is not None
     assert result.security_result.code == "CHAT_SECURITY_002"
+    assert llm_client.call_count == 1
+
+    second_result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert second_result.was_generated is False
+    assert second_result.security_result is not None
+    assert llm_client.call_count == 2
 
 
 def test_answer_generation_blocks_prompt_injection_llm_output() -> None:

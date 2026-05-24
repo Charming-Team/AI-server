@@ -43,6 +43,8 @@ def _build_args(**overrides: Any) -> Namespace:
         "answer_api_min_evidence_count": 0,
         "answer_api_min_document_source_count": 0,
         "answer_api_expected_llm_skipped_reason": None,
+        "answer_api_max_llm_total_tokens": None,
+        "answer_api_require_llm_cache_miss": False,
         "recommendation_api_base_url": "http://fastapi.local",
         "recommendation_api_keyword": "라인",
         "recommendation_api_role": "MANUFACTURING_MANAGER",
@@ -59,6 +61,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "qdrant_readonly_search_role": "MANUFACTURING_MANAGER",
         "qdrant_readonly_search_min_source_count": 1,
         "json": False,
+        "markdown": False,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -155,9 +158,20 @@ def test_check_chat_runtime_llm_preset_runs_only_llm_checks() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "llmEnabled": True,
+        "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
+        "modelAllowlistConfigured": False,
+        "modelAllowed": True,
         "apiKeyConfigured": False,
+        "openaiNetworkRequiresConfirmation": False,
+        "openaiCostGuardrailPassed": True,
+        "runtimeMaxTokens": 512,
+        "reasoningEffort": "minimal",
+        "openaiMaxTokensLimit": 1024,
+        "promptMaxTotalChars": 6000,
+        "openaiMaxPromptCharsLimit": 8000,
+        "responseCacheEnabled": True,
     }
 
 
@@ -505,7 +519,7 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     ]
     assert result["steps"][1]["result"]["checkStatus"] == "PASS"
     assert result["steps"][3]["result"]["scenarioGroups"] == ["core", "access"]
-    assert result["steps"][3]["result"]["scenarioCount"] == 9
+    assert result["steps"][3]["result"]["scenarioCount"] == 8
     assert result["steps"][4]["result"]["minEvidenceCount"] == 1
     assert result["steps"][4]["result"]["requireRdbEvidence"] is True
     assert result["runtimeMode"] == {
@@ -550,6 +564,7 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
     ]
     assert result["steps"][3]["result"]["scenarioGroups"] == ["core", "company"]
     assert result["steps"][3]["result"]["scenarioCount"] == 6
+    assert result["steps"][3]["result"]["requireLlmGeneration"] is False
     assert result["steps"][7]["result"]["minDocumentSourceCount"] == 1
     assert result["steps"][7]["result"]["requireRdbEvidence"] is True
     assert result["steps"][7]["result"]["requireVectorSearch"] is True
@@ -632,6 +647,7 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "failedSteps": [],
         "nextActions": [],
     }
+    assert result["steps"][5]["result"]["requireLlmGeneration"] is True
 
 
 def test_check_chat_runtime_validate_only_checks_answer_output_policy_smoke() -> None:
@@ -675,9 +691,20 @@ def test_check_chat_runtime_validate_only_checks_llm_completion_smoke() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "llmEnabled": True,
+        "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
+        "modelAllowlistConfigured": False,
+        "modelAllowed": True,
         "apiKeyConfigured": False,
+        "openaiNetworkRequiresConfirmation": False,
+        "openaiCostGuardrailPassed": True,
+        "runtimeMaxTokens": 512,
+        "reasoningEffort": "minimal",
+        "openaiMaxTokensLimit": 1024,
+        "promptMaxTotalChars": 6000,
+        "openaiMaxPromptCharsLimit": 8000,
+        "responseCacheEnabled": True,
     }
 
 
@@ -711,6 +738,9 @@ def test_check_chat_runtime_validate_only_checks_rdb_chat_scenarios() -> None:
         "scenarioGroups": ["access"],
         "scenarioCount": 1,
         "scenarioIds": ["operator-financial-blocked"],
+        "requireLlmGeneration": False,
+        "maxLlmTotalTokens": None,
+        "requireLlmCacheMiss": False,
     }
 
 
@@ -740,6 +770,9 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
     args = _build_args(
         network=True,
         include_rdb_chat_scenarios=True,
+        require_llm_generation=True,
+        answer_api_require_llm_cache_miss=True,
+        answer_api_max_llm_total_tokens=200,
         rdb_chat_scenario_group=["access"],
         rdb_chat_scenario=["operator-financial-blocked"],
     )
@@ -754,6 +787,9 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
         captured["token"] = scenario_args.token
         captured["scenario_group"] = scenario_args.scenario_group
         captured["scenario"] = scenario_args.scenario
+        captured["require_llm_generation"] = scenario_args.require_llm_generation
+        captured["require_llm_cache_miss"] = scenario_args.require_llm_cache_miss
+        captured["max_llm_total_tokens"] = scenario_args.max_llm_total_tokens
         return {
             "checkStatus": "PASS",
             "scenarioCount": 1,
@@ -788,6 +824,72 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
         "token": "answer-token",
         "scenario_group": ["access"],
         "scenario": ["operator-financial-blocked"],
+        "require_llm_generation": True,
+        "require_llm_cache_miss": True,
+        "max_llm_total_tokens": 200,
+    }
+
+
+def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(
+        network=True,
+        require_llm_generation=True,
+        answer_api_require_llm_cache_miss=True,
+        answer_api_max_llm_total_tokens=200,
+        rag_chat_scenario_group=["core"],
+        rag_chat_scenario=["line-bottleneck-with-company-guide"],
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_rag_chat_scenarios(scenario_args):
+        captured["base_url"] = scenario_args.base_url
+        captured["path"] = scenario_args.path
+        captured["token"] = scenario_args.token
+        captured["scenario_group"] = scenario_args.scenario_group
+        captured["scenario"] = scenario_args.scenario
+        captured["require_llm_generation"] = scenario_args.require_llm_generation
+        captured["require_llm_cache_miss"] = scenario_args.require_llm_cache_miss
+        captured["max_llm_total_tokens"] = scenario_args.max_llm_total_tokens
+        return {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "line-bottleneck-with-company-guide",
+                    "requireLlmGeneration": True,
+                    "usedLlmGeneration": True,
+            "llmCacheHit": False,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        check_chat_runtime.check_rag_chat_scenarios,
+        "check_rag_chat_scenarios",
+        fake_rag_chat_scenarios,
+    )
+
+    result = anyio.run(check_chat_runtime.run_rag_chat_scenarios, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert captured == {
+        "base_url": "http://fastapi.local",
+        "path": "/api/v1/chat/answer",
+        "token": "answer-token",
+        "scenario_group": ["core"],
+        "scenario": ["line-bottleneck-with-company-guide"],
+        "require_llm_generation": True,
+        "require_llm_cache_miss": True,
+        "max_llm_total_tokens": 200,
     }
 
 
@@ -798,12 +900,21 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
         evidence_lookup_enabled=True,
         evidence_lookup_internal_token="evidence-token",
     )
-    args = _build_args(network=True, include_rag_end_to_end_smoke=True)
+    args = _build_args(
+        network=True,
+        include_rag_end_to_end_smoke=True,
+        require_llm_generation=True,
+        answer_api_require_llm_cache_miss=True,
+        answer_api_max_llm_total_tokens=200,
+    )
     captured: dict[str, Any] = {}
 
     async def fake_rag_end_to_end(**kwargs):
         captured["base_url"] = kwargs["args"].base_url
         captured["document_id"] = kwargs["args"].document_id
+        captured["max_llm_total_tokens"] = kwargs["args"].max_llm_total_tokens
+        captured["require_llm_generation"] = kwargs["args"].require_llm_generation
+        captured["require_llm_cache_miss"] = kwargs["args"].require_llm_cache_miss
         captured["answer_token"] = kwargs["answer_token"]
         captured["document_token"] = kwargs["document_token"]
         return {
@@ -826,6 +937,9 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
     assert captured == {
         "base_url": "http://fastapi.local",
         "document_id": "smoke-document-api-contract",
+        "max_llm_total_tokens": 200,
+        "require_llm_generation": True,
+        "require_llm_cache_miss": True,
         "answer_token": "answer-token",
         "document_token": "document-token",
     }
@@ -1320,6 +1434,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
     args = _build_args(
         include_answer_api_smoke=True,
         answer_api_min_evidence_count=1,
+        answer_api_max_llm_total_tokens=200,
     )
 
     result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
@@ -1342,6 +1457,8 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "minDocumentSourceCount": 0,
         "requireVectorSearch": False,
         "requireLlmGeneration": False,
+        "maxLlmTotalTokens": 200,
+        "requireLlmCacheMiss": False,
         "expectedLlmGenerationSkippedReason": None,
     }
 
@@ -1510,6 +1627,7 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
             "usedRdbEvidence": kwargs["require_rdb_evidence"],
             "usedVectorSearch": kwargs["require_vector_search"],
             "usedLlmGeneration": kwargs["require_llm_generation"],
+            "llmCacheHit": False,
         }
 
     monkeypatch.setattr(
@@ -1545,7 +1663,9 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
         network=True,
         include_answer_api_smoke=True,
         require_llm_generation=True,
+        answer_api_require_llm_cache_miss=True,
         answer_api_expected_llm_skipped_reason="NONE",
+        answer_api_max_llm_total_tokens=200,
     )
     captured: dict[str, Any] = {}
 
@@ -1557,9 +1677,12 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
         captured["expected_llm_skipped_reason"] = kwargs[
             "expected_llm_skipped_reason"
         ]
+        captured["require_llm_cache_miss"] = kwargs["require_llm_cache_miss"]
+        captured["max_llm_total_tokens"] = kwargs["max_llm_total_tokens"]
         return {
             "checkStatus": "PASS",
             "usedLlmGeneration": kwargs["require_llm_generation"],
+            "llmCacheHit": False,
         }
 
     monkeypatch.setattr(
@@ -1580,6 +1703,8 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
     assert captured == {
         "require_llm_generation": True,
         "expected_llm_skipped_reason": "NONE",
+        "require_llm_cache_miss": True,
+        "max_llm_total_tokens": 200,
     }
 
 
@@ -1607,6 +1732,7 @@ def test_check_chat_runtime_network_answer_api_smoke_expects_fallback_when_llm_d
         return {
             "checkStatus": "PASS",
             "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "llmGenerationSkippedReason": kwargs["expected_llm_skipped_reason"],
         }
 
@@ -1815,6 +1941,62 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
     assert "readiness: status=FAIL code=CHAT_EVIDENCE_004" in output
     assert "failure=readiness code=CHAT_EVIDENCE_004" in output
     assert "nextAction=RDB Evidence 설정을 확인하세요." in output
+
+
+def test_check_chat_runtime_markdown_output_includes_step_status() -> None:
+    output = check_chat_runtime.format_markdown_result(
+        {
+            "checkStatus": "FAIL",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "requiredComponents": ["rdbEvidence"],
+            "runtimeMode": {
+                "apiPrefix": "/ai/api/v1",
+                "groundingMode": "RDB_QDRANT",
+                "answerMode": "FALLBACK",
+                "ragSearchMode": "ENABLED",
+                "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+                "expectedLlmSkippedReason": (
+                    "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                ),
+            },
+            "summary": {
+                "totalStepCount": 1,
+                "passedStepCount": 0,
+                "failedStepCount": 1,
+                "failedSteps": [
+                    {
+                        "name": "readiness",
+                        "code": "CHAT_EVIDENCE_004",
+                        "message": "RDB Evidence DSN이 설정되지 않았습니다.",
+                        "action": "RDB Evidence 설정을 확인하세요.",
+                    }
+                ],
+                "nextActions": ["RDB Evidence 설정을 확인하세요."],
+            },
+            "steps": [
+                {
+                    "name": "readiness",
+                    "status": "FAIL",
+                    "error": {
+                        "code": "CHAT_EVIDENCE_004",
+                        "message": "RDB Evidence DSN이 설정되지 않았습니다.",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert "# 챗봇 런타임 통합 점검 결과" in output
+    assert "- 점검 상태: `FAIL`" in output
+    assert "| Grounding Mode | RDB_QDRANT |" in output
+    assert "| Step | 상태 | 코드 | 메시지 |" in output
+    assert (
+        "| readiness | `FAIL` | CHAT_EVIDENCE_004 | "
+        "RDB Evidence DSN이 설정되지 않았습니다. |"
+    ) in output
+    assert "## 다음 조치" in output
+    assert "- RDB Evidence 설정을 확인하세요." in output
 
 
 def test_check_chat_runtime_builds_failure_summary_from_result_error() -> None:
@@ -2178,3 +2360,51 @@ def test_check_chat_runtime_main_returns_zero_on_pass(
 
     assert exit_code == 0
     assert '"checkStatus": "PASS"' in stdout.getvalue()
+
+
+def test_check_chat_runtime_main_formats_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_chat_runtime(settings, args):
+        return {
+            "checkStatus": "PASS",
+            "mode": "VALIDATE_ONLY",
+            "networkChecked": False,
+            "requiredComponents": ["rdbEvidence", "qdrantSearch"],
+            "runtimeMode": {
+                "apiPrefix": "/ai/api/v1",
+                "groundingMode": "RDB_QDRANT",
+                "answerMode": "FALLBACK",
+                "ragSearchMode": "ENABLED",
+                "enabledGroundingSources": ["RDB_EVIDENCE", "QDRANT"],
+                "expectedLlmSkippedReason": (
+                    "LLM 답변 생성 기능이 비활성화되어 있습니다."
+                ),
+            },
+            "summary": {
+                "totalStepCount": 1,
+                "passedStepCount": 1,
+                "failedStepCount": 0,
+                "failedSteps": [],
+                "nextActions": [],
+            },
+            "steps": [
+                {
+                    "name": "readiness",
+                    "status": "PASS",
+                    "result": {"checkStatus": "PASS"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(check_chat_runtime, "check_chat_runtime", fake_check_chat_runtime)
+    stdout = StringIO()
+
+    exit_code = check_chat_runtime.main(["--preset", "rag", "--markdown"], stdout=stdout)
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "# 챗봇 런타임 통합 점검 결과" in output
+    assert "- 점검 상태: `PASS`" in output
+    assert "| Grounding Mode | RDB_QDRANT |" in output
+    assert "| readiness | `PASS` | - | - |" in output

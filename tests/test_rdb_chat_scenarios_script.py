@@ -28,6 +28,10 @@ def _build_args(**overrides: Any) -> Namespace:
         "scenario": None,
         "scenario_group": None,
         "min_evidence_count": None,
+        "require_llm_generation": False,
+        "require_llm_cache_miss": False,
+        "max_llm_total_tokens": None,
+        "markdown": False,
         "json": False,
     }
     values.update(overrides)
@@ -38,6 +42,9 @@ def _answer_response(
     intent: ChatIntent,
     evidence_count: int = 1,
     security_status: str = "PASSED",
+    used_llm_generation: bool = False,
+    llm_cache_hit: bool = False,
+    llm_usage: dict[str, int] | None = None,
 ) -> dict:
     security_code = None
     if security_status == "BLOCKED_UNAUTHORIZED":
@@ -94,12 +101,18 @@ def _answer_response(
         "modelResult": {
             "usedVectorSearch": False,
             "usedRdbEvidence": evidence_count > 0,
-            "usedLlmGeneration": False,
+            "usedLlmGeneration": used_llm_generation,
+            "llmCacheHit": llm_cache_hit,
+            "llmUsage": llm_usage,
             "rdbEvidenceCount": evidence_count,
             "documentSourceCount": 0,
             "evidenceCount": evidence_count,
             "vectorSearchSkippedReason": None,
-            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "llmGenerationSkippedReason": (
+                None
+                if used_llm_generation
+                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+            ),
         },
     }
 
@@ -135,13 +148,22 @@ def test_select_scenarios_supports_scenario_groups() -> None:
     )
 
     assert [scenario.scenario_id for scenario in scenarios] == [
-        "operator-report-allowed",
         "operator-urgent-order-allowed",
         "operator-financial-blocked",
         "admin-chat-blocked",
         "material-shortage-this-week-target",
         "line-bottleneck-today-target",
         "production-plan-date-range",
+    ]
+    assert scenarios[0].role == "OPERATOR"
+    assert scenarios[0].expected_security_statuses == ("PASSED",)
+
+
+def test_select_scenarios_supports_report_group() -> None:
+    scenarios = check_rdb_chat_scenarios.select_scenarios(None, ["report"])
+
+    assert [scenario.scenario_id for scenario in scenarios] == [
+        "operator-report-allowed",
     ]
     assert scenarios[0].role == "OPERATOR"
     assert scenarios[0].expected_security_statuses == (
@@ -211,6 +233,87 @@ def test_check_rdb_chat_scenarios_calls_fastapi_for_each_scenario() -> None:
     )
 
 
+def test_check_rdb_chat_scenarios_carries_llm_generation_and_cache_miss_requirements() -> None:
+    captured_bodies: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode()
+        captured_bodies.append(body)
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.MATERIAL_SHORTAGE,
+                used_llm_generation=True,
+                llm_cache_hit=False,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
+                _build_args(
+                    scenario=["material-shortage"],
+                    require_llm_generation=True,
+                    require_llm_cache_miss=True,
+                    max_llm_total_tokens=200,
+                ),
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    scenario = result["scenarios"][0]
+    assert len(captured_bodies) == 1
+    assert scenario["requireLlmGeneration"] is True
+    assert scenario["requireLlmCacheMiss"] is True
+    assert scenario["maxLlmTotalTokens"] == 200
+    assert scenario["usedLlmGeneration"] is True
+    assert scenario["llmCacheHit"] is False
+    assert scenario["llmUsage"]["totalTokens"] == 152
+
+
+def test_check_rdb_chat_scenarios_fails_when_cache_miss_required_but_cache_hit() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.MATERIAL_SHORTAGE,
+                used_llm_generation=True,
+                llm_cache_hit=True,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
+                _build_args(
+                    scenario=["material-shortage"],
+                    require_llm_cache_miss=True,
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 캐시를 사용했습니다" in exc_info.value.message
+
+
 def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
     captured_roles: list[str] = []
 
@@ -245,20 +348,101 @@ def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
     result = anyio.run(run)
 
     assert result["checkStatus"] == "PASS"
-    assert result["scenarioCount"] == 4
-    assert captured_roles == ["OPERATOR", "OPERATOR", "OPERATOR", "ADMIN"]
+    assert result["scenarioCount"] == 3
+    assert captured_roles == ["OPERATOR", "OPERATOR", "ADMIN"]
     assert [scenario["securityStatus"] for scenario in result["scenarios"]] == [
-        "INSUFFICIENT_EVIDENCE",
         "PASSED",
         "BLOCKED_UNAUTHORIZED",
         "BLOCKED_UNAUTHORIZED",
     ]
     assert [scenario["requireRdbEvidence"] for scenario in result["scenarios"]] == [
-        False,
         True,
         False,
         False,
     ]
+
+
+def test_check_rdb_chat_scenarios_skips_llm_requirements_for_blocked_cases() -> None:
+    captured_requirements: list[tuple[str, bool, bool, int | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode()
+        for scenario in check_rdb_chat_scenarios.ACCESS_CONTROL_RDB_CHAT_SCENARIOS:
+            if scenario.question in body:
+                if scenario.expected_security_results == (("PASSED", None),):
+                    return httpx.Response(
+                        200,
+                        json=_answer_response(
+                            scenario.intent,
+                            used_llm_generation=True,
+                            llm_cache_hit=False,
+                            llm_usage={
+                                "promptTokens": 80,
+                                "completionTokens": 20,
+                                "totalTokens": 100,
+                            },
+                        ),
+                        request=request,
+                    )
+                return httpx.Response(
+                    200,
+                    json=_answer_response(
+                        scenario.intent,
+                        evidence_count=0,
+                        security_status="BLOCKED_UNAUTHORIZED",
+                    ),
+                    request=request,
+                )
+        return httpx.Response(500, json={}, request=request)
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            original_check = check_rdb_chat_scenarios.check_chat_answer.check_chat_answer
+
+            async def wrapped_check_chat_answer(**kwargs):
+                captured_requirements.append(
+                    (
+                        kwargs["request"].question,
+                        kwargs["require_llm_generation"],
+                        kwargs["require_llm_cache_miss"],
+                        kwargs["max_llm_total_tokens"],
+                    )
+                )
+                return await original_check(**kwargs)
+
+            check_rdb_chat_scenarios.check_chat_answer.check_chat_answer = (
+                wrapped_check_chat_answer
+            )
+            try:
+                return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
+                    _build_args(
+                        scenario_group=["access"],
+                        require_llm_generation=True,
+                        require_llm_cache_miss=True,
+                        max_llm_total_tokens=200,
+                    ),
+                    http_client=http_client,
+                )
+            finally:
+                check_rdb_chat_scenarios.check_chat_answer.check_chat_answer = (
+                    original_check
+                )
+
+    result = anyio.run(run)
+
+    assert captured_requirements == [
+        ("긴급 주문이 생산계획에 미치는 영향 알려줘", True, True, 200),
+        ("납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘", False, False, None),
+        ("납기 위험이 있는 주문 알려줘", False, False, None),
+    ]
+    assert result["scenarios"][0]["llmRequirementSkippedReason"] is None
+    assert result["scenarios"][1]["llmRequirementSkippedReason"] == (
+        "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
+    )
+    assert result["scenarios"][2]["llmRequirementSkippedReason"] == (
+        "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
+    )
 
 
 def test_check_rdb_chat_scenarios_fails_when_intent_is_different() -> None:
@@ -369,6 +553,9 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
                 "expectedSecurityCodes": [None],
                 "expectedSecurityResults": [{"status": "PASSED", "code": None}],
                 "requireRdbEvidence": True,
+                "requireLlmGeneration": True,
+                "requireLlmCacheMiss": True,
+                "llmCacheHit": False,
                 "rdbEvidenceCount": 3,
                 "sourceCount": 3,
                 "urlCount": 2,
@@ -384,7 +571,57 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
     assert "role=MANUFACTURING_MANAGER" in output
     assert "securityCode=None" in output
     assert "requireRdbEvidence=True" in output
+    assert "requireLlmGeneration=True" in output
+    assert "requireLlmCacheMiss=True" in output
+    assert "llmCacheHit=False" in output
     assert "rdbEvidenceCount=3" in output
+
+
+def test_check_rdb_chat_scenarios_formats_markdown_result() -> None:
+    result = {
+        "checkStatus": "PASS",
+        "scenarioCount": 1,
+        "scenarios": [
+            {
+                "scenarioId": "operator-financial-blocked",
+                "role": "OPERATOR",
+                "question": "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
+                "intent": "DELIVERY_RISK",
+                "securityStatus": "BLOCKED_UNAUTHORIZED",
+                "securityCode": "CHAT_SECURITY_004",
+                "expectedSecurityStatuses": ["BLOCKED_UNAUTHORIZED"],
+                "expectedSecurityCodes": ["CHAT_SECURITY_004"],
+                "expectedSecurityResults": [
+                    {
+                        "status": "BLOCKED_UNAUTHORIZED",
+                        "code": "CHAT_SECURITY_004",
+                    }
+                ],
+                "requireRdbEvidence": False,
+                "requireLlmGeneration": True,
+                "requireLlmCacheMiss": True,
+                "llmCacheHit": False,
+                "rdbEvidenceCount": 0,
+                "sourceCount": 0,
+                "urlCount": 0,
+            }
+        ],
+    }
+
+    output = check_rdb_chat_scenarios.format_markdown_result(result)
+
+    assert "# RDB 챗봇 시나리오 점검 결과" in output
+    assert "- 점검 상태: `PASS`" in output
+    assert "| 시나리오 | Role | Intent | 보안 상태 | 보안 코드 |" in output
+    assert (
+        "| operator-financial-blocked | OPERATOR | DELIVERY_RISK | "
+        "BLOCKED_UNAUTHORIZED | CHAT_SECURITY_004 | `false` | `true` | "
+        "`true` | `false` | 0 | 0 | 0 |"
+    ) in output
+    assert (
+        "- `operator-financial-blocked`: "
+        "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘"
+    ) in output
 
 
 def test_check_rdb_chat_scenarios_main_does_not_expose_secret(
@@ -427,6 +664,57 @@ def test_check_rdb_chat_scenarios_main_does_not_expose_secret(
     output = stdout.getvalue()
     assert exit_code == 0
     assert "status=PASS" in output
+    assert "secret-answer-token" not in output
+
+
+def test_check_rdb_chat_scenarios_main_formats_markdown_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_rdb_chat_scenarios(args) -> dict:
+        return {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "operator-financial-blocked",
+                    "role": "OPERATOR",
+                    "question": "납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘",
+                    "intent": "DELIVERY_RISK",
+                    "securityStatus": "BLOCKED_UNAUTHORIZED",
+                    "securityCode": "CHAT_SECURITY_004",
+                    "expectedSecurityStatuses": ["BLOCKED_UNAUTHORIZED"],
+                    "expectedSecurityCodes": ["CHAT_SECURITY_004"],
+                    "expectedSecurityResults": [
+                        {
+                            "status": "BLOCKED_UNAUTHORIZED",
+                            "code": "CHAT_SECURITY_004",
+                        }
+                    ],
+                    "requireRdbEvidence": False,
+                    "rdbEvidenceCount": 0,
+                    "sourceCount": 0,
+                    "urlCount": 0,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        check_rdb_chat_scenarios,
+        "check_rdb_chat_scenarios",
+        fake_check_rdb_chat_scenarios,
+    )
+    stdout = StringIO()
+
+    exit_code = check_rdb_chat_scenarios.main(
+        ["--token", "secret-answer-token", "--scenario-group", "access", "--markdown"],
+        stdout=stdout,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "# RDB 챗봇 시나리오 점검 결과" in output
+    assert "operator-financial-blocked" in output
+    assert "CHAT_SECURITY_004" in output
     assert "secret-answer-token" not in output
 
 

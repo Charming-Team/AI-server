@@ -30,6 +30,10 @@ def _build_args(**overrides: Any) -> Namespace:
         "min_evidence_count": None,
         "min_rdb_evidence_count": None,
         "min_document_source_count": None,
+        "require_llm_generation": False,
+        "require_llm_cache_miss": False,
+        "max_llm_total_tokens": None,
+        "markdown": False,
         "json": False,
     }
     values.update(overrides)
@@ -50,6 +54,8 @@ def _answer_response(
     rdb_title: str = "생산계획 근거",
     rdb_url: str = "/plans/1?mode=read",
     document_title: str = "LINE-A01 병목 대응 기준",
+    used_llm_generation: bool = False,
+    llm_usage: dict[str, int] | None = None,
 ) -> dict:
     security_code = None
     if security_status == "BLOCKED_UNAUTHORIZED":
@@ -115,12 +121,18 @@ def _answer_response(
         "modelResult": {
             "usedVectorSearch": used_vector_search,
             "usedRdbEvidence": rdb_evidence_count > 0,
-            "usedLlmGeneration": False,
+            "usedLlmGeneration": used_llm_generation,
+            "llmCacheHit": False,
+            "llmUsage": llm_usage,
             "rdbEvidenceCount": rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
             "vectorSearchSkippedReason": None if used_vector_search else "Qdrant 미사용",
-            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "llmGenerationSkippedReason": (
+                None
+                if used_llm_generation
+                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+            ),
         },
     }
 
@@ -149,7 +161,7 @@ def test_select_rag_scenarios_returns_core_by_default() -> None:
     assert [scenario.scenario_id for scenario in scenarios] == [
         "material-shortage-with-company-guide",
         "line-bottleneck-with-company-guide",
-        "delivery-risk-with-report",
+        "delivery-risk-with-company-guide",
     ]
     assert all(scenario.require_rdb_evidence for scenario in scenarios)
     assert all(scenario.require_vector_search for scenario in scenarios)
@@ -223,6 +235,42 @@ def test_check_rag_chat_scenarios_calls_fastapi_for_each_core_scenario() -> None
     assert all(scenario["usedRdbEvidence"] is True for scenario in result["scenarios"])
     assert all(scenario["usedVectorSearch"] is True for scenario in result["scenarios"])
     assert all(scenario["documentSourceCount"] == 1 for scenario in result["scenarios"])
+
+
+def test_check_rag_chat_scenarios_applies_llm_total_token_limit() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                used_llm_generation=True,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(
+                    scenario=["line-bottleneck-with-company-guide"],
+                    max_llm_total_tokens=100,
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "expected<=100, actual=152" in exc_info.value.message
 
 
 def test_check_rag_chat_scenarios_verifies_access_group() -> None:
@@ -343,14 +391,14 @@ def test_check_rag_chat_scenarios_fails_when_rdb_count_is_below_minimum() -> Non
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-                json=_answer_response(
-                    ChatIntent.LINE_BOTTLENECK,
-                    evidence_count=2,
-                    rdb_evidence_count=1,
-                    document_source_count=1,
-                ),
-                request=request,
-            )
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                evidence_count=2,
+                rdb_evidence_count=1,
+                document_source_count=1,
+            ),
+            request=request,
+        )
 
     async def run() -> None:
         transport = httpx.MockTransport(handler)
@@ -394,6 +442,205 @@ def test_check_rag_chat_scenarios_fails_when_vector_search_is_not_used() -> None
 
     assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
     assert "Qdrant Vector Search가 사용되지 않았습니다" in exc_info.value.message
+
+
+def test_check_rag_chat_scenarios_verifies_required_llm_generation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+                used_llm_generation=True,
+            ),
+            request=request,
+        )
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(
+                    scenario=["line-bottleneck-with-company-guide"],
+                    require_llm_generation=True,
+                ),
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["scenarios"][0]["requireLlmGeneration"] is True
+    assert result["scenarios"][0]["usedLlmGeneration"] is True
+    assert result["scenarios"][0]["requireLlmCacheMiss"] is False
+
+
+def test_check_rag_chat_scenarios_carries_llm_cache_miss_requirement() -> None:
+    captured: dict[str, bool] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                used_llm_generation=True,
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            original_check = check_rag_chat_scenarios.check_chat_answer.check_chat_answer
+
+            async def wrapped_check_chat_answer(**kwargs):
+                captured["require_llm_cache_miss"] = kwargs["require_llm_cache_miss"]
+                return await original_check(**kwargs)
+
+            check_rag_chat_scenarios.check_chat_answer.check_chat_answer = (
+                wrapped_check_chat_answer
+            )
+            try:
+                return await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                    _build_args(
+                        scenario=["line-bottleneck-with-company-guide"],
+                        require_llm_generation=True,
+                        require_llm_cache_miss=True,
+                    ),
+                    http_client=http_client,
+                )
+            finally:
+                check_rag_chat_scenarios.check_chat_answer.check_chat_answer = (
+                    original_check
+                )
+
+    result = anyio.run(run)
+
+    assert captured == {"require_llm_cache_miss": True}
+    assert result["scenarios"][0]["requireLlmCacheMiss"] is True
+
+
+def test_check_rag_chat_scenarios_skips_llm_requirements_for_blocked_cases() -> None:
+    captured_requirements: list[tuple[str, bool, bool, int | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode()
+        payload = json.loads(body)
+        for scenario in check_rag_chat_scenarios.COMPANY_INFO_RAG_CHAT_SCENARIOS:
+            if scenario.question in body and payload["user"]["role"] == scenario.role:
+                if scenario.expected_security_results == (("PASSED", None),):
+                    return httpx.Response(
+                        200,
+                        json=_answer_response(
+                            scenario.intent,
+                            evidence_count=1,
+                            rdb_evidence_count=0,
+                            document_source_count=1,
+                            document_title=_document_title_for_scenario(
+                                scenario.scenario_id
+                            ),
+                            used_llm_generation=True,
+                            llm_usage={
+                                "promptTokens": 90,
+                                "completionTokens": 20,
+                                "totalTokens": 110,
+                            },
+                        ),
+                        request=request,
+                    )
+                return httpx.Response(
+                    200,
+                    json=_answer_response(
+                        scenario.intent,
+                        evidence_count=0,
+                        rdb_evidence_count=0,
+                        document_source_count=0,
+                        used_vector_search=False,
+                        security_status="BLOCKED_UNAUTHORIZED",
+                    ),
+                    request=request,
+                )
+        return httpx.Response(500, json={}, request=request)
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            original_check = check_rag_chat_scenarios.check_chat_answer.check_chat_answer
+
+            async def wrapped_check_chat_answer(**kwargs):
+                captured_requirements.append(
+                    (
+                        kwargs["request"].question,
+                        kwargs["require_llm_generation"],
+                        kwargs["require_llm_cache_miss"],
+                        kwargs["max_llm_total_tokens"],
+                    )
+                )
+                return await original_check(**kwargs)
+
+            check_rag_chat_scenarios.check_chat_answer.check_chat_answer = (
+                wrapped_check_chat_answer
+            )
+            try:
+                return await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                    _build_args(
+                        scenario_group=["company"],
+                        require_llm_generation=True,
+                        require_llm_cache_miss=True,
+                        max_llm_total_tokens=200,
+                    ),
+                    http_client=http_client,
+                )
+            finally:
+                check_rag_chat_scenarios.check_chat_answer.check_chat_answer = (
+                    original_check
+                )
+
+    result = anyio.run(run)
+
+    assert captured_requirements == [
+        ("S-Map 회사 개요 알려줘", True, True, 200),
+        ("S-Map 매출 구조 알려줘", True, True, 200),
+        ("S-Map 매출 구조 알려줘", False, False, None),
+    ]
+    assert result["scenarios"][0]["llmRequirementSkippedReason"] is None
+    assert result["scenarios"][1]["llmRequirementSkippedReason"] is None
+    assert result["scenarios"][2]["llmRequirementSkippedReason"] == (
+        "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
+    )
+
+
+def test_check_rag_chat_scenarios_fails_when_llm_generation_is_required() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                rdb_title="LINE-PE-01 MAINTENANCE",
+                document_title="LINE-PE-01 병목 대응 기준",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(
+                    scenario=["line-bottleneck-with-company-guide"],
+                    require_llm_generation=True,
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 답변 생성이 사용되지 않았습니다" in exc_info.value.message
 
 
 def test_check_rag_chat_scenarios_fails_when_company_info_mixes_rdb_evidence() -> None:
@@ -497,6 +744,16 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
                     "rdbEvidenceCount": 1,
                     "documentSourceCount": 1,
                     "usedVectorSearch": True,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
+                    "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
+                    "llmUsage": {
+                        "promptTokens": 120,
+                        "completionTokens": 32,
+                        "totalTokens": 152,
+                    },
+                    "maxLlmTotalTokens": 200,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -507,7 +764,79 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
     assert "status=PASS" in output
     assert "scenario=line-bottleneck-with-company-guide" in output
     assert "requireVectorSearch=True" in output
+    assert "requireLlmGeneration=False" in output
+    assert "usedLlmGeneration=False" in output
+    assert "llmCacheHit=False" in output
+    assert "requireLlmCacheMiss=False" in output
+    assert "llmUsage=prompt=120, completion=32, total=152" in output
+    assert "maxLlmTotalTokens=200" in output
     assert "documentSourceCount=1" in output
+
+
+def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
+    output = check_rag_chat_scenarios.format_markdown_result(
+        {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "line-bottleneck-with-company-guide",
+                    "role": "MANUFACTURING_MANAGER",
+                    "question": "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘",
+                    "intent": "LINE_BOTTLENECK",
+                    "securityStatus": "PASSED",
+                    "securityCode": None,
+                    "evidenceCount": 2,
+                    "rdbEvidenceCount": 1,
+                    "documentSourceCount": 1,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
+                    "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
+                    "llmUsage": {
+                        "promptTokens": 120,
+                        "completionTokens": 32,
+                        "totalTokens": 152,
+                    },
+                    "maxLlmTotalTokens": 200,
+                    "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
+                    "sourceDetails": [
+                        {
+                            "sourceOrigin": "RDB",
+                            "sourceType": "LINE",
+                            "title": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        },
+                        {
+                            "sourceOrigin": "QDRANT",
+                            "sourceType": "COMPANY_INFO",
+                            "title": "LINE-PE-01 병목 대응 기준",
+                            "url": "/company-info/line-pe-01-bottleneck-guide",
+                        },
+                    ],
+                    "urlDetails": [
+                        {
+                            "type": "LINE",
+                            "label": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert "# RAG 챗봇 시나리오 점검 결과" in output
+    assert "## line-bottleneck-with-company-guide" in output
+    assert "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘" in output
+    assert (
+        "- LLM 생성: 요구 `False`, 사용 `False`, 캐시 `False`, "
+        "캐시 미스 요구 `False`, 토큰 `prompt=120, completion=32, total=152`, "
+        "최대 `200`"
+    ) in output
+    assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
+    assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
+    assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
 
 
 def test_check_rag_chat_scenarios_main_does_not_expose_secret(
@@ -529,6 +858,10 @@ def test_check_rag_chat_scenarios_main_does_not_expose_secret(
                     "rdbEvidenceCount": 1,
                     "documentSourceCount": 1,
                     "usedVectorSearch": True,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
+                    "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -550,6 +883,73 @@ def test_check_rag_chat_scenarios_main_does_not_expose_secret(
     assert exit_code == 0
     assert "status=PASS" in stdout.getvalue()
     assert "secret-answer-token" not in stdout.getvalue()
+
+
+def test_check_rag_chat_scenarios_main_formats_markdown_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_rag_chat_scenarios(args) -> dict:
+        return {
+            "checkStatus": "PASS",
+            "scenarioCount": 1,
+            "scenarios": [
+                {
+                    "scenarioId": "line-bottleneck-with-company-guide",
+                    "role": "MANUFACTURING_MANAGER",
+                    "question": "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘",
+                    "intent": "LINE_BOTTLENECK",
+                    "securityStatus": "PASSED",
+                    "securityCode": None,
+                    "requireRdbEvidence": True,
+                    "requireVectorSearch": True,
+                    "evidenceCount": 2,
+                    "rdbEvidenceCount": 1,
+                    "documentSourceCount": 1,
+                    "usedVectorSearch": True,
+                    "requireLlmGeneration": False,
+                    "usedLlmGeneration": False,
+                    "llmCacheHit": False,
+                    "requireLlmCacheMiss": False,
+                    "sourceCount": 2,
+                    "urlCount": 2,
+                    "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
+                    "sourceDetails": [
+                        {
+                            "sourceOrigin": "RDB",
+                            "sourceType": "LINE",
+                            "title": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        }
+                    ],
+                    "urlDetails": [
+                        {
+                            "type": "LINE",
+                            "label": "LINE-PE-01 MAINTENANCE",
+                            "url": "/production-lines/103?mode=read",
+                        }
+                    ],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        check_rag_chat_scenarios,
+        "check_rag_chat_scenarios",
+        fake_check_rag_chat_scenarios,
+    )
+    stdout = StringIO()
+
+    exit_code = check_rag_chat_scenarios.main(
+        ["--token", "secret-answer-token", "--scenario-group", "core", "--markdown"],
+        stdout=stdout,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "# RAG 챗봇 시나리오 점검 결과" in output
+    assert "## line-bottleneck-with-company-guide" in output
+    assert "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다." in output
+    assert "secret-answer-token" not in output
 
 
 def test_check_rag_chat_scenarios_main_returns_one_without_token() -> None:

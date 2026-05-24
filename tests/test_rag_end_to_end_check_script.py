@@ -35,6 +35,9 @@ def _build_args(**overrides: Any) -> Namespace:
         "min_document_source_count": 1,
         "min_evidence_count": 1,
         "require_rdb_evidence": False,
+        "max_llm_total_tokens": None,
+        "require_llm_generation": False,
+        "require_llm_cache_miss": False,
         "keep_document": False,
         "validate_only": False,
         "json": False,
@@ -58,6 +61,9 @@ def _answer_response(
     document_source_count: int = 1,
     used_vector_search: bool = True,
     rdb_evidence_count: int = 0,
+    used_llm_generation: bool = False,
+    llm_cache_hit: bool = False,
+    llm_usage: dict[str, int] | None = None,
 ) -> dict:
     evidence_count = document_source_count + rdb_evidence_count
     sources = []
@@ -113,12 +119,18 @@ def _answer_response(
         "modelResult": {
             "usedVectorSearch": used_vector_search,
             "usedRdbEvidence": rdb_evidence_count > 0,
-            "usedLlmGeneration": False,
+            "usedLlmGeneration": used_llm_generation,
+            "llmCacheHit": llm_cache_hit,
+            "llmUsage": llm_usage,
             "rdbEvidenceCount": rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
             "vectorSearchSkippedReason": None if used_vector_search else "Qdrant 미사용",
-            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "llmGenerationSkippedReason": (
+                None
+                if used_llm_generation
+                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+            ),
         },
     }
 
@@ -160,6 +172,9 @@ def test_rag_end_to_end_validate_only_checks_tokens_and_paths() -> None:
         "minEvidenceCount": 1,
         "minDocumentSourceCount": 1,
         "requireRdbEvidence": False,
+        "maxLlmTotalTokens": None,
+        "requireLlmGeneration": False,
+        "requireLlmCacheMiss": False,
         "keepDocument": False,
     }
 
@@ -205,6 +220,149 @@ def test_rag_end_to_end_calls_index_answer_delete_in_order() -> None:
     assert result["answer"]["documentSourceCount"] == 1
     assert result["answer"]["usedVectorSearch"] is True
     assert result["usedCleanup"] is True
+
+
+def test_rag_end_to_end_carries_llm_generation_and_cache_miss_requirements() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(path)
+        if path.endswith("/documents/index"):
+            return httpx.Response(200, json=_index_response(), request=request)
+        if path.endswith("/chat/answer"):
+            return httpx.Response(
+                200,
+                json=_answer_response(
+                    used_llm_generation=True,
+                    llm_cache_hit=False,
+                    llm_usage={
+                        "promptTokens": 120,
+                        "completionTokens": 32,
+                        "totalTokens": 152,
+                    },
+                ),
+                request=request,
+            )
+        if path.endswith("/documents/delete"):
+            return httpx.Response(200, json=_delete_response(), request=request)
+        return httpx.Response(404, request=request)
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_rag_end_to_end.check_rag_end_to_end(
+                args=_build_args(
+                    require_llm_generation=True,
+                    require_llm_cache_miss=True,
+                    max_llm_total_tokens=200,
+                ),
+                settings=Settings(),
+                answer_token="answer-token",
+                document_token="document-token",
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert calls == [
+        "/api/v1/chat/internal/documents/index",
+        "/api/v1/chat/answer",
+        "/api/v1/chat/internal/documents/delete",
+    ]
+    assert result["requireLlmGeneration"] is True
+    assert result["requireLlmCacheMiss"] is True
+    assert result["answer"]["usedLlmGeneration"] is True
+    assert result["answer"]["llmCacheHit"] is False
+    assert result["answer"]["llmUsage"]["totalTokens"] == 152
+
+
+def test_rag_end_to_end_applies_llm_total_token_limit_and_cleans_up() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(path)
+        if path.endswith("/documents/index"):
+            return httpx.Response(200, json=_index_response(), request=request)
+        if path.endswith("/chat/answer"):
+            return httpx.Response(
+                200,
+                json=_answer_response(
+                    llm_usage={
+                        "promptTokens": 120,
+                        "completionTokens": 32,
+                        "totalTokens": 152,
+                    }
+                ),
+                request=request,
+            )
+        if path.endswith("/documents/delete"):
+            return httpx.Response(200, json=_delete_response(), request=request)
+        return httpx.Response(404, request=request)
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_end_to_end.check_rag_end_to_end(
+                args=_build_args(max_llm_total_tokens=100),
+                settings=Settings(),
+                answer_token="answer-token",
+                document_token="document-token",
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "expected<=100, actual=152" in exc_info.value.message
+    assert calls[-1].endswith("/documents/delete")
+
+
+def test_rag_end_to_end_fails_when_cache_miss_required_but_cache_hit() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(path)
+        if path.endswith("/documents/index"):
+            return httpx.Response(200, json=_index_response(), request=request)
+        if path.endswith("/chat/answer"):
+            return httpx.Response(
+                200,
+                json=_answer_response(
+                    used_llm_generation=True,
+                    llm_cache_hit=True,
+                    llm_usage={
+                        "promptTokens": 120,
+                        "completionTokens": 32,
+                        "totalTokens": 152,
+                    },
+                ),
+                request=request,
+            )
+        if path.endswith("/documents/delete"):
+            return httpx.Response(200, json=_delete_response(), request=request)
+        return httpx.Response(404, request=request)
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_end_to_end.check_rag_end_to_end(
+                args=_build_args(require_llm_cache_miss=True),
+                settings=Settings(),
+                answer_token="answer-token",
+                document_token="document-token",
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 캐시를 사용했습니다" in exc_info.value.message
+    assert calls[-1].endswith("/documents/delete")
 
 
 def test_rag_end_to_end_can_keep_document() -> None:
@@ -295,6 +453,9 @@ def test_rag_end_to_end_format_text_does_not_expose_tokens() -> None:
                 "usedVectorSearch": True,
             },
             "cleanup": {"operationStatus": "completed"},
+            "maxLlmTotalTokens": 200,
+            "requireLlmGeneration": True,
+            "requireLlmCacheMiss": True,
             "usedCleanup": True,
             "keepDocument": False,
         }
@@ -302,6 +463,9 @@ def test_rag_end_to_end_format_text_does_not_expose_tokens() -> None:
 
     assert "status=PASS" in output
     assert "answerDocumentSourceCount=1" in output
+    assert "maxLlmTotalTokens=200" in output
+    assert "requireLlmGeneration=True" in output
+    assert "requireLlmCacheMiss=True" in output
     assert "answer-token" not in output
     assert "document-token" not in output
 
