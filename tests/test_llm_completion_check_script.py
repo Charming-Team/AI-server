@@ -196,7 +196,12 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
             json={
                 "choices": [
                     {"message": {"content": "연결 정상입니다."}},
-                ]
+                ],
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 5,
+                    "total_tokens": 25,
+                },
             },
             request=request,
         )
@@ -231,6 +236,11 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": 9,
+        "usage": {
+            "promptTokens": 20,
+            "completionTokens": 5,
+            "totalTokens": 25,
+        },
         "outputPolicyPassed": True,
     }
 
@@ -306,12 +316,18 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": 9,
+        "usage": {
+            "promptTokens": 20,
+            "completionTokens": 5,
+            "totalTokens": 25,
+        },
         "outputPolicyPassed": True,
     }
 
     output = check_llm_completion.format_text_result(result)
 
     assert "outputPolicyPassed=True" in output
+    assert "usage={'promptTokens': 20, 'completionTokens': 5, 'totalTokens': 25}" in output
     assert "maxTokensUsed=64" in output
     assert "modelAllowlistConfigured=False" in output
     assert "modelAllowed=True" in output
@@ -405,6 +421,7 @@ def test_check_llm_completion_main_allows_openai_network_with_confirmation(
             "openaiCostGuardrailPassed": True,
             "answerReceived": True,
             "answerLength": 9,
+            "usage": None,
             "outputPolicyPassed": True,
         }
 

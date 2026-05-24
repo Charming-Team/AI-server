@@ -15,6 +15,7 @@ from app.features.chat.schemas import (
     ChatAnswerRequest,
     DocumentSearchResult,
     EvidenceResult,
+    LlmUsage,
 )
 from app.features.chat.skip_reasons import (
     ANSWER_BLOCKED_BY_OUTPUT_POLICY,
@@ -87,10 +88,11 @@ class AnswerGenerationService:
                 evidence_result=evidence_result,
                 document_result=document_result,
                 llm_cache_hit=True,
+                llm_usage=LlmUsage(promptTokens=0, completionTokens=0, totalTokens=0),
             )
 
         try:
-            answer = await self.llm_client.generate(prompt)
+            completion = await self.llm_client.generate_completion(prompt)
         except ChatExternalServiceError:
             answer = self.fallback_answer_builder.build(evidence_result, document_result)
             return self._build_output_checked_result(
@@ -101,14 +103,15 @@ class AnswerGenerationService:
             )
 
         result = self._build_generated_result_from_llm_answer(
-            answer,
+            completion.answer,
             role=request.user.role,
             evidence_result=evidence_result,
             document_result=document_result,
             llm_cache_hit=False,
+            llm_usage=completion.usage,
         )
         if result.was_generated and result.security_result is None:
-            self.llm_response_cache.put(cache_key, answer)
+            self.llm_response_cache.put(cache_key, completion.answer)
         return result
 
     def _build_generated_result_from_llm_answer(
@@ -119,6 +122,7 @@ class AnswerGenerationService:
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
         llm_cache_hit: bool,
+        llm_usage: LlmUsage | None,
     ) -> AnswerGenerationResult:
         if not answer:
             return AnswerGenerationResult(
@@ -138,6 +142,7 @@ class AnswerGenerationService:
             role=role,
             was_generated=True,
             llm_cache_hit=llm_cache_hit,
+            llm_usage=llm_usage,
         )
 
     def _build_cache_key(self, prompt: GroundedPrompt) -> str:
@@ -156,6 +161,7 @@ class AnswerGenerationService:
         role: str,
         was_generated: bool,
         llm_cache_hit: bool = False,
+        llm_usage: LlmUsage | None = None,
         skipped_reason: str | None = None,
     ) -> AnswerGenerationResult:
         output_security_result = self.output_policy.evaluate(
@@ -169,6 +175,7 @@ class AnswerGenerationService:
                     "업무 데이터에 대한 질문으로 다시 요청해 주세요."
                 ),
                 was_generated=False,
+                llm_usage=llm_usage,
                 skipped_reason=ANSWER_BLOCKED_BY_OUTPUT_POLICY,
                 security_result=output_security_result,
             )
@@ -178,6 +185,7 @@ class AnswerGenerationService:
             answer=answer,
             was_generated=was_generated,
             llm_cache_hit=llm_cache_hit,
+            llm_usage=llm_usage,
             skipped_reason=skipped_reason,
         )
 

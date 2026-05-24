@@ -562,6 +562,7 @@ def test_chat_answer_returns_grounded_answer_with_sources_and_urls() -> None:
         "usedRdbEvidence": True,
         "usedLlmGeneration": True,
         "llmCacheHit": False,
+        "llmUsage": None,
         "rdbEvidenceCount": 1,
         "documentSourceCount": 1,
         "evidenceCount": 2,

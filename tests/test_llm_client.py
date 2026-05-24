@@ -9,6 +9,7 @@ from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.llm_client import (
     LlmClient,
+    LlmCompletion,
     resolve_llm_base_url,
     validate_llm_settings,
     validate_openai_cost_guardrails,
@@ -164,6 +165,11 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
         return httpx.Response(
             200,
             json={
+                "usage": {
+                    "prompt_tokens": 120,
+                    "completion_tokens": 32,
+                    "total_tokens": 152,
+                },
                 "choices": [
                     {
                         "message": {
@@ -186,6 +192,37 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
     assert answer == "자재 부족과 라인 병목이 주요 위험입니다."
     assert captured_request["url"].endswith("/chat/completions")
     assert captured_request["body"]["model"] == "qwen-test"
+
+
+def test_llm_client_generate_completion_parses_usage() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": "연결 정상입니다."}},
+                ],
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 5,
+                    "total_tokens": 25,
+                },
+            },
+        )
+
+    async def run_generate() -> LlmCompletion:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            client = LlmClient(Settings(llm_model="qwen-test"), http_client=http_client)
+            return await client.generate_completion(_build_prompt())
+
+    completion = anyio.run(run_generate)
+
+    assert completion.answer == "연결 정상입니다."
+    assert completion.usage is not None
+    assert completion.usage.prompt_tokens == 20
+    assert completion.usage.completion_tokens == 5
+    assert completion.usage.total_tokens == 25
 
 
 @pytest.mark.parametrize(
@@ -347,4 +384,34 @@ def test_llm_client_returns_empty_answer_on_missing_content() -> None:
         json={"choices": [{"message": {"content": None}}]},
     )
 
-    assert client._parse_response(response) == ""
+    assert client._parse_response(response) == LlmCompletion(answer="")
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        "not-a-dict",
+        {"prompt_tokens": "20", "completion_tokens": 5, "total_tokens": 25},
+        {"prompt_tokens": -1, "completion_tokens": 5, "total_tokens": 25},
+        {"prompt_tokens": True, "completion_tokens": 5, "total_tokens": 25},
+    ],
+)
+def test_llm_client_raises_external_error_on_invalid_usage_shape(
+    usage: object,
+) -> None:
+    client = LlmClient(Settings())
+    response = httpx.Response(
+        200,
+        request=httpx.Request("POST", "http://llm.local/chat/completions"),
+        json={
+            "choices": [{"message": {"content": "정상 응답"}}],
+            "usage": usage,
+        },
+    )
+
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        client._parse_response(response)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_002
+    assert exc_info.value.message == "LLM 응답 형식이 올바르지 않습니다."

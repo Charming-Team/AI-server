@@ -279,12 +279,21 @@ class SecurityResult(BaseModel):
     reason: str | None = None
 
 
+class LlmUsage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    prompt_tokens: int = Field(default=0, ge=0, alias="promptTokens")
+    completion_tokens: int = Field(default=0, ge=0, alias="completionTokens")
+    total_tokens: int = Field(default=0, ge=0, alias="totalTokens")
+
+
 class AnswerGenerationResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     answer: str
     was_generated: bool = False
     llm_cache_hit: bool = Field(default=False, alias="llmCacheHit")
+    llm_usage: LlmUsage | None = Field(default=None, alias="llmUsage")
     skipped_reason: str | None = None
     security_result: SecurityResult | None = Field(default=None, alias="securityResult")
 
@@ -301,6 +310,7 @@ class ModelResult(BaseModel):
     used_rdb_evidence: bool = Field(alias="usedRdbEvidence")
     used_llm_generation: bool = Field(default=False, alias="usedLlmGeneration")
     llm_cache_hit: bool = Field(default=False, alias="llmCacheHit")
+    llm_usage: LlmUsage | None = Field(default=None, alias="llmUsage")
     rdb_evidence_count: int = Field(default=0, alias="rdbEvidenceCount")
     document_source_count: int = Field(default=0, alias="documentSourceCount")
     evidence_count: int = Field(alias="evidenceCount")

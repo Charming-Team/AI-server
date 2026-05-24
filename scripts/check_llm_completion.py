@@ -153,9 +153,10 @@ async def check_llm_completion(
 ) -> dict[str, Any]:
     validate_llm_smoke_settings(settings)
     smoke_settings = build_smoke_settings(settings)
-    answer = await LlmClient(smoke_settings, http_client=http_client).generate(
+    completion = await LlmClient(smoke_settings, http_client=http_client).generate_completion(
         build_smoke_prompt()
     )
+    answer = completion.answer
     if not answer:
         raise ChatServiceError(
             status_code=502,
@@ -180,6 +181,11 @@ async def check_llm_completion(
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": len(answer),
+        "usage": (
+            completion.usage.model_dump(by_alias=True)
+            if completion.usage
+            else None
+        ),
         "outputPolicyPassed": True,
     }
 
@@ -220,6 +226,8 @@ def format_text_result(result: dict[str, Any]) -> str:
         lines.append(f"maxTokensUsed={result['maxTokensUsed']}")
         lines.append(f"answerReceived={result['answerReceived']}")
         lines.append(f"answerLength={result['answerLength']}")
+        if result.get("usage"):
+            lines.append(f"usage={result['usage']}")
         lines.append(f"outputPolicyPassed={result['outputPolicyPassed']}")
     return "\n".join(lines)
 

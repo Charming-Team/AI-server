@@ -7,6 +7,7 @@ from app.core.config import Settings
 from app.features.chat.answer_generation_service import AnswerGenerationService
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
+from app.features.chat.llm_client import LlmCompletion
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
@@ -16,6 +17,7 @@ from app.features.chat.schemas import (
     DocumentSearchResult,
     EvidenceItem,
     EvidenceResult,
+    LlmUsage,
 )
 
 BLOCKED_GENERATED_ANSWER = (
@@ -28,22 +30,28 @@ class FakeLlmClient:
     def __init__(
         self,
         answer: str = "보고서 근거에 따르면 자재 부족이 주요 리스크입니다.",
+        usage: LlmUsage | None = None,
     ) -> None:
         self.answer = answer
+        self.usage = usage
         self.prompt: GroundedPrompt | None = None
         self.call_count = 0
 
     async def generate(self, prompt: GroundedPrompt) -> str:
+        completion = await self.generate_completion(prompt)
+        return completion.answer
+
+    async def generate_completion(self, prompt: GroundedPrompt) -> LlmCompletion:
         self.call_count += 1
         self.prompt = prompt
-        return self.answer
+        return LlmCompletion(answer=self.answer, usage=self.usage)
 
 
 class FakeFailingLlmClient:
     def __init__(self) -> None:
         self.prompt: GroundedPrompt | None = None
 
-    async def generate(self, prompt: GroundedPrompt) -> str:
+    async def generate_completion(self, prompt: GroundedPrompt) -> LlmCompletion:
         self.prompt = prompt
         raise ChatExternalServiceError(
             status_code=503,
@@ -249,7 +257,8 @@ def test_answer_generation_prompt_includes_rdb_evidence_source_data() -> None:
 
 def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     llm_client = FakeLlmClient(
-        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다.",
+        usage=LlmUsage(promptTokens=120, completionTokens=32, totalTokens=152),
     )
     service = AnswerGenerationService(
         Settings(llm_enabled=True),
@@ -280,6 +289,10 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
 
     assert result.was_generated is True
     assert result.llm_cache_hit is False
+    assert result.llm_usage is not None
+    assert result.llm_usage.prompt_tokens == 120
+    assert result.llm_usage.completion_tokens == 32
+    assert result.llm_usage.total_tokens == 152
     assert result.answer.startswith(
         "핵심 답변:\n"
         "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
@@ -332,6 +345,8 @@ def test_answer_generation_reuses_cached_llm_answer_for_same_grounded_prompt() -
     assert first_result.llm_cache_hit is False
     assert second_result.was_generated is True
     assert second_result.llm_cache_hit is True
+    assert second_result.llm_usage is not None
+    assert second_result.llm_usage.total_tokens == 0
     assert first_result.answer == second_result.answer
     assert llm_client.call_count == 1
 

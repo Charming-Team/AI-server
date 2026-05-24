@@ -73,6 +73,7 @@ def test_chat_audit_logger_builds_safe_answer_payload() -> None:
         "usedRdbEvidence": False,
         "usedLlmGeneration": False,
         "llmCacheHit": True,
+        "llmUsage": None,
         "vectorSearchSkippedReason": "Qdrant 검색 결과가 없습니다.",
         "llmGenerationSkippedReason": "RDB Evidence와 문서 검색 근거가 없습니다.",
         "rdbEvidenceCount": 0,

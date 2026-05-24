@@ -1,9 +1,11 @@
+from dataclasses import dataclass
+
 import httpx
 
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
-from app.features.chat.schemas import ChatErrorCode
+from app.features.chat.schemas import ChatErrorCode, LlmUsage
 
 OPENAI_PROVIDER = "openai"
 OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
@@ -14,6 +16,12 @@ OPENAI_COST_GUARDRAIL_MAX_TOKENS = 1024
 OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS = 8_000
 OPENAI_COST_GUARDRAIL_MIN_CACHE_TTL_SECONDS = 1.0
 OPENAI_COST_GUARDRAIL_MIN_CACHE_ENTRIES = 1
+
+
+@dataclass(frozen=True)
+class LlmCompletion:
+    answer: str
+    usage: LlmUsage | None = None
 
 
 def normalize_llm_provider(provider: str) -> str:
@@ -140,6 +148,10 @@ class LlmClient:
         self.http_client = http_client
 
     async def generate(self, prompt: GroundedPrompt) -> str:
+        completion = await self.generate_completion(prompt)
+        return completion.answer
+
+    async def generate_completion(self, prompt: GroundedPrompt) -> LlmCompletion:
         validate_llm_settings(self.settings)
         payload = self._build_payload(prompt)
         try:
@@ -176,7 +188,7 @@ class LlmClient:
             "max_tokens": self.settings.llm_max_tokens,
         }
 
-    def _parse_response(self, response: httpx.Response) -> str:
+    def _parse_response(self, response: httpx.Response) -> LlmCompletion:
         try:
             response.raise_for_status()
             body = response.json()
@@ -198,7 +210,7 @@ class LlmClient:
 
         choices = body.get("choices", [])
         if not choices:
-            return ""
+            return LlmCompletion(answer="", usage=self._parse_usage(body.get("usage")))
         if not isinstance(choices, list):
             self._raise_invalid_response_shape()
 
@@ -212,10 +224,32 @@ class LlmClient:
 
         content = message.get("content", "")
         if content is None:
-            return ""
+            return LlmCompletion(answer="", usage=self._parse_usage(body.get("usage")))
         if not isinstance(content, str):
             self._raise_invalid_response_shape()
-        return content.strip()
+        return LlmCompletion(
+            answer=content.strip(),
+            usage=self._parse_usage(body.get("usage")),
+        )
+
+    def _parse_usage(self, usage: object) -> LlmUsage | None:
+        if usage is None:
+            return None
+        if not isinstance(usage, dict):
+            self._raise_invalid_response_shape()
+
+        return LlmUsage(
+            promptTokens=self._parse_usage_token(usage.get("prompt_tokens")),
+            completionTokens=self._parse_usage_token(usage.get("completion_tokens")),
+            totalTokens=self._parse_usage_token(usage.get("total_tokens")),
+        )
+
+    def _parse_usage_token(self, value: object) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            self._raise_invalid_response_shape()
+        return value
 
     def _raise_invalid_response_shape(self) -> None:
         raise ChatExternalServiceError(

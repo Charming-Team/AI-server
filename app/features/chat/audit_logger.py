@@ -87,6 +87,11 @@ class ChatAuditLogger:
             "usedRdbEvidence": response.model_result.used_rdb_evidence,
             "usedLlmGeneration": response.model_result.used_llm_generation,
             "llmCacheHit": response.model_result.llm_cache_hit,
+            "llmUsage": (
+                response.model_result.llm_usage.model_dump(by_alias=True)
+                if response.model_result.llm_usage
+                else None
+            ),
             "vectorSearchSkippedReason": (
                 response.model_result.vector_search_skipped_reason
             ),
