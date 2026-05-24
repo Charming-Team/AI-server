@@ -47,6 +47,7 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "근거 원천(RDB 또는 QDRANT)" in prompt.system_prompt
     assert "700~900자 안쪽" in prompt.system_prompt
     assert "원천 JSON, 전체 데이터 덤프" in prompt.system_prompt
+    assert "각 섹션명은 한 번만 출력" in prompt.system_prompt
     assert "같은 제목과 같은 출처의 근거를 여러 bullet" in prompt.system_prompt
     assert "수치에는 가능한 경우 시간, 일, %, 수량" in prompt.system_prompt
     assert "현재 상태, 수치, 진행률은 RDB 근거를 우선" in prompt.system_prompt
@@ -61,6 +62,7 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     )
     assert "전체 답변은 700~900자 안쪽" in prompt.user_prompt
     assert "원천 JSON, 전체 데이터 덤프" in prompt.user_prompt
+    assert "섹션명은 각각 한 번만 출력" in prompt.user_prompt
     assert "RDB 근거가 1개뿐이면 해당 RDB 근거는 1개 bullet" in prompt.user_prompt
     assert "비율 값은 % 단위" in prompt.user_prompt
     assert "근거 섹션에는 최소 1개 이상의 출처 제목" in prompt.user_prompt
