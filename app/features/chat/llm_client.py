@@ -16,6 +16,13 @@ OPENAI_COST_GUARDRAIL_MAX_TOKENS = 1024
 OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS = 8_000
 OPENAI_COST_GUARDRAIL_MIN_CACHE_TTL_SECONDS = 1.0
 OPENAI_COST_GUARDRAIL_MIN_CACHE_ENTRIES = 1
+OPENAI_MAX_COMPLETION_TOKEN_MODEL_PREFIXES = (
+    "gpt-5",
+    "o1",
+    "o3",
+    "o4",
+)
+OPENAI_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
 
 
 @dataclass(frozen=True)
@@ -42,10 +49,11 @@ def validate_llm_settings(settings: Settings) -> None:
         missing_fields.append("llm_base_url")
     if not settings.llm_model.strip():
         missing_fields.append("llm_model")
-    if provider == OPENAI_PROVIDER and not settings.llm_api_key:
+    if provider == OPENAI_PROVIDER and not resolve_llm_api_key(settings):
         missing_fields.append("llm_api_key")
 
     if not missing_fields:
+        validate_openai_reasoning_effort(settings)
         validate_openai_model_allowlist(settings)
         validate_openai_cost_guardrails(settings)
         return
@@ -83,6 +91,21 @@ def validate_openai_model_allowlist(settings: Settings) -> None:
         status_code=503,
         code=ChatErrorCode.CHAT_LLM_001,
         message="OpenAI 허용 모델이 아닙니다: llm_model",
+    )
+
+
+def validate_openai_reasoning_effort(settings: Settings) -> None:
+    if not should_use_max_completion_tokens(settings):
+        return
+
+    reasoning_effort = settings.llm_reasoning_effort.strip().casefold()
+    if reasoning_effort in OPENAI_REASONING_EFFORTS:
+        return
+
+    raise ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_LLM_001,
+        message="OpenAI reasoning effort 설정이 올바르지 않습니다: llm_reasoning_effort",
     )
 
 
@@ -138,6 +161,19 @@ def resolve_llm_base_url(settings: Settings) -> str:
     return base_url
 
 
+def resolve_llm_api_key(settings: Settings) -> str | None:
+    if normalize_llm_provider(settings.llm_provider) != OPENAI_PROVIDER:
+        return settings.llm_api_key
+    return settings.llm_api_key or settings.openai_api_key
+
+
+def should_use_max_completion_tokens(settings: Settings) -> bool:
+    if normalize_llm_provider(settings.llm_provider) != OPENAI_PROVIDER:
+        return False
+    model = settings.llm_model.strip().casefold()
+    return model.startswith(OPENAI_MAX_COMPLETION_TOKEN_MODEL_PREFIXES)
+
+
 class LlmClient:
     def __init__(
         self,
@@ -178,15 +214,21 @@ class LlmClient:
             ) from exc
 
     def _build_payload(self, prompt: GroundedPrompt) -> dict:
-        return {
+        payload = {
             "model": self.settings.llm_model,
             "messages": [
                 {"role": "system", "content": prompt.system_prompt},
                 {"role": "user", "content": prompt.user_prompt},
             ],
-            "temperature": self.settings.llm_temperature,
-            "max_tokens": self.settings.llm_max_tokens,
         }
+        if should_use_max_completion_tokens(self.settings):
+            payload["max_completion_tokens"] = self.settings.llm_max_tokens
+            payload["reasoning_effort"] = self.settings.llm_reasoning_effort
+            return payload
+
+        payload["temperature"] = self.settings.llm_temperature
+        payload["max_tokens"] = self.settings.llm_max_tokens
+        return payload
 
     def _parse_response(self, response: httpx.Response) -> LlmCompletion:
         try:
@@ -196,7 +238,11 @@ class LlmClient:
             raise ChatExternalServiceError(
                 status_code=503,
                 code=ChatErrorCode.CHAT_LLM_003,
-                message="LLM 서버 호출에 실패했습니다.",
+                message=(
+                    "LLM 서버 호출에 실패했습니다. "
+                    f"status={exc.response.status_code}, "
+                    f"reason={self._parse_error_reason(exc.response)}"
+                ),
             ) from exc
         except ValueError as exc:
             raise ChatExternalServiceError(
@@ -251,6 +297,29 @@ class LlmClient:
             self._raise_invalid_response_shape()
         return value
 
+    def _parse_error_reason(self, response: httpx.Response) -> str:
+        try:
+            body = response.json()
+        except ValueError:
+            return "invalid_error_response"
+
+        if not isinstance(body, dict):
+            return "invalid_error_response"
+
+        error = body.get("error")
+        if not isinstance(error, dict):
+            return "unknown"
+
+        error_type = error.get("type")
+        error_code = error.get("code")
+        error_param = error.get("param")
+        parts = [
+            f"type={error_type}" if isinstance(error_type, str) else None,
+            f"code={error_code}" if isinstance(error_code, str) else None,
+            f"param={error_param}" if isinstance(error_param, str) else None,
+        ]
+        return ",".join(part for part in parts if part) or "unknown"
+
     def _raise_invalid_response_shape(self) -> None:
         raise ChatExternalServiceError(
             status_code=502,
@@ -265,6 +334,6 @@ class LlmClient:
     @property
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        if self.settings.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
+        if api_key := resolve_llm_api_key(self.settings):
+            headers["Authorization"] = f"Bearer {api_key}"
         return headers

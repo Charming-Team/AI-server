@@ -15,7 +15,9 @@ from app.features.chat.llm_client import (
     OPENAI_COST_GUARDRAIL_MAX_TOKENS,
     LlmClient,
     normalize_llm_provider,
+    resolve_llm_api_key,
     resolve_llm_base_url,
+    should_use_max_completion_tokens,
     validate_llm_settings,
 )
 from app.features.chat.schemas import ChatErrorCode
@@ -27,6 +29,7 @@ DEFAULT_SYSTEM_PROMPT = (
 DEFAULT_USER_PROMPT = "LLM 연결 점검입니다. 짧게 정상 응답을 반환하세요."
 OPENAI_NETWORK_CONFIRM_FLAG = "--allow-openai-network"
 SMOKE_MAX_TOKENS = 64
+OPENAI_REASONING_SMOKE_MAX_TOKENS = 256
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,9 +97,14 @@ def validate_openai_network_allowed(settings: Settings, allow_openai_network: bo
 
 
 def build_smoke_settings(settings: Settings) -> Settings:
+    max_tokens = (
+        OPENAI_REASONING_SMOKE_MAX_TOKENS
+        if should_use_max_completion_tokens(settings)
+        else SMOKE_MAX_TOKENS
+    )
     return settings.model_copy(
         update={
-            "llm_max_tokens": min(settings.llm_max_tokens, SMOKE_MAX_TOKENS),
+            "llm_max_tokens": min(settings.llm_max_tokens, max_tokens),
         }
     )
 
@@ -115,10 +123,11 @@ def build_validate_only_result(settings: Settings) -> dict[str, Any]:
         "modelConfigured": bool(settings.llm_model.strip()),
         "modelAllowlistConfigured": model_allowlist_configured,
         "modelAllowed": model_allowed,
-        "apiKeyConfigured": bool(settings.llm_api_key),
+        "apiKeyConfigured": bool(resolve_llm_api_key(settings)),
         "openaiNetworkRequiresConfirmation": provider == "openai",
         "openaiCostGuardrailPassed": True,
         "runtimeMaxTokens": settings.llm_max_tokens,
+        "reasoningEffort": settings.llm_reasoning_effort,
         "openaiMaxTokensLimit": OPENAI_COST_GUARDRAIL_MAX_TOKENS,
         "promptMaxTotalChars": settings.prompt_max_total_chars,
         "openaiMaxPromptCharsLimit": OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS,
@@ -158,10 +167,18 @@ async def check_llm_completion(
     )
     answer = completion.answer
     if not answer:
+        usage = (
+            completion.usage.model_dump(by_alias=True)
+            if completion.usage
+            else None
+        )
         raise ChatServiceError(
             status_code=502,
             code=ChatErrorCode.CHAT_LLM_004,
-            message="LLM smoke check 응답이 비어 있습니다.",
+            message=(
+                "LLM smoke check 응답이 비어 있습니다. "
+                f"maxTokensUsed={smoke_settings.llm_max_tokens}, usage={usage}"
+            ),
         )
     validate_llm_smoke_answer(answer)
 
@@ -175,9 +192,10 @@ async def check_llm_completion(
         "modelConfigured": True,
         "modelAllowlistConfigured": bool(settings.llm_allowed_models),
         "modelAllowed": True,
-        "apiKeyConfigured": bool(settings.llm_api_key),
+        "apiKeyConfigured": bool(resolve_llm_api_key(settings)),
         "maxTokensUsed": smoke_settings.llm_max_tokens,
         "runtimeMaxTokens": settings.llm_max_tokens,
+        "reasoningEffort": settings.llm_reasoning_effort,
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": len(answer),
@@ -216,6 +234,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"apiKeyConfigured={result['apiKeyConfigured']}",
         f"openaiCostGuardrailPassed={result['openaiCostGuardrailPassed']}",
         f"runtimeMaxTokens={result['runtimeMaxTokens']}",
+        f"reasoningEffort={result['reasoningEffort']}",
     ]
     if "openaiNetworkRequiresConfirmation" in result:
         lines.append(

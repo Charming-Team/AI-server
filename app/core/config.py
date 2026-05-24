@@ -48,8 +48,10 @@ class Settings(BaseSettings):
     llm_provider: str = "openai_compatible"
     llm_base_url: str = "http://localhost:8001/v1"
     llm_api_key: str | None = None
+    openai_api_key: str | None = None
     llm_model: str = "local-open-source-model"
     llm_allowed_models: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    llm_reasoning_effort: str = "minimal"
     llm_temperature: float = 0.1
     llm_max_tokens: int = Field(default=512, ge=1, le=4096)
     llm_timeout_seconds: float = 60.0

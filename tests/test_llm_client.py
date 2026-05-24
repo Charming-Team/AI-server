@@ -10,10 +10,13 @@ from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.llm_client import (
     LlmClient,
     LlmCompletion,
+    resolve_llm_api_key,
     resolve_llm_base_url,
+    should_use_max_completion_tokens,
     validate_llm_settings,
     validate_openai_cost_guardrails,
     validate_openai_model_allowlist,
+    validate_openai_reasoning_effort,
 )
 from app.features.chat.schemas import ChatErrorCode
 
@@ -77,6 +80,61 @@ def test_llm_client_resolves_openai_base_url_and_requires_api_key() -> None:
         "Content-Type": "application/json",
         "Authorization": "Bearer openai-secret-token",
     }
+
+
+def test_llm_client_accepts_standard_openai_api_key_env_name() -> None:
+    settings = Settings(
+        llm_provider="openai",
+        llm_model="gpt-test",
+        llm_allowed_models=["gpt-test"],
+        llm_api_key=None,
+        openai_api_key="standard-openai-token",
+    )
+    client = LlmClient(settings)
+
+    validate_llm_settings(settings)
+
+    assert resolve_llm_api_key(settings) == "standard-openai-token"
+    assert client._headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer standard-openai-token",
+    }
+
+
+def test_llm_client_builds_gpt5_openai_payload_with_max_completion_tokens() -> None:
+    settings = Settings(
+        llm_provider="openai",
+        llm_model="gpt-5-nano",
+        llm_allowed_models=["gpt-5-nano"],
+        openai_api_key="standard-openai-token",
+        llm_temperature=0.1,
+        llm_max_tokens=512,
+    )
+    client = LlmClient(settings)
+
+    payload = client._build_payload(_build_prompt())
+
+    assert should_use_max_completion_tokens(settings) is True
+    assert payload["max_completion_tokens"] == 512
+    assert payload["reasoning_effort"] == "minimal"
+    assert "max_tokens" not in payload
+    assert "temperature" not in payload
+
+
+def test_llm_client_rejects_invalid_openai_reasoning_effort() -> None:
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        validate_openai_reasoning_effort(
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-5-nano",
+                llm_allowed_models=["gpt-5-nano"],
+                openai_api_key="standard-openai-token",
+                llm_reasoning_effort="expensive",
+            )
+        )
+
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_001
+    assert "llm_reasoning_effort" in exc_info.value.message
 
 
 @pytest.mark.parametrize(
@@ -329,7 +387,7 @@ def test_llm_client_raises_external_error_on_http_failure() -> None:
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.code == ChatErrorCode.CHAT_LLM_003
-    assert exc_info.value.message == "LLM 서버 호출에 실패했습니다."
+    assert exc_info.value.message == "LLM 서버 호출에 실패했습니다. status=500, reason=unknown"
 
 
 def test_llm_client_raises_external_error_on_invalid_response_body() -> None:

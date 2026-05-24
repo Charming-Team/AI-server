@@ -24,6 +24,7 @@ REQUIRED_EXACT_VALUES = {
     "LLM_PROVIDER": "openai",
     "LLM_BASE_URL": "https://api.openai.com/v1",
     "LLM_MAX_TOKENS": "512",
+    "LLM_REASONING_EFFORT": "minimal",
     "LLM_RESPONSE_CACHE_ENABLED": "true",
     "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
     "LLM_RESPONSE_CACHE_MAX_ENTRIES": "128",
@@ -34,8 +35,11 @@ REQUIRED_SECRET_KEYS = {
     "CHAT_ANSWER_INTERNAL_TOKEN",
     "CHAT_RECOMMENDATION_INTERNAL_TOKEN",
     "DOCUMENT_INDEX_INTERNAL_TOKEN",
-    "LLM_API_KEY",
     "RDB_EVIDENCE_DSN",
+}
+
+REQUIRED_SECRET_KEY_GROUPS = {
+    "OPENAI_API_KEY": ("LLM_API_KEY", "OPENAI_API_KEY"),
 }
 
 REQUIRED_CONFIG_KEYS = {
@@ -93,6 +97,7 @@ def check_k8s_runtime_env(
     checks = []
     checks.extend(_check_exact_values(values))
     checks.extend(_check_secret_values(values, allow_placeholders))
+    checks.extend(_check_secret_value_groups(values, allow_placeholders))
     checks.extend(_check_config_values(values, allow_placeholders))
     checks.extend(_check_openai_model_allowlist(values, allow_placeholders))
     checks.extend(_check_k8s_service_urls(values))
@@ -147,6 +152,42 @@ def _check_secret_values(
                 ),
                 expected="non-empty secret reference",
                 actual=_mask_secret_value(value),
+            )
+        )
+    return checks
+
+
+def _check_secret_value_groups(
+    values: dict[str, str],
+    allow_placeholders: bool,
+) -> list[dict]:
+    checks: list[dict] = []
+    for group_name, keys in REQUIRED_SECRET_KEY_GROUPS.items():
+        configured_values = {
+            key: values.get(key, "")
+            for key in keys
+        }
+        is_valid = any(
+            _is_valid_secret_value(
+                value,
+                allow_placeholders=allow_placeholders,
+            )
+            for value in configured_values.values()
+        )
+        checks.append(
+            _build_check(
+                name=group_name,
+                status="PASS" if is_valid else "FAIL",
+                reason=(
+                    None
+                    if is_valid
+                    else (
+                        f"{', '.join(keys)} 중 하나는 Kubernetes Secret에서 "
+                        "주입되어야 합니다."
+                    )
+                ),
+                expected="one non-empty secret reference",
+                actual=_mask_secret_group_value(configured_values),
             )
         )
     return checks
@@ -237,6 +278,11 @@ def _build_secret_failure_reason(
     return f"{key} placeholder는 실제 배포 env에서 사용할 수 없습니다."
 
 
+def _is_valid_secret_value(value: str, allow_placeholders: bool) -> bool:
+    is_placeholder = value.startswith(PLACEHOLDER_PREFIX)
+    return bool(value) and (allow_placeholders or not is_placeholder)
+
+
 def _build_config_failure_reason(
     key: str,
     value: str,
@@ -324,6 +370,17 @@ def _mask_secret_value(value: str) -> str:
     if value.startswith(PLACEHOLDER_PREFIX):
         return value
     return "<set>"
+
+
+def _mask_secret_group_value(values: dict[str, str]) -> str:
+    configured_keys = [
+        key
+        for key, value in values.items()
+        if value
+    ]
+    if not configured_keys:
+        return "<empty>"
+    return ",".join(configured_keys)
 
 
 def _mask_config_value(value: str) -> str:

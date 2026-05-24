@@ -30,6 +30,7 @@ def _valid_env_values() -> dict[str, str]:
         "LLM_API_KEY": "openai-secret-token",
         "LLM_MODEL": "gpt-test",
         "LLM_ALLOWED_MODELS": "gpt-test,gpt-fallback",
+        "LLM_REASONING_EFFORT": "minimal",
         "LLM_MAX_TOKENS": "512",
         "LLM_RESPONSE_CACHE_ENABLED": "true",
         "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
@@ -43,6 +44,16 @@ def test_check_k8s_runtime_env_accepts_runtime_values() -> None:
 
     assert result["checkStatus"] == "PASS"
     assert result["failureCount"] == 0
+
+
+def test_check_k8s_runtime_env_accepts_standard_openai_api_key_name() -> None:
+    values = _valid_env_values()
+    values.pop("LLM_API_KEY")
+    values["OPENAI_API_KEY"] = "openai-secret-token"
+
+    result = check_k8s_runtime_env.check_k8s_runtime_env(values)
+
+    assert result["checkStatus"] == "PASS"
 
 
 def test_check_k8s_runtime_env_allows_placeholders_for_example_file() -> None:
@@ -96,6 +107,7 @@ def test_check_k8s_runtime_env_rejects_local_llm_runtime_values() -> None:
     values["LLM_PROVIDER"] = "openai_compatible"
     values["LLM_BASE_URL"] = "http://llm-service:8001/v1"
     values["LLM_MAX_TOKENS"] = "1024"
+    values["LLM_REASONING_EFFORT"] = "medium"
     values["LLM_RESPONSE_CACHE_ENABLED"] = "false"
     values["PROMPT_MAX_TOTAL_CHARS"] = "20000"
 
@@ -109,6 +121,7 @@ def test_check_k8s_runtime_env_rejects_local_llm_runtime_values() -> None:
         "LLM_PROVIDER",
         "LLM_BASE_URL",
         "LLM_MAX_TOKENS",
+        "LLM_REASONING_EFFORT",
         "LLM_RESPONSE_CACHE_ENABLED",
         "PROMPT_MAX_TOTAL_CHARS",
     } <= failed_names
@@ -117,6 +130,7 @@ def test_check_k8s_runtime_env_rejects_local_llm_runtime_values() -> None:
 def test_check_k8s_runtime_env_rejects_missing_openai_runtime_values() -> None:
     values = _valid_env_values()
     values["LLM_API_KEY"] = ""
+    values["OPENAI_API_KEY"] = ""
     values["LLM_MODEL"] = ""
     values["LLM_ALLOWED_MODELS"] = ""
 
@@ -126,7 +140,7 @@ def test_check_k8s_runtime_env_rejects_missing_openai_runtime_values() -> None:
     failed_names = {
         check["name"] for check in result["checks"] if check["status"] == "FAIL"
     }
-    assert {"LLM_API_KEY", "LLM_MODEL", "LLM_ALLOWED_MODELS"} <= failed_names
+    assert {"OPENAI_API_KEY", "LLM_MODEL", "LLM_ALLOWED_MODELS"} <= failed_names
 
 
 def test_check_k8s_runtime_env_rejects_model_outside_allowlist() -> None:

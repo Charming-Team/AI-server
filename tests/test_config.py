@@ -35,6 +35,7 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.llm_provider == "openai"
     assert settings.llm_base_url == "https://api.openai.com/v1"
     assert settings.llm_allowed_models == []
+    assert settings.llm_reasoning_effort == "minimal"
     assert settings.qdrant_top_k == 5
     assert settings.document_chunk_size == 800
     assert settings.document_chunk_overlap == 80

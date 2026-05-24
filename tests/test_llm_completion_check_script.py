@@ -61,6 +61,7 @@ def test_check_llm_completion_validate_only_result_does_not_expose_model_value()
         "openaiNetworkRequiresConfirmation": False,
         "openaiCostGuardrailPassed": True,
         "runtimeMaxTokens": 512,
+        "reasoningEffort": "minimal",
         "openaiMaxTokensLimit": 1024,
         "promptMaxTotalChars": 6000,
         "openaiMaxPromptCharsLimit": 8000,
@@ -99,6 +100,22 @@ def test_check_llm_completion_accepts_openai_provider_with_api_key() -> None:
     assert result["openaiNetworkRequiresConfirmation"] is True
     assert result["openaiCostGuardrailPassed"] is True
     assert "secret-llm-token" not in check_llm_completion.format_json_result(result)
+
+
+def test_check_llm_completion_accepts_standard_openai_api_key() -> None:
+    result = check_llm_completion.build_validate_only_result(
+        _ready_settings(
+            llm_provider="openai",
+            llm_base_url=" ",
+            llm_model="gpt-test",
+            llm_allowed_models=["gpt-test"],
+            llm_api_key=None,
+            openai_api_key="secret-openai-token",
+        )
+    )
+
+    assert result["apiKeyConfigured"] is True
+    assert "secret-openai-token" not in check_llm_completion.format_json_result(result)
 
 
 def test_check_llm_completion_requires_explicit_openai_network_confirmation() -> None:
@@ -233,6 +250,7 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         "apiKeyConfigured": True,
         "maxTokensUsed": 64,
         "runtimeMaxTokens": 512,
+        "reasoningEffort": "minimal",
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": 9,
@@ -243,6 +261,19 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         },
         "outputPolicyPassed": True,
     }
+
+
+def test_check_llm_completion_uses_larger_smoke_cap_for_gpt5_openai() -> None:
+    settings = _ready_settings(
+        llm_provider="openai",
+        llm_model="gpt-5-nano",
+        llm_allowed_models=["gpt-5-nano"],
+        openai_api_key="secret-openai-token",
+    )
+
+    smoke_settings = check_llm_completion.build_smoke_settings(settings)
+
+    assert smoke_settings.llm_max_tokens == 256
 
 
 def test_check_llm_completion_fails_on_empty_answer() -> None:
@@ -266,6 +297,7 @@ def test_check_llm_completion_fails_on_empty_answer() -> None:
 
     assert exc_info.value.code.value == "CHAT_LLM_004"
     assert "응답이 비어 있습니다" in exc_info.value.message
+    assert "maxTokensUsed=64" in exc_info.value.message
 
 
 def test_check_llm_completion_fails_when_answer_violates_output_policy() -> None:
@@ -313,6 +345,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
         "apiKeyConfigured": False,
         "maxTokensUsed": 64,
         "runtimeMaxTokens": 512,
+        "reasoningEffort": "minimal",
         "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": 9,
@@ -333,6 +366,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
     assert "modelAllowed=True" in output
     assert "openaiCostGuardrailPassed=True" in output
     assert "runtimeMaxTokens=512" in output
+    assert "reasoningEffort=minimal" in output
     assert "provider=openai_compatible" in output
 
 
@@ -418,6 +452,7 @@ def test_check_llm_completion_main_allows_openai_network_with_confirmation(
             "apiKeyConfigured": True,
             "maxTokensUsed": 64,
             "runtimeMaxTokens": settings.llm_max_tokens,
+            "reasoningEffort": settings.llm_reasoning_effort,
             "openaiCostGuardrailPassed": True,
             "answerReceived": True,
             "answerLength": 9,
