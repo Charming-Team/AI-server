@@ -219,7 +219,11 @@ class AnswerGenerationService:
         if any(title.casefold() in normalized_answer for title in titles):
             return answer
 
-        return f"{answer}\n\n참조 근거: {', '.join(titles[:3])}"
+        source_references = self._collect_source_references(
+            evidence_result,
+            document_result,
+        )
+        return f"{answer}\n\n참조 근거: {', '.join(source_references[:3])}"
 
     def _collect_source_titles(
         self,
@@ -239,6 +243,40 @@ class AnswerGenerationService:
             titles.append(title)
         return titles
 
+    def _collect_source_references(
+        self,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> list[str]:
+        references: list[str] = []
+        seen_references: set[str] = set()
+        for item in evidence_result.items:
+            self._append_source_reference(
+                references,
+                seen_references,
+                f"[RDB] {item.title}",
+            )
+        for source in document_result.sources:
+            origin = source.source_origin or "QDRANT"
+            self._append_source_reference(
+                references,
+                seen_references,
+                f"[{origin}] {source.title}",
+            )
+        return references
+
+    def _append_source_reference(
+        self,
+        references: list[str],
+        seen_references: set[str],
+        reference: str,
+    ) -> None:
+        normalized_reference = reference.casefold()
+        if normalized_reference in seen_references:
+            return
+        seen_references.add(normalized_reference)
+        references.append(reference)
+
     def _ensure_answer_sections(
         self,
         answer: str,
@@ -248,9 +286,14 @@ class AnswerGenerationService:
         if self._has_required_sections(answer):
             return answer
 
-        source_titles = self._collect_source_titles(evidence_result, document_result)
-        if source_titles:
-            evidence_lines = "\n".join(f"- {title}" for title in source_titles[:3])
+        source_references = self._collect_source_references(
+            evidence_result,
+            document_result,
+        )
+        if source_references:
+            evidence_lines = "\n".join(
+                f"- {reference}" for reference in source_references[:3]
+            )
         else:
             evidence_lines = "- 제공된 내부 근거"
 

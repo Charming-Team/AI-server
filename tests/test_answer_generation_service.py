@@ -298,7 +298,7 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
         "핵심 답변:\n"
         "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
     )
-    assert "근거:\n- 2026년 5월 생산 리스크 보고서" in result.answer
+    assert "근거:\n- [QDRANT] 2026년 5월 생산 리스크 보고서" in result.answer
     assert "확인 필요:" in result.answer
     assert llm_client.prompt is not None
     assert "2026년 5월 생산 리스크 보고서" in llm_client.prompt.user_prompt
@@ -577,8 +577,8 @@ def test_answer_generation_wraps_unstructured_llm_answer_with_source_titles() ->
         "핵심 답변:\n"
         "근거에 따르면 자재 부족이 주요 리스크입니다.\n\n"
         "근거:\n"
-        "- 월간 생산 리스크\n"
-        "- 2026년 5월 생산 리스크 보고서\n\n"
+        "- [RDB] 월간 생산 리스크\n"
+        "- [QDRANT] 2026년 5월 생산 리스크 보고서\n\n"
         "확인 필요:\n"
         "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
     )
