@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.core.config import Settings
@@ -98,6 +98,42 @@ COLUMN_LABELS = {
     "waiting_time_hr": "대기 시간",
 }
 
+HOUR_COLUMNS = frozenset(
+    {
+        "actual_delay_hr",
+        "actual_duration_hr",
+        "actual_setup_time_hr",
+        "after_total_delay_hr",
+        "before_total_delay_hr",
+        "delay_reduction_hr",
+        "estimated_duration_hr",
+        "line_waiting_time_hr",
+        "waiting_time_hr",
+    }
+)
+
+DAY_COLUMNS = frozenset(
+    {
+        "predicted_delay_days",
+    }
+)
+
+RATE_COLUMNS = frozenset(
+    column
+    for column in (
+        "after_avg_line_utilization_rate",
+        "average_yield_rate",
+        "before_avg_line_utilization_rate",
+        "current_yield_rate",
+        "delay_probability",
+        "progress_rate",
+        "standard_yield_rate",
+        "throughput_rate",
+        "utilization_rate",
+        "yield_rate",
+    )
+)
+
 
 class CatalogRdbEvidenceProvider:
     def __init__(
@@ -154,7 +190,10 @@ class CatalogRdbEvidenceProvider:
 
     def _build_summary(self, row: Mapping[str, Any]) -> str:
         fragments = [
-            f"{COLUMN_LABELS.get(column, column)}: {self._stringify(row.get(column))}"
+            (
+                f"{COLUMN_LABELS.get(column, column)}: "
+                f"{self._format_summary_value(column, row.get(column))}"
+            )
             for column in self.definition.summary_columns
             if self._has_value(row.get(column))
         ]
@@ -206,6 +245,49 @@ class CatalogRdbEvidenceProvider:
 
     def _stringify(self, value: Any) -> str:
         return str(self._json_safe_value(value))
+
+    def _format_summary_value(self, column: str, value: Any) -> str:
+        if isinstance(value, bool):
+            return "예" if value else "아니오"
+        if column in HOUR_COLUMNS:
+            return f"{self._format_number(value)}시간"
+        if column in DAY_COLUMNS:
+            return f"{self._format_number(value)}일"
+        if column in RATE_COLUMNS:
+            return f"{self._format_rate(value)}%"
+        return self._stringify(value)
+
+    def _format_rate(self, value: Any) -> str:
+        number = self._to_decimal(value)
+        if number is None:
+            return self._stringify(value)
+        if abs(number) <= Decimal("1"):
+            number *= Decimal("100")
+        return self._format_decimal(number)
+
+    def _format_number(self, value: Any) -> str:
+        number = self._to_decimal(value)
+        if number is None:
+            return self._stringify(value)
+        return self._format_decimal(number)
+
+    def _to_decimal(self, value: Any) -> Decimal | None:
+        if isinstance(value, Decimal):
+            return value
+        if isinstance(value, int | float | str):
+            try:
+                return Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                return None
+        return None
+
+    def _format_decimal(self, value: Decimal) -> str:
+        normalized = (
+            value.quantize(Decimal("0.1"))
+            if value != value.to_integral()
+            else value
+        )
+        return format(normalized.normalize(), "f")
 
     def _has_value(self, value: Any) -> bool:
         if value is None:

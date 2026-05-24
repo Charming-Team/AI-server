@@ -14,19 +14,27 @@ from app.features.chat.source_url_policy import normalize_internal_url
 
 
 class ChatResponseBuilder:
+    _max_rdb_sources = 3
+    _max_document_sources = 2
     _max_source_summary_chars = 300
+    _max_urls = 3
 
     def build_sources(
         self,
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
     ) -> list[ChatSource]:
-        sources = [
+        evidence_sources = [
             self._evidence_item_to_source(item, evidence_result.basis_time)
             for item in evidence_result.items
         ]
-        sources.extend(self._sanitize_source_url(source) for source in document_result.sources)
-        return self._deduplicate_sources(sources)
+        document_sources = [
+            self._sanitize_source_url(source) for source in document_result.sources
+        ]
+        return [
+            *self._deduplicate_sources(evidence_sources)[: self._max_rdb_sources],
+            *self._deduplicate_sources(document_sources)[: self._max_document_sources],
+        ]
 
     def build_urls(self, sources: list[ChatSource]) -> list[ChatUrl]:
         urls: list[ChatUrl] = []
@@ -43,6 +51,8 @@ class ChatResponseBuilder:
                     type=source.source_type,
                 )
             )
+            if len(urls) >= self._max_urls:
+                break
         return urls
 
     def build_basis_time(
