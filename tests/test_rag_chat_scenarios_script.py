@@ -119,6 +119,7 @@ def _answer_response(
             "usedVectorSearch": used_vector_search,
             "usedRdbEvidence": rdb_evidence_count > 0,
             "usedLlmGeneration": used_llm_generation,
+            "llmCacheHit": False,
             "rdbEvidenceCount": rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
@@ -567,6 +568,7 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
                     "usedVectorSearch": True,
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
+                    "llmCacheHit": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -579,6 +581,7 @@ def test_check_rag_chat_scenarios_formats_text_result() -> None:
     assert "requireVectorSearch=True" in output
     assert "requireLlmGeneration=False" in output
     assert "usedLlmGeneration=False" in output
+    assert "llmCacheHit=False" in output
     assert "documentSourceCount=1" in output
 
 
@@ -600,6 +603,7 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
                     "documentSourceCount": 1,
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
+                    "llmCacheHit": False,
                     "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
                     "sourceDetails": [
                         {
@@ -630,7 +634,7 @@ def test_check_rag_chat_scenarios_formats_markdown_result() -> None:
     assert "# RAG 챗봇 시나리오 점검 결과" in output
     assert "## line-bottleneck-with-company-guide" in output
     assert "LINE-PE-01 병목 현황과 대응 기준을 같이 알려줘" in output
-    assert "- LLM 생성: 요구 `False`, 사용 `False`" in output
+    assert "- LLM 생성: 요구 `False`, 사용 `False`, 캐시 `False`" in output
     assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
     assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
     assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
@@ -657,6 +661,7 @@ def test_check_rag_chat_scenarios_main_does_not_expose_secret(
                     "usedVectorSearch": True,
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
+            "llmCacheHit": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                 }
@@ -703,6 +708,7 @@ def test_check_rag_chat_scenarios_main_formats_markdown_without_secret(
                     "usedVectorSearch": True,
                     "requireLlmGeneration": False,
                     "usedLlmGeneration": False,
+            "llmCacheHit": False,
                     "sourceCount": 2,
                     "urlCount": 2,
                     "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",

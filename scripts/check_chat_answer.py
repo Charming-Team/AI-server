@@ -276,6 +276,7 @@ async def check_chat_answer(
         "requireVectorSearch": require_vector_search,
         "vectorSearchSkippedReason": answer.model_result.vector_search_skipped_reason,
         "usedLlmGeneration": answer.model_result.used_llm_generation,
+        "llmCacheHit": answer.model_result.llm_cache_hit,
         "requireLlmGeneration": require_llm_generation,
         "llmGenerationSkippedReason": llm_skipped_reason,
         "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
@@ -371,6 +372,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"requireVectorSearch={result['requireVectorSearch']}",
         f"vectorSearchSkippedReason={result['vectorSearchSkippedReason']}",
         f"usedLlmGeneration={result['usedLlmGeneration']}",
+        f"llmCacheHit={result['llmCacheHit']}",
         f"requireLlmGeneration={result['requireLlmGeneration']}",
         f"llmGenerationSkippedReason={result['llmGenerationSkippedReason']}",
         (
@@ -408,6 +410,7 @@ def format_markdown_result(result: dict[str, Any]) -> str:
         (
             "- 생성 상태: "
             f"LLM `{result['usedLlmGeneration']}`, "
+            f"LLM Cache `{result['llmCacheHit']}`, "
             f"Vector Search `{result['usedVectorSearch']}`"
         ),
     ]

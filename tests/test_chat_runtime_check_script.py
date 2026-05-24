@@ -829,6 +829,7 @@ def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
                     "scenarioId": "line-bottleneck-with-company-guide",
                     "requireLlmGeneration": True,
                     "usedLlmGeneration": True,
+            "llmCacheHit": False,
                 }
             ],
         }
@@ -1571,6 +1572,7 @@ def test_check_chat_runtime_network_runs_answer_api_smoke(
             "usedRdbEvidence": kwargs["require_rdb_evidence"],
             "usedVectorSearch": kwargs["require_vector_search"],
             "usedLlmGeneration": kwargs["require_llm_generation"],
+            "llmCacheHit": False,
         }
 
     monkeypatch.setattr(
@@ -1621,6 +1623,7 @@ def test_check_chat_runtime_answer_api_smoke_carries_llm_generation_requirement(
         return {
             "checkStatus": "PASS",
             "usedLlmGeneration": kwargs["require_llm_generation"],
+            "llmCacheHit": False,
         }
 
     monkeypatch.setattr(
@@ -1668,6 +1671,7 @@ def test_check_chat_runtime_network_answer_api_smoke_expects_fallback_when_llm_d
         return {
             "checkStatus": "PASS",
             "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "llmGenerationSkippedReason": kwargs["expected_llm_skipped_reason"],
         }
 

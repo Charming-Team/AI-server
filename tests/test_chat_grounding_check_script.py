@@ -96,6 +96,7 @@ def _fastapi_answer_response() -> dict:
             "usedVectorSearch": False,
             "usedRdbEvidence": True,
             "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "rdbEvidenceCount": 1,
             "documentSourceCount": 0,
             "evidenceCount": 1,

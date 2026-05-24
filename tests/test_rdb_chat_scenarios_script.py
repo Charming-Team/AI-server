@@ -96,6 +96,7 @@ def _answer_response(
             "usedVectorSearch": False,
             "usedRdbEvidence": evidence_count > 0,
             "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "rdbEvidenceCount": evidence_count,
             "documentSourceCount": 0,
             "evidenceCount": evidence_count,

@@ -284,6 +284,7 @@ class AnswerGenerationResult(BaseModel):
 
     answer: str
     was_generated: bool = False
+    llm_cache_hit: bool = Field(default=False, alias="llmCacheHit")
     skipped_reason: str | None = None
     security_result: SecurityResult | None = Field(default=None, alias="securityResult")
 
@@ -299,6 +300,7 @@ class ModelResult(BaseModel):
     used_vector_search: bool = Field(alias="usedVectorSearch")
     used_rdb_evidence: bool = Field(alias="usedRdbEvidence")
     used_llm_generation: bool = Field(default=False, alias="usedLlmGeneration")
+    llm_cache_hit: bool = Field(default=False, alias="llmCacheHit")
     rdb_evidence_count: int = Field(default=0, alias="rdbEvidenceCount")
     document_source_count: int = Field(default=0, alias="documentSourceCount")
     evidence_count: int = Field(alias="evidenceCount")

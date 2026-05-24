@@ -86,6 +86,7 @@ class AnswerGenerationService:
                 role=request.user.role,
                 evidence_result=evidence_result,
                 document_result=document_result,
+                llm_cache_hit=True,
             )
 
         try:
@@ -104,6 +105,7 @@ class AnswerGenerationService:
             role=request.user.role,
             evidence_result=evidence_result,
             document_result=document_result,
+            llm_cache_hit=False,
         )
         if result.was_generated and result.security_result is None:
             self.llm_response_cache.put(cache_key, answer)
@@ -116,6 +118,7 @@ class AnswerGenerationService:
         role: str,
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
+        llm_cache_hit: bool,
     ) -> AnswerGenerationResult:
         if not answer:
             return AnswerGenerationResult(
@@ -134,6 +137,7 @@ class AnswerGenerationService:
             answer,
             role=role,
             was_generated=True,
+            llm_cache_hit=llm_cache_hit,
         )
 
     def _build_cache_key(self, prompt: GroundedPrompt) -> str:
@@ -151,6 +155,7 @@ class AnswerGenerationService:
         *,
         role: str,
         was_generated: bool,
+        llm_cache_hit: bool = False,
         skipped_reason: str | None = None,
     ) -> AnswerGenerationResult:
         output_security_result = self.output_policy.evaluate(
@@ -172,6 +177,7 @@ class AnswerGenerationService:
         return AnswerGenerationResult(
             answer=answer,
             was_generated=was_generated,
+            llm_cache_hit=llm_cache_hit,
             skipped_reason=skipped_reason,
         )
 

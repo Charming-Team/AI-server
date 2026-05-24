@@ -123,6 +123,7 @@ def _answer_response(
             "usedVectorSearch": used_vector_search,
             "usedRdbEvidence": resolved_used_rdb_evidence,
             "usedLlmGeneration": used_llm_generation,
+            "llmCacheHit": False,
             "rdbEvidenceCount": resolved_rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
@@ -227,6 +228,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "requireVectorSearch": False,
         "vectorSearchSkippedReason": "Qdrant 검색이 비활성화되어 있습니다.",
         "usedLlmGeneration": False,
+        "llmCacheHit": False,
         "requireLlmGeneration": False,
         "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         "expectedLlmGenerationSkippedReason": None,
@@ -715,6 +717,7 @@ def test_check_chat_answer_script_formats_markdown_result() -> None:
             "rdbEvidenceCount": 1,
             "documentSourceCount": 1,
             "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "usedVectorSearch": True,
             "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
             "sourceDetails": [
@@ -743,6 +746,7 @@ def test_check_chat_answer_script_formats_markdown_result() -> None:
 
     assert "# 챗봇 답변 점검 결과" in output
     assert "Intent: `LINE_BOTTLENECK`" in output
+    assert "LLM Cache `False`" in output
     assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
     assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
     assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
@@ -806,6 +810,7 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
             "requireVectorSearch": False,
             "vectorSearchSkippedReason": None,
             "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "requireLlmGeneration": False,
             "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
             "expectedLlmGenerationSkippedReason": None,
@@ -863,6 +868,7 @@ def test_check_chat_answer_script_main_formats_markdown_without_secret(
             "requireVectorSearch": False,
             "vectorSearchSkippedReason": None,
             "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "requireLlmGeneration": False,
             "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
             "expectedLlmGenerationSkippedReason": None,

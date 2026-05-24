@@ -463,6 +463,7 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"usedVectorSearch={scenario['usedVectorSearch']} "
             f"requireLlmGeneration={scenario['requireLlmGeneration']} "
             f"usedLlmGeneration={scenario['usedLlmGeneration']} "
+            f"llmCacheHit={scenario.get('llmCacheHit', False)} "
             f"sourceCount={scenario['sourceCount']} "
             f"urlCount={scenario['urlCount']}"
         )
@@ -504,7 +505,8 @@ def format_markdown_result(result: dict[str, Any]) -> str:
                 (
                     "- LLM 생성: "
                     f"요구 `{scenario['requireLlmGeneration']}`, "
-                    f"사용 `{scenario['usedLlmGeneration']}`"
+                    f"사용 `{scenario['usedLlmGeneration']}`, "
+                    f"캐시 `{scenario.get('llmCacheHit', False)}`"
                 ),
             ]
         )

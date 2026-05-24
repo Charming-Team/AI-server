@@ -279,6 +279,7 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     )
 
     assert result.was_generated is True
+    assert result.llm_cache_hit is False
     assert result.answer.startswith(
         "핵심 답변:\n"
         "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
@@ -328,7 +329,9 @@ def test_answer_generation_reuses_cached_llm_answer_for_same_grounded_prompt() -
     )
 
     assert first_result.was_generated is True
+    assert first_result.llm_cache_hit is False
     assert second_result.was_generated is True
+    assert second_result.llm_cache_hit is True
     assert first_result.answer == second_result.answer
     assert llm_client.call_count == 1
 

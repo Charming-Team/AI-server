@@ -102,6 +102,20 @@ class FakeGeneratedAnswerGenerationService:
         )
 
 
+class FakeCachedAnswerGenerationService:
+    async def generate_answer(
+        self,
+        request: ChatAnswerRequest,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> AnswerGenerationResult:
+        return AnswerGenerationResult(
+            answer="캐시된 근거 기반 답변입니다.",
+            was_generated=True,
+            llmCacheHit=True,
+        )
+
+
 class FakeCapturingAnswerGenerationService:
     def __init__(self) -> None:
         self.evidence_result: EvidenceResult | None = None
@@ -264,6 +278,7 @@ def test_chat_service_blocks_inactive_user_status_before_evidence_lookup() -> No
     assert response.model_result.used_rdb_evidence is False
     assert response.model_result.used_vector_search is False
     assert response.model_result.used_llm_generation is False
+    assert response.model_result.llm_cache_hit is False
     assert audit_logger.requests == [_build_request(status="SUSPENDED")]
     assert audit_logger.responses == [response]
 
@@ -313,6 +328,7 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
     assert response.model_result.used_vector_search is True
     assert response.model_result.used_rdb_evidence is True
     assert response.model_result.used_llm_generation is True
+    assert response.model_result.llm_cache_hit is False
     assert response.model_result.rdb_evidence_count == 1
     assert response.model_result.document_source_count == 2
     assert response.model_result.evidence_count == 3
@@ -320,6 +336,19 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
     assert response.model_result.llm_generation_skipped_reason is None
     assert audit_logger.requests == [request]
     assert audit_logger.responses == [response]
+
+
+def test_chat_service_marks_llm_cache_hit_in_model_result() -> None:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeDocumentSearchService()
+    service.answer_generation_service = FakeCachedAnswerGenerationService()
+
+    response = anyio.run(service.create_answer, _build_request())
+
+    assert response.answer == "캐시된 근거 기반 답변입니다."
+    assert response.model_result.used_llm_generation is True
+    assert response.model_result.llm_cache_hit is True
 
 
 def test_chat_service_uses_latest_grounding_basis_time() -> None:
