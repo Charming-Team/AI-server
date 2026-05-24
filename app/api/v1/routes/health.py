@@ -3,11 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from app.core.config import Settings, get_settings
+from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.llm_client import (
     OPENAI_COMPATIBLE_PROVIDER,
     OPENAI_PROVIDER,
     SUPPORTED_LLM_PROVIDERS,
     normalize_llm_provider,
+    validate_llm_settings,
 )
 from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import ChatErrorCode
@@ -185,7 +187,7 @@ def _llm_component(settings: Settings) -> ReadinessComponent:
     elif provider == OPENAI_COMPATIBLE_PROVIDER:
         required_fields["llm_base_url"] = settings.llm_base_url
 
-    return _integration_component(
+    component = _integration_component(
         name="llm",
         enabled=True,
         required_fields=required_fields,
@@ -195,6 +197,20 @@ def _llm_component(settings: Settings) -> ReadinessComponent:
             "llm_model": ChatErrorCode.CHAT_LLM_001,
         },
     )
+    if not component.configured:
+        return component
+
+    try:
+        validate_llm_settings(settings)
+    except ChatExternalServiceError as exc:
+        return ReadinessComponent(
+            name="llm",
+            enabled=True,
+            configured=False,
+            code=exc.code,
+            reason=exc.message,
+        )
+    return component
 
 
 def _rag_search_pipeline_component(settings: Settings) -> ReadinessComponent:

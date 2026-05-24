@@ -29,6 +29,7 @@ def _valid_env_values() -> dict[str, str]:
         "LLM_BASE_URL": "https://api.openai.com/v1",
         "LLM_API_KEY": "openai-secret-token",
         "LLM_MODEL": "gpt-test",
+        "LLM_ALLOWED_MODELS": "gpt-test,gpt-fallback",
         "LLM_MAX_TOKENS": "512",
         "LLM_RESPONSE_CACHE_ENABLED": "true",
         "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
@@ -51,6 +52,7 @@ def test_check_k8s_runtime_env_allows_placeholders_for_example_file() -> None:
     values["DOCUMENT_INDEX_INTERNAL_TOKEN"] = "__SET_BY_SECRET__"
     values["LLM_API_KEY"] = "__SET_BY_SECRET__"
     values["LLM_MODEL"] = "__SET_OPENAI_MODEL__"
+    values["LLM_ALLOWED_MODELS"] = "__SET_OPENAI_ALLOWED_MODELS__"
     values["RDB_EVIDENCE_DSN"] = "__SET_BY_SECRET__"
 
     result = check_k8s_runtime_env.check_k8s_runtime_env(
@@ -116,6 +118,7 @@ def test_check_k8s_runtime_env_rejects_missing_openai_runtime_values() -> None:
     values = _valid_env_values()
     values["LLM_API_KEY"] = ""
     values["LLM_MODEL"] = ""
+    values["LLM_ALLOWED_MODELS"] = ""
 
     result = check_k8s_runtime_env.check_k8s_runtime_env(values)
 
@@ -123,7 +126,23 @@ def test_check_k8s_runtime_env_rejects_missing_openai_runtime_values() -> None:
     failed_names = {
         check["name"] for check in result["checks"] if check["status"] == "FAIL"
     }
-    assert {"LLM_API_KEY", "LLM_MODEL"} <= failed_names
+    assert {"LLM_API_KEY", "LLM_MODEL", "LLM_ALLOWED_MODELS"} <= failed_names
+
+
+def test_check_k8s_runtime_env_rejects_model_outside_allowlist() -> None:
+    values = _valid_env_values()
+    values["LLM_MODEL"] = "gpt-test"
+    values["LLM_ALLOWED_MODELS"] = "gpt-other"
+
+    result = check_k8s_runtime_env.check_k8s_runtime_env(values)
+
+    assert result["checkStatus"] == "FAIL"
+    assert any(
+        check["name"] == "LLM_MODEL_ALLOWLIST"
+        and check["status"] == "FAIL"
+        and check["actual"] == "<set>"
+        for check in result["checks"]
+    )
 
 
 def test_check_k8s_runtime_env_loads_example_file() -> None:

@@ -39,6 +39,7 @@ REQUIRED_SECRET_KEYS = {
 }
 
 REQUIRED_CONFIG_KEYS = {
+    "LLM_ALLOWED_MODELS",
     "LLM_MODEL",
 }
 
@@ -93,6 +94,7 @@ def check_k8s_runtime_env(
     checks.extend(_check_exact_values(values))
     checks.extend(_check_secret_values(values, allow_placeholders))
     checks.extend(_check_config_values(values, allow_placeholders))
+    checks.extend(_check_openai_model_allowlist(values, allow_placeholders))
     checks.extend(_check_k8s_service_urls(values))
     checks.extend(_check_disabled_spring_evidence_lookup(values))
 
@@ -174,6 +176,52 @@ def _check_config_values(
             )
         )
     return checks
+
+
+def _check_openai_model_allowlist(
+    values: dict[str, str],
+    allow_placeholders: bool,
+) -> list[dict]:
+    model = values.get("LLM_MODEL", "")
+    allowed_models_value = values.get("LLM_ALLOWED_MODELS", "")
+    model_is_placeholder = model.startswith(CONFIG_PLACEHOLDER_PREFIX)
+    allowed_is_placeholder = allowed_models_value.startswith(CONFIG_PLACEHOLDER_PREFIX)
+    should_skip_placeholder = (
+        allow_placeholders
+        and model_is_placeholder
+        and allowed_is_placeholder
+    )
+    allowed_models = _parse_config_list(allowed_models_value)
+    is_valid = (
+        should_skip_placeholder
+        or (
+            bool(model)
+            and not model_is_placeholder
+            and bool(allowed_models)
+            and model in allowed_models
+        )
+    )
+    return [
+        _build_check(
+            name="LLM_MODEL_ALLOWLIST",
+            status="PASS" if is_valid else "FAIL",
+            reason=(
+                None
+                if is_valid
+                else "LLM_MODEL 값은 LLM_ALLOWED_MODELS에 포함되어야 합니다."
+            ),
+            expected="LLM_MODEL included in LLM_ALLOWED_MODELS",
+            actual=_mask_config_value(allowed_models_value),
+        )
+    ]
+
+
+def _parse_config_list(value: str) -> set[str]:
+    return {
+        item.strip()
+        for item in value.split(",")
+        if item.strip()
+    }
 
 
 def _build_secret_failure_reason(

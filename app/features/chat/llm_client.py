@@ -38,6 +38,7 @@ def validate_llm_settings(settings: Settings) -> None:
         missing_fields.append("llm_api_key")
 
     if not missing_fields:
+        validate_openai_model_allowlist(settings)
         validate_openai_cost_guardrails(settings)
         return
 
@@ -45,6 +46,35 @@ def validate_llm_settings(settings: Settings) -> None:
         status_code=503,
         code=ChatErrorCode.CHAT_LLM_001,
         message=f"LLM 필수 설정이 누락되었습니다: {', '.join(missing_fields)}",
+    )
+
+
+def validate_openai_model_allowlist(settings: Settings) -> None:
+    if normalize_llm_provider(settings.llm_provider) != OPENAI_PROVIDER:
+        return
+
+    allowed_models = {
+        model.strip()
+        for model in settings.llm_allowed_models
+        if model.strip()
+    }
+    if not allowed_models:
+        raise ChatExternalServiceError(
+            status_code=503,
+            code=ChatErrorCode.CHAT_LLM_001,
+            message=(
+                "OpenAI 모델 allowlist가 설정되지 않았습니다: "
+                "llm_allowed_models"
+            ),
+        )
+
+    if settings.llm_model.strip() in allowed_models:
+        return
+
+    raise ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_LLM_001,
+        message="OpenAI 허용 모델이 아닙니다: llm_model",
     )
 
 

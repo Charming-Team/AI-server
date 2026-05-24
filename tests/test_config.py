@@ -34,6 +34,7 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.llm_enabled is False
     assert settings.llm_provider == "openai"
     assert settings.llm_base_url == "https://api.openai.com/v1"
+    assert settings.llm_allowed_models == []
     assert settings.qdrant_top_k == 5
     assert settings.document_chunk_size == 800
     assert settings.document_chunk_overlap == 80
@@ -77,6 +78,26 @@ def test_settings_accepts_json_cors_origins_from_env(
         "http://localhost:3000",
         "http://localhost:5173",
     ]
+
+
+def test_settings_accepts_comma_separated_llm_allowed_models_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_ALLOWED_MODELS", "gpt-a,gpt-b")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_allowed_models == ["gpt-a", "gpt-b"]
+
+
+def test_settings_accepts_json_llm_allowed_models_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_ALLOWED_MODELS", '["gpt-a","gpt-b"]')
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_allowed_models == ["gpt-a", "gpt-b"]
 
 
 def test_settings_accepts_chat_cost_guardrail_limits() -> None:

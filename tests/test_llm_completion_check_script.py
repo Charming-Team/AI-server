@@ -55,6 +55,8 @@ def test_check_llm_completion_validate_only_result_does_not_expose_model_value()
         "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
+        "modelAllowlistConfigured": False,
+        "modelAllowed": True,
         "apiKeyConfigured": True,
         "openaiNetworkRequiresConfirmation": False,
         "openaiCostGuardrailPassed": True,
@@ -84,6 +86,7 @@ def test_check_llm_completion_accepts_openai_provider_with_api_key() -> None:
             llm_provider="openai",
             llm_base_url=" ",
             llm_model="gpt-test",
+            llm_allowed_models=["gpt-test"],
             llm_api_key="secret-llm-token",
         )
     )
@@ -91,6 +94,8 @@ def test_check_llm_completion_accepts_openai_provider_with_api_key() -> None:
     assert result["provider"] == "openai"
     assert result["baseUrlConfigured"] is True
     assert result["apiKeyConfigured"] is True
+    assert result["modelAllowlistConfigured"] is True
+    assert result["modelAllowed"] is True
     assert result["openaiNetworkRequiresConfirmation"] is True
     assert result["openaiCostGuardrailPassed"] is True
     assert "secret-llm-token" not in check_llm_completion.format_json_result(result)
@@ -102,6 +107,7 @@ def test_check_llm_completion_requires_explicit_openai_network_confirmation() ->
             _ready_settings(
                 llm_provider="openai",
                 llm_model="gpt-test",
+                llm_allowed_models=["gpt-test"],
                 llm_api_key="secret-llm-token",
             ),
             allow_openai_network=False,
@@ -132,12 +138,42 @@ def test_check_llm_completion_requires_openai_api_key() -> None:
     assert "llm_api_key" in exc_info.value.message
 
 
+def test_check_llm_completion_requires_openai_model_allowlist() -> None:
+    with pytest.raises(ChatServiceError) as exc_info:
+        check_llm_completion.build_validate_only_result(
+            _ready_settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="secret-llm-token",
+            )
+        )
+
+    assert exc_info.value.code.value == "CHAT_LLM_001"
+    assert "llm_allowed_models" in exc_info.value.message
+
+
+def test_check_llm_completion_rejects_openai_model_outside_allowlist() -> None:
+    with pytest.raises(ChatServiceError) as exc_info:
+        check_llm_completion.build_validate_only_result(
+            _ready_settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_allowed_models=["gpt-other"],
+                llm_api_key="secret-llm-token",
+            )
+        )
+
+    assert exc_info.value.code.value == "CHAT_LLM_001"
+    assert "OpenAI 허용 모델" in exc_info.value.message
+
+
 def test_check_llm_completion_rejects_openai_cost_guardrail_violation() -> None:
     with pytest.raises(ChatServiceError) as exc_info:
         check_llm_completion.build_validate_only_result(
             _ready_settings(
                 llm_provider="openai",
                 llm_model="gpt-test",
+                llm_allowed_models=["gpt-test"],
                 llm_api_key="secret-llm-token",
                 llm_max_tokens=2048,
             )
@@ -187,6 +223,8 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
+        "modelAllowlistConfigured": False,
+        "modelAllowed": True,
         "apiKeyConfigured": True,
         "maxTokensUsed": 64,
         "runtimeMaxTokens": 512,
@@ -260,6 +298,8 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
         "provider": "openai_compatible",
         "baseUrlConfigured": True,
         "modelConfigured": True,
+        "modelAllowlistConfigured": False,
+        "modelAllowed": True,
         "apiKeyConfigured": False,
         "maxTokensUsed": 64,
         "runtimeMaxTokens": 512,
@@ -273,6 +313,8 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
 
     assert "outputPolicyPassed=True" in output
     assert "maxTokensUsed=64" in output
+    assert "modelAllowlistConfigured=False" in output
+    assert "modelAllowed=True" in output
     assert "openaiCostGuardrailPassed=True" in output
     assert "runtimeMaxTokens=512" in output
     assert "provider=openai_compatible" in output
@@ -324,6 +366,7 @@ def test_check_llm_completion_main_blocks_openai_network_without_confirmation(
         lambda args: _ready_settings(
             llm_provider="openai",
             llm_model="gpt-test",
+            llm_allowed_models=["gpt-test"],
             llm_api_key="secret-llm-token",
         ),
     )
@@ -354,6 +397,8 @@ def test_check_llm_completion_main_allows_openai_network_with_confirmation(
             "provider": "openai",
             "baseUrlConfigured": True,
             "modelConfigured": True,
+            "modelAllowlistConfigured": True,
+            "modelAllowed": True,
             "apiKeyConfigured": True,
             "maxTokensUsed": 64,
             "runtimeMaxTokens": settings.llm_max_tokens,
@@ -369,6 +414,7 @@ def test_check_llm_completion_main_allows_openai_network_with_confirmation(
         lambda args: _ready_settings(
             llm_provider="openai",
             llm_model="gpt-test",
+            llm_allowed_models=["gpt-test"],
             llm_api_key="secret-llm-token",
         ),
     )

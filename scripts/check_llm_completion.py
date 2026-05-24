@@ -104,6 +104,7 @@ def build_smoke_settings(settings: Settings) -> Settings:
 def build_validate_only_result(settings: Settings) -> dict[str, Any]:
     validate_llm_smoke_settings(settings)
     provider = normalize_llm_provider(settings.llm_provider)
+    model_allowlist_configured, model_allowed = _build_model_allowlist_status(settings)
     return {
         "checkStatus": "VALIDATED",
         "mode": "VALIDATE_ONLY",
@@ -112,6 +113,8 @@ def build_validate_only_result(settings: Settings) -> dict[str, Any]:
         "provider": provider,
         "baseUrlConfigured": bool(resolve_llm_base_url(settings)),
         "modelConfigured": bool(settings.llm_model.strip()),
+        "modelAllowlistConfigured": model_allowlist_configured,
+        "modelAllowed": model_allowed,
         "apiKeyConfigured": bool(settings.llm_api_key),
         "openaiNetworkRequiresConfirmation": provider == "openai",
         "openaiCostGuardrailPassed": True,
@@ -169,6 +172,8 @@ async def check_llm_completion(
         "provider": normalize_llm_provider(settings.llm_provider),
         "baseUrlConfigured": True,
         "modelConfigured": True,
+        "modelAllowlistConfigured": bool(settings.llm_allowed_models),
+        "modelAllowed": True,
         "apiKeyConfigured": bool(settings.llm_api_key),
         "maxTokensUsed": smoke_settings.llm_max_tokens,
         "runtimeMaxTokens": settings.llm_max_tokens,
@@ -177,6 +182,18 @@ async def check_llm_completion(
         "answerLength": len(answer),
         "outputPolicyPassed": True,
     }
+
+
+def _build_model_allowlist_status(settings: Settings) -> tuple[bool, bool]:
+    if normalize_llm_provider(settings.llm_provider) != "openai":
+        return bool(settings.llm_allowed_models), True
+
+    allowed_models = {
+        model.strip()
+        for model in settings.llm_allowed_models
+        if model.strip()
+    }
+    return bool(allowed_models), settings.llm_model.strip() in allowed_models
 
 
 def format_text_result(result: dict[str, Any]) -> str:
@@ -188,6 +205,8 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"provider={result['provider']}",
         f"baseUrlConfigured={result['baseUrlConfigured']}",
         f"modelConfigured={result['modelConfigured']}",
+        f"modelAllowlistConfigured={result['modelAllowlistConfigured']}",
+        f"modelAllowed={result['modelAllowed']}",
         f"apiKeyConfigured={result['apiKeyConfigured']}",
         f"openaiCostGuardrailPassed={result['openaiCostGuardrailPassed']}",
         f"runtimeMaxTokens={result['runtimeMaxTokens']}",

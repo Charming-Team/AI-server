@@ -256,6 +256,7 @@ def test_readiness_check_accepts_openai_provider_without_exposing_api_key() -> N
             llm_enabled=True,
             llm_provider="openai",
             llm_model="gpt-test",
+            llm_allowed_models=["gpt-test"],
             llm_api_key="openai-secret-token",
         )
     )
@@ -271,6 +272,39 @@ def test_readiness_check_accepts_openai_provider_without_exposing_api_key() -> N
         "name": "llm",
         "enabled": True,
         "configured": True,
+    }
+    assert "openai-secret-token" not in response.text
+    assert "gpt-test" not in response.text
+
+
+def test_readiness_check_rejects_openai_model_outside_allowlist() -> None:
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token="answer-secret",
+            chat_recommendation_internal_token="recommendation-secret",
+            rdb_evidence_enabled=True,
+            rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+            llm_enabled=True,
+            llm_provider="openai",
+            llm_model="gpt-test",
+            llm_allowed_models=["gpt-other"],
+            llm_api_key="openai-secret-token",
+        )
+    )
+    try:
+        response = client.get("/api/v1/health/ready")
+    finally:
+        _restore_settings(previous_override)
+
+    assert response.status_code == 503
+    body = response.json()
+    components = {component["name"]: component for component in body["components"]}
+    assert components["llm"] == {
+        "name": "llm",
+        "enabled": True,
+        "configured": False,
+        "code": "CHAT_LLM_001",
+        "reason": "OpenAI 허용 모델이 아닙니다: llm_model",
     }
     assert "openai-secret-token" not in response.text
     assert "gpt-test" not in response.text

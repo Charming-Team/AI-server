@@ -10,7 +10,9 @@ from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.llm_client import (
     LlmClient,
     resolve_llm_base_url,
+    validate_llm_settings,
     validate_openai_cost_guardrails,
+    validate_openai_model_allowlist,
 )
 from app.features.chat.schemas import ChatErrorCode
 
@@ -63,6 +65,7 @@ def test_llm_client_resolves_openai_base_url_and_requires_api_key() -> None:
     settings = Settings(
         llm_provider="openai",
         llm_model="gpt-test",
+        llm_allowed_models=["gpt-test"],
         llm_api_key="openai-secret-token",
     )
     client = LlmClient(settings)
@@ -205,6 +208,23 @@ def test_llm_client_generate_parses_chat_completion_response() -> None:
             "LLM 필수 설정이 누락되었습니다: llm_api_key",
         ),
         (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+            ),
+            "OpenAI 모델 allowlist가 설정되지 않았습니다: llm_allowed_models",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_allowed_models=["gpt-other"],
+                llm_api_key="openai-secret-token",
+            ),
+            "OpenAI 허용 모델이 아닙니다: llm_model",
+        ),
+        (
             Settings(llm_provider="unsupported", llm_model="gpt-test"),
             "지원하지 않는 LLM provider입니다: unsupported",
         ),
@@ -234,6 +254,27 @@ def test_llm_client_requires_settings_before_request(
     assert exc_info.value.code == ChatErrorCode.CHAT_LLM_001
     assert exc_info.value.message == expected_message
     assert called is False
+
+
+def test_llm_client_accepts_openai_model_when_allowlisted() -> None:
+    validate_llm_settings(
+        Settings(
+            llm_provider="openai",
+            llm_model="gpt-test",
+            llm_allowed_models=["gpt-test", "gpt-fallback"],
+            llm_api_key="openai-secret-token",
+        )
+    )
+
+
+def test_llm_client_does_not_apply_openai_model_allowlist_to_compatible_provider() -> None:
+    validate_openai_model_allowlist(
+        Settings(
+            llm_provider="openai_compatible",
+            llm_model="qwen-test",
+            llm_allowed_models=[],
+        )
+    )
 
 
 def test_llm_client_raises_external_error_on_http_failure() -> None:
