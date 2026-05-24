@@ -31,7 +31,7 @@ def _valid_env_values() -> dict[str, str]:
         "LLM_MODEL": "gpt-5-nano",
         "LLM_ALLOWED_MODELS": "gpt-5-nano",
         "LLM_REASONING_EFFORT": "minimal",
-        "LLM_MAX_TOKENS": "512",
+        "LLM_MAX_TOKENS": "1024",
         "LLM_RESPONSE_CACHE_ENABLED": "true",
         "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
         "LLM_RESPONSE_CACHE_MAX_ENTRIES": "128",

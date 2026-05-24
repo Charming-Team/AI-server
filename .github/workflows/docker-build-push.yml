@@ -62,7 +62,7 @@ jobs:
           LLM_PROVIDER: openai_compatible
           LLM_BASE_URL: http://localhost:8001/v1
           LLM_MODEL: local-open-source-model
-          LLM_MAX_TOKENS: "512"
+          LLM_MAX_TOKENS: "1024"
           LLM_RESPONSE_CACHE_ENABLED: "true"
           LLM_RESPONSE_CACHE_TTL_SECONDS: "60.0"
           LLM_RESPONSE_CACHE_MAX_ENTRIES: "128"
@@ -75,7 +75,7 @@ jobs:
         run: >-
           python -m scripts.check_chat_runtime
           --preset full
-          --answer-api-max-llm-total-tokens 2000
+          --answer-api-max-llm-total-tokens 3500
           --json
 
       - name: Set up Docker Buildx

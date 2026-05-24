@@ -23,7 +23,7 @@ REQUIRED_EXACT_VALUES = {
     "LLM_ENABLED": "true",
     "LLM_PROVIDER": "openai",
     "LLM_BASE_URL": "https://api.openai.com/v1",
-    "LLM_MAX_TOKENS": "512",
+    "LLM_MAX_TOKENS": "1024",
     "LLM_REASONING_EFFORT": "minimal",
     "LLM_RESPONSE_CACHE_ENABLED": "true",
     "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",

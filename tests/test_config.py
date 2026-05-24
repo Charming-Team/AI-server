@@ -40,7 +40,7 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.document_chunk_size == 800
     assert settings.document_chunk_overlap == 80
     assert settings.embedding_dimension == 1024
-    assert settings.llm_max_tokens == 512
+    assert settings.llm_max_tokens == 1024
     assert settings.llm_response_cache_enabled is True
     assert settings.llm_response_cache_ttl_seconds == 60.0
     assert settings.llm_response_cache_max_entries == 128

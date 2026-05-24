@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     llm_allowed_models: Annotated[list[str], NoDecode] = Field(default_factory=list)
     llm_reasoning_effort: str = "minimal"
     llm_temperature: float = 0.1
-    llm_max_tokens: int = Field(default=512, ge=1, le=4096)
+    llm_max_tokens: int = Field(default=1024, ge=1, le=4096)
     llm_timeout_seconds: float = 60.0
     llm_response_cache_enabled: bool = True
     llm_response_cache_ttl_seconds: float = Field(default=60.0, ge=0.0, le=3600.0)
