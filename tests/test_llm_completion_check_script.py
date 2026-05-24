@@ -63,7 +63,7 @@ def test_check_llm_completion_validate_only_result_does_not_expose_model_value()
         "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiMaxTokensLimit": 1024,
-        "promptMaxTotalChars": 4000,
+        "promptMaxTotalChars": 3000,
         "openaiMaxPromptCharsLimit": 8000,
         "responseCacheEnabled": True,
     }

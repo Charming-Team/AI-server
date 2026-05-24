@@ -53,12 +53,11 @@ def test_docker_build_workflow_configures_chat_runtime_gate() -> None:
     assert env["LLM_RESPONSE_CACHE_ENABLED"] == "true"
     assert env["LLM_RESPONSE_CACHE_TTL_SECONDS"] == "60.0"
     assert env["LLM_RESPONSE_CACHE_MAX_ENTRIES"] == "128"
-    assert env["ANSWER_MAX_CHARS"] == "1600"
+    assert env["ANSWER_MAX_CHARS"] == "900"
     assert env["PROMPT_MAX_EVIDENCE_ITEMS"] == "3"
-    assert env["PROMPT_MAX_DOCUMENT_SOURCES"] == "3"
-    assert env["PROMPT_MAX_SUMMARY_CHARS"] == "360"
-    assert env["PROMPT_MAX_DATA_CHARS"] == "500"
-    assert env["PROMPT_MAX_TOTAL_CHARS"] == "4000"
+    assert env["PROMPT_MAX_DOCUMENT_SOURCES"] == "2"
+    assert env["PROMPT_MAX_SUMMARY_CHARS"] == "280"
+    assert env["PROMPT_MAX_TOTAL_CHARS"] == "3000"
 
 
 def test_docker_build_workflow_runs_on_project_branch_patterns() -> None:

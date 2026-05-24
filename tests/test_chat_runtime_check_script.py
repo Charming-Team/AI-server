@@ -170,7 +170,7 @@ def test_check_chat_runtime_llm_preset_runs_only_llm_checks() -> None:
         "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiMaxTokensLimit": 1024,
-        "promptMaxTotalChars": 4000,
+        "promptMaxTotalChars": 3000,
         "openaiMaxPromptCharsLimit": 8000,
         "responseCacheEnabled": True,
     }
@@ -764,7 +764,7 @@ def test_check_chat_runtime_validate_only_checks_llm_completion_smoke() -> None:
         "runtimeMaxTokens": 1024,
         "reasoningEffort": "minimal",
         "openaiMaxTokensLimit": 1024,
-        "promptMaxTotalChars": 4000,
+        "promptMaxTotalChars": 3000,
         "openaiMaxPromptCharsLimit": 8000,
         "responseCacheEnabled": True,
     }
