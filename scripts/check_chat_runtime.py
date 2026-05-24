@@ -33,6 +33,10 @@ from scripts import (
 )
 
 StepRunner = Callable[[], Awaitable[dict[str, Any]] | dict[str, Any]]
+POST_DEPLOY_ANSWER_QUESTION = "LINE-ABS-01 병목 대응 기준 알려줘"
+POST_DEPLOY_ANSWER_INTENT = ChatIntent.LINE_BOTTLENECK.value
+POST_DEPLOY_MAX_LLM_TOTAL_TOKENS = 2500
+POST_DEPLOY_ANSWER_TIMEOUT_SECONDS = 90.0
 
 STEP_ACTION_GUIDE = {
     "readiness": (
@@ -99,14 +103,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--preset",
-        choices=("none", "rdb", "qdrant", "llm", "rag", "full"),
+        choices=("none", "rdb", "qdrant", "llm", "rag", "full", "post-deploy"),
         default="none",
         help=(
             "자주 쓰는 점검 옵션 묶음. rdb는 RDB Evidence와 답변/추천 API, "
             "qdrant는 Qdrant 컬렉션/페이로드/read-only 검색 smoke, "
             "llm은 LLM 연결과 출력 보안 정책, "
             "rag는 이미 Qdrant에 저장된 문서 검색 기반 챗봇 경로, "
-            "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로를 점검합니다."
+            "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로, "
+            "post-deploy는 OpenAI 비용을 줄이기 위해 실제 챗봇 답변 API 1회로 "
+            "RDB/Qdrant/LLM 경로를 점검합니다."
         ),
     )
     parser.add_argument(
@@ -428,21 +434,22 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
     if preset == "none":
         return args
 
-    if preset in {"rdb", "rag", "full"}:
+    if preset in {"rdb", "rag", "full", "post-deploy"}:
         args.require_rdb_evidence = True
 
-    if preset in {"qdrant", "rag", "full"}:
+    if preset in {"qdrant", "rag", "full", "post-deploy"}:
         args.include_qdrant_readonly_search = True
 
-    if preset in {"rag", "full"}:
+    if preset in {"rag", "full", "post-deploy"}:
         args.require_vector_search = True
-        args.include_rag_chat_scenarios = True
+        if preset != "post-deploy":
+            args.include_rag_chat_scenarios = True
         args.answer_api_min_document_source_count = max(
             args.answer_api_min_document_source_count,
             1,
         )
 
-    if preset in {"rdb", "rag", "full"}:
+    if preset in {"rdb", "rag", "full", "post-deploy"}:
         args.include_answer_api_smoke = True
         args.include_recommendation_api_smoke = True
         args.include_answer_output_policy_smoke = True
@@ -453,8 +460,19 @@ def apply_runtime_preset(args: argparse.Namespace) -> argparse.Namespace:
         args.include_answer_output_policy_smoke = True
     if preset in {"rdb", "full"}:
         args.include_rdb_chat_scenarios = True
-    if preset == "full":
+    if preset in {"full", "post-deploy"}:
         args.require_llm_generation = True
+    if preset == "post-deploy":
+        if args.answer_api_question == check_chat_answer.DEFAULT_QUESTION:
+            args.answer_api_question = POST_DEPLOY_ANSWER_QUESTION
+        if args.answer_api_expected_intent is None:
+            args.answer_api_expected_intent = POST_DEPLOY_ANSWER_INTENT
+        if args.answer_api_max_llm_total_tokens is None:
+            args.answer_api_max_llm_total_tokens = POST_DEPLOY_MAX_LLM_TOTAL_TOKENS
+        args.answer_api_timeout_seconds = max(
+            args.answer_api_timeout_seconds,
+            POST_DEPLOY_ANSWER_TIMEOUT_SECONDS,
+        )
     args.answer_api_min_evidence_count = max(args.answer_api_min_evidence_count, 1)
     return args
 

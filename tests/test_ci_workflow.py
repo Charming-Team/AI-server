@@ -59,6 +59,7 @@ def test_docker_build_workflow_configures_chat_runtime_gate() -> None:
 def test_docker_build_workflow_runs_on_project_branch_patterns() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
+    assert '- "dev/**"' in workflow
     assert '- "feat/**"' in workflow
     assert '- "fix/**"' in workflow
     assert '- "chore/**"' in workflow
