@@ -74,6 +74,7 @@ def build_llm_response_cache_key(
     model: str,
     max_tokens: int,
     temperature: float,
+    reasoning_effort: str | None = None,
 ) -> str:
     raw_key = "\n".join(
         [
@@ -81,6 +82,7 @@ def build_llm_response_cache_key(
             model.strip(),
             str(max_tokens),
             str(temperature),
+            (reasoning_effort or "").strip().casefold(),
             prompt.system_prompt,
             prompt.user_prompt,
         ]

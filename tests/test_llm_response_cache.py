@@ -61,3 +61,11 @@ def test_llm_response_cache_key_changes_by_prompt_and_model_settings() -> None:
         max_tokens=512,
         temperature=0.1,
     )
+    assert key != build_llm_response_cache_key(
+        _build_prompt(),
+        provider="openai",
+        model="gpt-test",
+        max_tokens=512,
+        temperature=0.1,
+        reasoning_effort="low",
+    )

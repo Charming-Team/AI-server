@@ -152,6 +152,7 @@ class AnswerGenerationService:
             model=self.settings.llm_model,
             max_tokens=self.settings.llm_max_tokens,
             temperature=self.settings.llm_temperature,
+            reasoning_effort=self.settings.llm_reasoning_effort,
         )
 
     def _build_output_checked_result(

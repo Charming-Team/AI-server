@@ -8,6 +8,7 @@ from app.features.chat.answer_generation_service import AnswerGenerationService
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.llm_client import LlmCompletion
+from app.features.chat.llm_response_cache import LlmResponseCache
 from app.features.chat.schemas import (
     ChatAnswerRequest,
     ChatErrorCode,
@@ -349,6 +350,57 @@ def test_answer_generation_reuses_cached_llm_answer_for_same_grounded_prompt() -
     assert second_result.llm_usage.total_tokens == 0
     assert first_result.answer == second_result.answer
     assert llm_client.call_count == 1
+
+
+def test_answer_generation_cache_key_changes_by_reasoning_effort() -> None:
+    cache = LlmResponseCache(ttl_seconds=60.0, max_entries=10)
+    first_llm_client = FakeLlmClient("minimal reasoning 답변입니다.")
+    second_llm_client = FakeLlmClient("low reasoning 답변입니다.")
+    first_service = AnswerGenerationService(
+        Settings(llm_enabled=True, llm_reasoning_effort="minimal"),
+        llm_client=first_llm_client,
+        llm_response_cache=cache,
+    )
+    second_service = AnswerGenerationService(
+        Settings(llm_enabled=True, llm_reasoning_effort="low"),
+        llm_client=second_llm_client,
+        llm_response_cache=cache,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="REPORT",
+                title="2026년 5월 생산 리스크 보고서",
+                summary="자재 부족과 LINE-A01 병목이 주요 리스크입니다.",
+            )
+        ]
+    )
+
+    first_result = anyio.run(
+        first_service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+    second_result = anyio.run(
+        second_service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert first_result.llm_cache_hit is False
+    assert second_result.llm_cache_hit is False
+    assert "minimal reasoning 답변입니다." in first_result.answer
+    assert "low reasoning 답변입니다." in second_result.answer
+    assert first_llm_client.call_count == 1
+    assert second_llm_client.call_count == 1
 
 
 def test_answer_generation_skips_llm_cache_when_disabled() -> None:
