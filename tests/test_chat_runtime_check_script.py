@@ -129,6 +129,7 @@ def test_check_chat_runtime_preset_help_matches_chat_runtime_scope() -> None:
 
     assert "rag는 이미 Qdrant에 저장된 문서 검색 기반 챗봇 경로" in help_text
     assert "full은 문서 등록 smoke를 제외한 전체 챗봇 런타임 경로" in help_text
+    assert "post-deploy는 OpenAI 비용을 줄이기 위해 실제 챗봇 답변 API 1회" in help_text
     assert "rag는 Qdrant/문서/답변/추천 API" not in help_text
 
 
@@ -648,6 +649,67 @@ def test_check_chat_runtime_full_preset_validate_only_runs_all_core_checks() -> 
         "nextActions": [],
     }
     assert result["steps"][5]["result"]["requireLlmGeneration"] is True
+
+
+def test_check_chat_runtime_post_deploy_preset_runs_cost_limited_checks() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(preset="post-deploy")
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["mode"] == "VALIDATE_ONLY"
+    assert result["requiredComponents"] == [
+        "rdbEvidence",
+        "qdrantSearch",
+        "ragSearchPipeline",
+        "llm",
+    ]
+    assert [step["name"] for step in result["steps"]] == [
+        "readiness",
+        "answerOutputPolicySmoke",
+        "rdbEvidenceViews",
+        "qdrantCollection",
+        "qdrantDocumentPayloads",
+        "qdrantReadOnlySearch",
+        "answerApiSmoke",
+        "recommendationApiSmoke",
+    ]
+    assert result["steps"][6]["result"]["question"] == "LINE-ABS-01 병목 대응 기준 알려줘"
+    assert result["steps"][6]["result"]["expectedIntent"] == "LINE_BOTTLENECK"
+    assert result["steps"][6]["result"]["requireRdbEvidence"] is True
+    assert result["steps"][6]["result"]["requireVectorSearch"] is True
+    assert result["steps"][6]["result"]["requireLlmGeneration"] is True
+    assert result["steps"][6]["result"]["maxLlmTotalTokens"] == 2500
+    assert result["steps"][6]["result"]["requireLlmCacheMiss"] is False
+
+
+def test_check_chat_runtime_post_deploy_preset_preserves_custom_answer_question() -> None:
+    settings = _base_ready_settings(
+        rdb_evidence_enabled=True,
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+        qdrant_search_enabled=True,
+        embedding_enabled=True,
+        qdrant_collection="smap_internal_documents",
+    )
+    args = _build_args(
+        preset="post-deploy",
+        answer_api_question="PP 라인 병목 알려줘",
+        answer_api_expected_intent="LINE_BOTTLENECK",
+        answer_api_max_llm_total_tokens=1800,
+    )
+
+    result = anyio.run(check_chat_runtime.check_chat_runtime, settings, args)
+
+    assert result["steps"][6]["result"]["question"] == "PP 라인 병목 알려줘"
+    assert result["steps"][6]["result"]["expectedIntent"] == "LINE_BOTTLENECK"
+    assert result["steps"][6]["result"]["maxLlmTotalTokens"] == 1800
 
 
 def test_check_chat_runtime_validate_only_checks_answer_output_policy_smoke() -> None:

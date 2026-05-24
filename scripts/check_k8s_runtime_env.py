@@ -11,7 +11,7 @@ CONFIG_PLACEHOLDER_PREFIX = "__SET_"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 REQUIRED_EXACT_VALUES = {
-    "ENVIRONMENT": "kubernetes",
+    "ENVIRONMENT": "prod",
     "API_V1_PREFIX": "/ai/api/v1",
     "RDB_EVIDENCE_ENABLED": "true",
     "QDRANT_SEARCH_ENABLED": "true",
@@ -23,7 +23,7 @@ REQUIRED_EXACT_VALUES = {
     "LLM_ENABLED": "true",
     "LLM_PROVIDER": "openai",
     "LLM_BASE_URL": "https://api.openai.com/v1",
-    "LLM_MAX_TOKENS": "512",
+    "LLM_MAX_TOKENS": "1024",
     "LLM_REASONING_EFFORT": "minimal",
     "LLM_RESPONSE_CACHE_ENABLED": "true",
     "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
@@ -66,7 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--env-file",
         default=K8S_ENV_EXAMPLE_PATH,
-        help="점검할 Kubernetes runtime env 파일 경로",
+        help=(
+            "점검할 Kubernetes runtime env 파일 경로. '-'를 사용하면 stdin에서 "
+            "KEY=VALUE 형식 env 출력을 읽습니다."
+        ),
     )
     parser.add_argument(
         "--allow-placeholders",
@@ -78,8 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def load_env_values(path: Path) -> dict[str, str]:
+    return parse_env_values(path.read_text(encoding="utf-8"))
+
+
+def parse_env_values(raw_env_text: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in raw_env_text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -417,13 +424,19 @@ def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
+    stdin: TextIO | None = None,
 ) -> int:
     output = stdout or sys.stdout
     error_output = stderr or sys.stderr
+    input_stream = stdin or sys.stdin
     args = build_parser().parse_args(argv)
 
     try:
-        values = load_env_values(Path(args.env_file))
+        values = (
+            parse_env_values(input_stream.read())
+            if args.env_file == "-"
+            else load_env_values(Path(args.env_file))
+        )
         result = check_k8s_runtime_env(
             values,
             allow_placeholders=args.allow_placeholders,
