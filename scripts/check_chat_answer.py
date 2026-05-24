@@ -490,8 +490,18 @@ def _validate_max_llm_total_tokens(
     llm_usage: dict[str, int] | None,
     max_llm_total_tokens: int | None,
 ) -> None:
-    if max_llm_total_tokens is None or llm_usage is None:
+    if max_llm_total_tokens is None:
         return
+
+    if llm_usage is None:
+        raise ChatServiceError(
+            status_code=500,
+            code=ChatErrorCode.CHAT_LLM_004,
+            message=(
+                "FastAPI 챗봇 응답의 LLM total token 사용량을 확인할 수 없습니다. "
+                "max LLM token 기준을 적용하려면 응답에 llmUsage가 필요합니다."
+            ),
+        )
 
     total_tokens = llm_usage["totalTokens"]
     if total_tokens <= max_llm_total_tokens:

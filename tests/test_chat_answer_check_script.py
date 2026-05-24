@@ -332,6 +332,38 @@ def test_check_chat_answer_script_fails_when_llm_total_tokens_exceed_limit() -> 
     assert "expected<=100, actual=152" in exc_info.value.message
 
 
+def test_check_chat_answer_script_fails_when_llm_token_limit_requires_missing_usage() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                used_llm_generation=True,
+                llm_usage=None,
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                max_llm_total_tokens=100,
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM total token 사용량을 확인할 수 없습니다" in exc_info.value.message
+    assert "llmUsage가 필요합니다" in exc_info.value.message
+
+
 def test_check_chat_answer_script_fails_when_evidence_count_is_below_minimum() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_answer_response(evidence_count=0), request=request)
