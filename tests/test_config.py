@@ -44,9 +44,13 @@ def test_env_example_loads_as_valid_settings() -> None:
     assert settings.llm_response_cache_enabled is True
     assert settings.llm_response_cache_ttl_seconds == 60.0
     assert settings.llm_response_cache_max_entries == 128
-    assert settings.answer_max_chars == 2000
+    assert settings.answer_max_chars == 1600
     assert settings.rdb_evidence_max_limit == 20
-    assert settings.prompt_max_total_chars == 6000
+    assert settings.prompt_max_evidence_items == 3
+    assert settings.prompt_max_document_sources == 3
+    assert settings.prompt_max_summary_chars == 360
+    assert settings.prompt_max_data_chars == 500
+    assert settings.prompt_max_total_chars == 4000
 
 
 def test_settings_accepts_comma_separated_cors_origins_from_env(

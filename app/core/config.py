@@ -58,12 +58,12 @@ class Settings(BaseSettings):
     llm_response_cache_enabled: bool = True
     llm_response_cache_ttl_seconds: float = Field(default=60.0, ge=0.0, le=3600.0)
     llm_response_cache_max_entries: int = Field(default=128, ge=0, le=10_000)
-    answer_max_chars: int = Field(default=2000, ge=100, le=5000)
-    prompt_max_evidence_items: int = Field(default=5, ge=0, le=20)
-    prompt_max_document_sources: int = Field(default=5, ge=0, le=20)
-    prompt_max_summary_chars: int = Field(default=700, ge=1, le=2_000)
-    prompt_max_data_chars: int = Field(default=1000, ge=1, le=5_000)
-    prompt_max_total_chars: int = Field(default=6_000, ge=1_000, le=20_000)
+    answer_max_chars: int = Field(default=1600, ge=100, le=5000)
+    prompt_max_evidence_items: int = Field(default=3, ge=0, le=20)
+    prompt_max_document_sources: int = Field(default=3, ge=0, le=20)
+    prompt_max_summary_chars: int = Field(default=360, ge=1, le=2_000)
+    prompt_max_data_chars: int = Field(default=500, ge=1, le=5_000)
+    prompt_max_total_chars: int = Field(default=4_000, ge=1_000, le=20_000)
 
     model_config = SettingsConfigDict(
         env_file=".env",

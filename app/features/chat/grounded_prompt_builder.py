@@ -44,11 +44,19 @@ class GroundedPromptBuilder:
 근거 항목에는 출처 제목과 근거 원천(RDB 또는 QDRANT)을 함께 표시한다."""
 
     def __init__(self, settings: Settings | None = None) -> None:
-        self.max_evidence_items = max(0, settings.prompt_max_evidence_items) if settings else 5
-        self.max_document_sources = max(0, settings.prompt_max_document_sources) if settings else 5
-        self.max_summary_chars = max(0, settings.prompt_max_summary_chars) if settings else 700
-        self.max_data_chars = max(0, settings.prompt_max_data_chars) if settings else 1000
-        self.max_total_chars = max(0, settings.prompt_max_total_chars) if settings else 6_000
+        self.max_evidence_items = (
+            max(0, settings.prompt_max_evidence_items) if settings else 3
+        )
+        self.max_document_sources = (
+            max(0, settings.prompt_max_document_sources) if settings else 3
+        )
+        self.max_summary_chars = (
+            max(0, settings.prompt_max_summary_chars) if settings else 360
+        )
+        self.max_data_chars = max(0, settings.prompt_max_data_chars) if settings else 500
+        self.max_total_chars = (
+            max(0, settings.prompt_max_total_chars) if settings else 4_000
+        )
         self.sensitive_pattern_policy = SensitivePatternPolicy()
 
     def build(

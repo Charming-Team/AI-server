@@ -66,7 +66,12 @@ jobs:
           LLM_RESPONSE_CACHE_ENABLED: "true"
           LLM_RESPONSE_CACHE_TTL_SECONDS: "60.0"
           LLM_RESPONSE_CACHE_MAX_ENTRIES: "128"
-          PROMPT_MAX_TOTAL_CHARS: "6000"
+          ANSWER_MAX_CHARS: "1600"
+          PROMPT_MAX_EVIDENCE_ITEMS: "3"
+          PROMPT_MAX_DOCUMENT_SOURCES: "3"
+          PROMPT_MAX_SUMMARY_CHARS: "360"
+          PROMPT_MAX_DATA_CHARS: "500"
+          PROMPT_MAX_TOTAL_CHARS: "4000"
         run: >-
           python -m scripts.check_chat_runtime
           --preset full
