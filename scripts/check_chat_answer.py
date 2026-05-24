@@ -277,6 +277,7 @@ async def check_chat_answer(
         "vectorSearchSkippedReason": answer.model_result.vector_search_skipped_reason,
         "usedLlmGeneration": answer.model_result.used_llm_generation,
         "llmCacheHit": answer.model_result.llm_cache_hit,
+        "llmUsage": _dump_llm_usage(answer),
         "requireLlmGeneration": require_llm_generation,
         "llmGenerationSkippedReason": llm_skipped_reason,
         "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
@@ -373,6 +374,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"vectorSearchSkippedReason={result['vectorSearchSkippedReason']}",
         f"usedLlmGeneration={result['usedLlmGeneration']}",
         f"llmCacheHit={result['llmCacheHit']}",
+        f"llmUsage={format_llm_usage(result.get('llmUsage'))}",
         f"requireLlmGeneration={result['requireLlmGeneration']}",
         f"llmGenerationSkippedReason={result['llmGenerationSkippedReason']}",
         (
@@ -413,6 +415,7 @@ def format_markdown_result(result: dict[str, Any]) -> str:
             f"LLM Cache `{result['llmCacheHit']}`, "
             f"Vector Search `{result['usedVectorSearch']}`"
         ),
+        f"- LLM 토큰 사용량: `{format_llm_usage(result.get('llmUsage'))}`",
     ]
 
     answer = result.get("answer")
@@ -452,6 +455,22 @@ def _format_optional_code(code: str | None) -> str:
     if code is None:
         return ""
     return f" / `{code}`"
+
+
+def _dump_llm_usage(answer: ChatAnswerResponse) -> dict[str, int] | None:
+    if answer.model_result.llm_usage is None:
+        return None
+    return answer.model_result.llm_usage.model_dump(by_alias=True)
+
+
+def format_llm_usage(usage: dict[str, Any] | None) -> str:
+    if not usage:
+        return "-"
+    return (
+        f"prompt={usage['promptTokens']}, "
+        f"completion={usage['completionTokens']}, "
+        f"total={usage['totalTokens']}"
+    )
 
 
 def _escape_markdown_cell(value: str | None) -> str:

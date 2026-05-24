@@ -464,6 +464,7 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"requireLlmGeneration={scenario['requireLlmGeneration']} "
             f"usedLlmGeneration={scenario['usedLlmGeneration']} "
             f"llmCacheHit={scenario.get('llmCacheHit', False)} "
+            f"llmUsage={check_chat_answer.format_llm_usage(scenario.get('llmUsage'))} "
             f"sourceCount={scenario['sourceCount']} "
             f"urlCount={scenario['urlCount']}"
         )
@@ -506,7 +507,9 @@ def format_markdown_result(result: dict[str, Any]) -> str:
                     "- LLM 생성: "
                     f"요구 `{scenario['requireLlmGeneration']}`, "
                     f"사용 `{scenario['usedLlmGeneration']}`, "
-                    f"캐시 `{scenario.get('llmCacheHit', False)}`"
+                    f"캐시 `{scenario.get('llmCacheHit', False)}`, "
+                    "토큰 "
+                    f"`{check_chat_answer.format_llm_usage(scenario.get('llmUsage'))}`"
                 ),
             ]
         )

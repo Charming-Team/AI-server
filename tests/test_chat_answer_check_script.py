@@ -53,6 +53,7 @@ def _answer_response(
     security_code: str | None = None,
     intent: str = "MATERIAL_SHORTAGE",
     answer: str = "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
+    llm_usage: dict[str, int] | None = None,
 ) -> dict:
     resolved_rdb_evidence_count = (
         evidence_count if rdb_evidence_count is None else rdb_evidence_count
@@ -124,6 +125,7 @@ def _answer_response(
             "usedRdbEvidence": resolved_used_rdb_evidence,
             "usedLlmGeneration": used_llm_generation,
             "llmCacheHit": False,
+            "llmUsage": llm_usage,
             "rdbEvidenceCount": resolved_rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
@@ -229,6 +231,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         "vectorSearchSkippedReason": "Qdrant 검색이 비활성화되어 있습니다.",
         "usedLlmGeneration": False,
         "llmCacheHit": False,
+        "llmUsage": None,
         "requireLlmGeneration": False,
         "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         "expectedLlmGenerationSkippedReason": None,
@@ -249,6 +252,46 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
                 "type": "MATERIAL",
             }
         ],
+    }
+
+
+def test_check_chat_answer_script_exposes_llm_usage() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                used_llm_generation=True,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_chat_answer.check_chat_answer(
+                base_url="http://fastapi.local",
+                path="/api/v1/chat/answer",
+                token="answer-token",
+                request=check_chat_answer.build_request(_build_args()),
+                timeout_seconds=10.0,
+                min_evidence_count=1,
+                require_rdb_evidence=True,
+                min_document_source_count=0,
+                require_vector_search=False,
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["llmUsage"] == {
+        "promptTokens": 120,
+        "completionTokens": 32,
+        "totalTokens": 152,
     }
 
 
@@ -718,6 +761,11 @@ def test_check_chat_answer_script_formats_markdown_result() -> None:
             "documentSourceCount": 1,
             "usedLlmGeneration": False,
             "llmCacheHit": False,
+            "llmUsage": {
+                "promptTokens": 120,
+                "completionTokens": 32,
+                "totalTokens": 152,
+            },
             "usedVectorSearch": True,
             "answer": "핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.",
             "sourceDetails": [
@@ -747,6 +795,7 @@ def test_check_chat_answer_script_formats_markdown_result() -> None:
     assert "# 챗봇 답변 점검 결과" in output
     assert "Intent: `LINE_BOTTLENECK`" in output
     assert "LLM Cache `False`" in output
+    assert "- LLM 토큰 사용량: `prompt=120, completion=32, total=152`" in output
     assert "```text\n핵심 답변: LINE-PE-01 병목 근거를 확인했습니다.\n```" in output
     assert "| `RDB` / `LINE` | LINE-PE-01 MAINTENANCE |" in output
     assert "| `LINE` | LINE-PE-01 MAINTENANCE | `/production-lines/103?mode=read` |" in output
