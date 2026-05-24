@@ -28,10 +28,10 @@ def _valid_env_values() -> dict[str, str]:
         "LLM_PROVIDER": "openai",
         "LLM_BASE_URL": "https://api.openai.com/v1",
         "LLM_API_KEY": "openai-secret-token",
-        "LLM_MODEL": "gpt-test",
-        "LLM_ALLOWED_MODELS": "gpt-test,gpt-fallback",
+        "LLM_MODEL": "gpt-5-nano",
+        "LLM_ALLOWED_MODELS": "gpt-5-nano",
         "LLM_REASONING_EFFORT": "minimal",
-        "LLM_MAX_TOKENS": "512",
+        "LLM_MAX_TOKENS": "1024",
         "LLM_RESPONSE_CACHE_ENABLED": "true",
         "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
         "LLM_RESPONSE_CACHE_MAX_ENTRIES": "128",
@@ -106,7 +106,7 @@ def test_check_k8s_runtime_env_rejects_local_llm_runtime_values() -> None:
     values = _valid_env_values()
     values["LLM_PROVIDER"] = "openai_compatible"
     values["LLM_BASE_URL"] = "http://llm-service:8001/v1"
-    values["LLM_MAX_TOKENS"] = "1024"
+    values["LLM_MAX_TOKENS"] = "2048"
     values["LLM_REASONING_EFFORT"] = "medium"
     values["LLM_RESPONSE_CACHE_ENABLED"] = "false"
     values["PROMPT_MAX_TOTAL_CHARS"] = "20000"
