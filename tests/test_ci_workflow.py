@@ -27,7 +27,10 @@ def test_docker_build_workflow_runs_python_quality_gates() -> None:
 
     assert "python -m ruff check ." in runs
     assert "python -m pytest" in runs
-    assert "python -m scripts.check_chat_runtime --preset full --json" in runs
+    assert (
+        "python -m scripts.check_chat_runtime --preset full "
+        "--answer-api-max-llm-total-tokens 2000 --json"
+    ) in runs
 
 
 def test_docker_build_workflow_configures_chat_runtime_gate() -> None:

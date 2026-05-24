@@ -882,12 +882,17 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
         evidence_lookup_enabled=True,
         evidence_lookup_internal_token="evidence-token",
     )
-    args = _build_args(network=True, include_rag_end_to_end_smoke=True)
+    args = _build_args(
+        network=True,
+        include_rag_end_to_end_smoke=True,
+        answer_api_max_llm_total_tokens=200,
+    )
     captured: dict[str, Any] = {}
 
     async def fake_rag_end_to_end(**kwargs):
         captured["base_url"] = kwargs["args"].base_url
         captured["document_id"] = kwargs["args"].document_id
+        captured["max_llm_total_tokens"] = kwargs["args"].max_llm_total_tokens
         captured["answer_token"] = kwargs["answer_token"]
         captured["document_token"] = kwargs["document_token"]
         return {
@@ -910,6 +915,7 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
     assert captured == {
         "base_url": "http://fastapi.local",
         "document_id": "smoke-document-api-contract",
+        "max_llm_total_tokens": 200,
         "answer_token": "answer-token",
         "document_token": "document-token",
     }

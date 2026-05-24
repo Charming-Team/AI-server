@@ -5,6 +5,7 @@ import anyio
 import httpx
 import pytest
 
+from app.features.chat.exceptions import ChatServiceError
 from scripts import check_chat_grounding
 
 
@@ -28,6 +29,7 @@ def _build_args(**overrides):
         "requested_at": "2026-05-12T10:30:00+09:00",
         "min_evidence_count": 1,
         "allow_non_rdb_evidence": False,
+        "max_llm_total_tokens": None,
         "json": False,
     }
     values.update(overrides)
@@ -97,6 +99,7 @@ def _fastapi_answer_response() -> dict:
             "usedRdbEvidence": True,
             "usedLlmGeneration": False,
             "llmCacheHit": False,
+            "llmUsage": None,
             "rdbEvidenceCount": 1,
             "documentSourceCount": 0,
             "evidenceCount": 1,
@@ -104,6 +107,16 @@ def _fastapi_answer_response() -> dict:
             "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
         },
     }
+
+
+def _fastapi_answer_response_with_usage() -> dict:
+    response = _fastapi_answer_response()
+    response["modelResult"]["llmUsage"] = {
+        "promptTokens": 120,
+        "completionTokens": 32,
+        "totalTokens": 152,
+    }
+    return response
 
 
 def test_check_chat_grounding_script_builds_settings_from_cli() -> None:
@@ -166,11 +179,41 @@ def test_check_chat_grounding_script_calls_spring_and_fastapi_contracts() -> Non
     assert result["fastapiAnswer"]["evidenceCount"] == 1
 
 
+def test_check_chat_grounding_script_applies_llm_total_token_limit() -> None:
+    def spring_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_spring_evidence_response(), request=request)
+
+    def fastapi_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_fastapi_answer_response_with_usage(),
+            request=request,
+        )
+
+    async def run() -> None:
+        spring_transport = httpx.MockTransport(spring_handler)
+        fastapi_transport = httpx.MockTransport(fastapi_handler)
+        async with httpx.AsyncClient(transport=spring_transport) as spring_client:
+            async with httpx.AsyncClient(transport=fastapi_transport) as fastapi_client:
+                await check_chat_grounding.check_chat_grounding(
+                    _build_args(max_llm_total_tokens=100),
+                    spring_http_client=spring_client,
+                    fastapi_http_client=fastapi_client,
+                )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "expected<=100, actual=152" in str(exc_info.value)
+
+
 def test_check_chat_grounding_script_formats_text_result() -> None:
     result = {
         "checkStatus": "PASS",
         "intent": "MATERIAL_SHORTAGE",
         "minEvidenceCount": 1,
+        "maxLlmTotalTokens": None,
         "springEvidence": {
             "url": "http://spring.local/internal/chat/evidence",
             "itemCount": 1,
@@ -190,6 +233,7 @@ def test_check_chat_grounding_script_formats_text_result() -> None:
 
     assert "status=PASS" in output
     assert "spring.itemCount=1" in output
+    assert "maxLlmTotalTokens=None" in output
     assert "fastapi.usedRdbEvidence=True" in output
 
 

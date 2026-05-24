@@ -1272,6 +1272,7 @@ async def run_rag_end_to_end_smoke(
         min_document_source_count=max(args.answer_api_min_document_source_count, 1),
         min_evidence_count=max(args.answer_api_min_evidence_count, 1),
         require_rdb_evidence=bool(args.require_rdb_evidence),
+        max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
         keep_document=False,
         validate_only=not args.network,
         json=False,

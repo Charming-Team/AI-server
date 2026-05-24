@@ -35,6 +35,7 @@ def _build_args(**overrides: Any) -> Namespace:
         "min_document_source_count": 1,
         "min_evidence_count": 1,
         "require_rdb_evidence": False,
+        "max_llm_total_tokens": None,
         "keep_document": False,
         "validate_only": False,
         "json": False,
@@ -58,6 +59,7 @@ def _answer_response(
     document_source_count: int = 1,
     used_vector_search: bool = True,
     rdb_evidence_count: int = 0,
+    llm_usage: dict[str, int] | None = None,
 ) -> dict:
     evidence_count = document_source_count + rdb_evidence_count
     sources = []
@@ -115,6 +117,7 @@ def _answer_response(
             "usedRdbEvidence": rdb_evidence_count > 0,
             "usedLlmGeneration": False,
             "llmCacheHit": False,
+            "llmUsage": llm_usage,
             "rdbEvidenceCount": rdb_evidence_count,
             "documentSourceCount": document_source_count,
             "evidenceCount": evidence_count,
@@ -161,6 +164,7 @@ def test_rag_end_to_end_validate_only_checks_tokens_and_paths() -> None:
         "minEvidenceCount": 1,
         "minDocumentSourceCount": 1,
         "requireRdbEvidence": False,
+        "maxLlmTotalTokens": None,
         "keepDocument": False,
     }
 
@@ -206,6 +210,49 @@ def test_rag_end_to_end_calls_index_answer_delete_in_order() -> None:
     assert result["answer"]["documentSourceCount"] == 1
     assert result["answer"]["usedVectorSearch"] is True
     assert result["usedCleanup"] is True
+
+
+def test_rag_end_to_end_applies_llm_total_token_limit_and_cleans_up() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(path)
+        if path.endswith("/documents/index"):
+            return httpx.Response(200, json=_index_response(), request=request)
+        if path.endswith("/chat/answer"):
+            return httpx.Response(
+                200,
+                json=_answer_response(
+                    llm_usage={
+                        "promptTokens": 120,
+                        "completionTokens": 32,
+                        "totalTokens": 152,
+                    }
+                ),
+                request=request,
+            )
+        if path.endswith("/documents/delete"):
+            return httpx.Response(200, json=_delete_response(), request=request)
+        return httpx.Response(404, request=request)
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_end_to_end.check_rag_end_to_end(
+                args=_build_args(max_llm_total_tokens=100),
+                settings=Settings(),
+                answer_token="answer-token",
+                document_token="document-token",
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "expected<=100, actual=152" in exc_info.value.message
+    assert calls[-1].endswith("/documents/delete")
 
 
 def test_rag_end_to_end_can_keep_document() -> None:
@@ -296,6 +343,7 @@ def test_rag_end_to_end_format_text_does_not_expose_tokens() -> None:
                 "usedVectorSearch": True,
             },
             "cleanup": {"operationStatus": "completed"},
+            "maxLlmTotalTokens": 200,
             "usedCleanup": True,
             "keepDocument": False,
         }
@@ -303,6 +351,7 @@ def test_rag_end_to_end_format_text_does_not_expose_tokens() -> None:
 
     assert "status=PASS" in output
     assert "answerDocumentSourceCount=1" in output
+    assert "maxLlmTotalTokens=200" in output
     assert "answer-token" not in output
     assert "document-token" not in output
 

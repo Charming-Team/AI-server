@@ -57,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="FastAPI 답변에서 RDB Evidence 사용 여부를 필수로 보지 않습니다.",
     )
+    parser.add_argument(
+        "--max-llm-total-tokens",
+        type=int,
+        default=None,
+        help="FastAPI 챗봇 답변에서 허용할 LLM total token 최대값입니다.",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -120,6 +126,7 @@ async def check_chat_grounding(
         timeout_seconds=args.timeout_seconds,
         min_evidence_count=args.min_evidence_count,
         require_rdb_evidence=not args.allow_non_rdb_evidence,
+        max_llm_total_tokens=args.max_llm_total_tokens,
         http_client=fastapi_http_client,
     )
 
@@ -127,6 +134,7 @@ async def check_chat_grounding(
         "checkStatus": "PASS",
         "intent": intent.value,
         "minEvidenceCount": args.min_evidence_count,
+        "maxLlmTotalTokens": args.max_llm_total_tokens,
         "springEvidence": evidence_result,
         "fastapiAnswer": answer_result,
     }
@@ -139,6 +147,7 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"status={result['checkStatus']}",
         f"intent={result['intent']}",
         f"minEvidenceCount={result['minEvidenceCount']}",
+        f"maxLlmTotalTokens={result.get('maxLlmTotalTokens')}",
         f"spring.url={spring_result['url']}",
         f"spring.itemCount={spring_result['itemCount']}",
         f"spring.sourceTypes={','.join(spring_result['sourceTypes'])}",

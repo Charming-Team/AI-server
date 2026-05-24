@@ -97,6 +97,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="챗봇 답변에 RDB Evidence가 함께 사용되어야 합니다.",
     )
     parser.add_argument(
+        "--max-llm-total-tokens",
+        type=int,
+        default=None,
+        help="챗봇 답변에서 허용할 LLM total token 최대값입니다.",
+    )
+    parser.add_argument(
         "--keep-document",
         action="store_true",
         help="점검 후 임시 문서를 삭제하지 않고 Qdrant에 남깁니다.",
@@ -187,6 +193,7 @@ def build_validate_only_result(
         "minEvidenceCount": args.min_evidence_count,
         "minDocumentSourceCount": args.min_document_source_count,
         "requireRdbEvidence": args.require_rdb_evidence,
+        "maxLlmTotalTokens": args.max_llm_total_tokens,
         "keepDocument": args.keep_document,
     }
 
@@ -227,6 +234,7 @@ async def check_rag_end_to_end(
             require_rdb_evidence=args.require_rdb_evidence,
             min_document_source_count=args.min_document_source_count,
             require_vector_search=True,
+            max_llm_total_tokens=args.max_llm_total_tokens,
             expected_security_status="PASSED",
             expected_security_code="NONE",
             http_client=http_client,
@@ -259,6 +267,7 @@ async def check_rag_end_to_end(
         "index": index_result,
         "answer": answer_result,
         "cleanup": cleanup_result,
+        "maxLlmTotalTokens": args.max_llm_total_tokens,
         "usedCleanup": cleanup_result is not None,
         "keepDocument": args.keep_document,
     }
@@ -286,6 +295,7 @@ def format_text_result(result: dict[str, Any]) -> str:
                 f"minEvidenceCount={result['minEvidenceCount']}",
                 f"minDocumentSourceCount={result['minDocumentSourceCount']}",
                 f"requireRdbEvidence={result['requireRdbEvidence']}",
+                f"maxLlmTotalTokens={result['maxLlmTotalTokens']}",
                 f"keepDocument={result['keepDocument']}",
             ]
         )
@@ -302,6 +312,7 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"answerRdbEvidenceCount={answer['rdbEvidenceCount']}",
             f"answerDocumentSourceCount={answer['documentSourceCount']}",
             f"answerUsedVectorSearch={answer['usedVectorSearch']}",
+            f"maxLlmTotalTokens={result.get('maxLlmTotalTokens')}",
             f"usedCleanup={result['usedCleanup']}",
             f"keepDocument={result['keepDocument']}",
         ]

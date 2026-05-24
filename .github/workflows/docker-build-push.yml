@@ -66,7 +66,11 @@ jobs:
           LLM_RESPONSE_CACHE_TTL_SECONDS: "60.0"
           LLM_RESPONSE_CACHE_MAX_ENTRIES: "128"
           PROMPT_MAX_TOTAL_CHARS: "6000"
-        run: python -m scripts.check_chat_runtime --preset full --json
+        run: >-
+          python -m scripts.check_chat_runtime
+          --preset full
+          --answer-api-max-llm-total-tokens 2000
+          --json
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
