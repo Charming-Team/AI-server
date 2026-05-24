@@ -6,7 +6,7 @@ from scripts import check_k8s_runtime_env
 
 def _valid_env_values() -> dict[str, str]:
     return {
-        "ENVIRONMENT": "kubernetes",
+        "ENVIRONMENT": "prod",
         "API_V1_PREFIX": "/ai/api/v1",
         "CHAT_ANSWER_INTERNAL_TOKEN": "answer-token",
         "CHAT_RECOMMENDATION_INTERNAL_TOKEN": "recommendation-token",
@@ -168,6 +168,47 @@ def test_check_k8s_runtime_env_loads_example_file() -> None:
     )
 
     assert result["checkStatus"] == "PASS"
+
+
+def test_check_k8s_runtime_env_parses_stdin_style_env_output() -> None:
+    raw_env_text = "\n".join(
+        [
+            "# comment",
+            "IGNORED_LINE_WITHOUT_EQUALS",
+            *[
+                f"{key}={value}"
+                for key, value in _valid_env_values().items()
+            ],
+        ]
+    )
+
+    result = check_k8s_runtime_env.check_k8s_runtime_env(
+        check_k8s_runtime_env.parse_env_values(raw_env_text)
+    )
+
+    assert result["checkStatus"] == "PASS"
+
+
+def test_check_k8s_runtime_env_main_accepts_stdin_env_values() -> None:
+    stdout = StringIO()
+    stdin = StringIO(
+        "\n".join(
+            f"{key}={value}"
+            for key, value in _valid_env_values().items()
+        )
+    )
+
+    exit_code = check_k8s_runtime_env.main(
+        ["--env-file", "-", "--json"],
+        stdout=stdout,
+        stdin=stdin,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert '"checkStatus": "PASS"' in output
+    assert "openai-secret-token" not in output
+    assert '"actual": "<set>"' in output
 
 
 def test_check_k8s_runtime_env_main_prints_json() -> None:
