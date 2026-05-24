@@ -7,7 +7,11 @@ import pytest
 from app.core.config import Settings
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
-from app.features.chat.llm_client import LlmClient, resolve_llm_base_url
+from app.features.chat.llm_client import (
+    LlmClient,
+    resolve_llm_base_url,
+    validate_openai_cost_guardrails,
+)
 from app.features.chat.schemas import ChatErrorCode
 
 
@@ -69,6 +73,83 @@ def test_llm_client_resolves_openai_base_url_and_requires_api_key() -> None:
         "Content-Type": "application/json",
         "Authorization": "Bearer openai-secret-token",
     }
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_message"),
+    [
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_max_tokens=2048,
+            ),
+            "llm_max_tokens<=1024",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                prompt_max_total_chars=12_000,
+            ),
+            "prompt_max_total_chars<=8000",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_response_cache_enabled=False,
+            ),
+            "llm_response_cache_enabled=true",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_response_cache_ttl_seconds=0.0,
+            ),
+            "llm_response_cache_ttl_seconds>=1",
+        ),
+        (
+            Settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="openai-secret-token",
+                llm_response_cache_max_entries=0,
+            ),
+            "llm_response_cache_max_entries>=1",
+        ),
+    ],
+)
+def test_llm_client_rejects_openai_cost_guardrail_violations(
+    settings: Settings,
+    expected_message: str,
+) -> None:
+    with pytest.raises(ChatExternalServiceError) as exc_info:
+        validate_openai_cost_guardrails(settings)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_001
+    assert "OpenAI 비용 가드레일" in exc_info.value.message
+    assert expected_message in exc_info.value.message
+
+
+def test_llm_client_does_not_apply_openai_cost_guardrail_to_compatible_provider() -> None:
+    validate_openai_cost_guardrails(
+        Settings(
+            llm_provider="openai_compatible",
+            llm_model="qwen-test",
+            llm_max_tokens=4096,
+            prompt_max_total_chars=20_000,
+            llm_response_cache_enabled=False,
+            llm_response_cache_ttl_seconds=0.0,
+            llm_response_cache_max_entries=0,
+        )
+    )
 
 
 def test_llm_client_generate_parses_chat_completion_response() -> None:

@@ -160,6 +160,13 @@ def test_check_chat_runtime_llm_preset_runs_only_llm_checks() -> None:
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": False,
+        "openaiNetworkRequiresConfirmation": False,
+        "openaiCostGuardrailPassed": True,
+        "runtimeMaxTokens": 512,
+        "openaiMaxTokensLimit": 1024,
+        "promptMaxTotalChars": 6000,
+        "openaiMaxPromptCharsLimit": 8000,
+        "responseCacheEnabled": True,
     }
 
 
@@ -683,6 +690,13 @@ def test_check_chat_runtime_validate_only_checks_llm_completion_smoke() -> None:
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": False,
+        "openaiNetworkRequiresConfirmation": False,
+        "openaiCostGuardrailPassed": True,
+        "runtimeMaxTokens": 512,
+        "openaiMaxTokensLimit": 1024,
+        "promptMaxTotalChars": 6000,
+        "openaiMaxPromptCharsLimit": 8000,
+        "responseCacheEnabled": True,
     }
 
 

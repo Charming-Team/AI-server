@@ -10,6 +10,10 @@ OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 _DEFAULT_LOCAL_LLM_BASE_URL = "http://localhost:8001/v1"
 SUPPORTED_LLM_PROVIDERS = (OPENAI_PROVIDER, OPENAI_COMPATIBLE_PROVIDER)
+OPENAI_COST_GUARDRAIL_MAX_TOKENS = 1024
+OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS = 8_000
+OPENAI_COST_GUARDRAIL_MIN_CACHE_TTL_SECONDS = 1.0
+OPENAI_COST_GUARDRAIL_MIN_CACHE_ENTRIES = 1
 
 
 def normalize_llm_provider(provider: str) -> str:
@@ -34,12 +38,55 @@ def validate_llm_settings(settings: Settings) -> None:
         missing_fields.append("llm_api_key")
 
     if not missing_fields:
+        validate_openai_cost_guardrails(settings)
         return
 
     raise ChatExternalServiceError(
         status_code=503,
         code=ChatErrorCode.CHAT_LLM_001,
         message=f"LLM 필수 설정이 누락되었습니다: {', '.join(missing_fields)}",
+    )
+
+
+def validate_openai_cost_guardrails(settings: Settings) -> None:
+    if normalize_llm_provider(settings.llm_provider) != OPENAI_PROVIDER:
+        return
+
+    violations: list[str] = []
+    if settings.llm_max_tokens > OPENAI_COST_GUARDRAIL_MAX_TOKENS:
+        violations.append(
+            f"llm_max_tokens<={OPENAI_COST_GUARDRAIL_MAX_TOKENS}"
+        )
+    if settings.prompt_max_total_chars > OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS:
+        violations.append(
+            f"prompt_max_total_chars<={OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS}"
+        )
+    if not settings.llm_response_cache_enabled:
+        violations.append("llm_response_cache_enabled=true")
+    if (
+        settings.llm_response_cache_ttl_seconds
+        < OPENAI_COST_GUARDRAIL_MIN_CACHE_TTL_SECONDS
+    ):
+        violations.append(
+            "llm_response_cache_ttl_seconds>="
+            f"{OPENAI_COST_GUARDRAIL_MIN_CACHE_TTL_SECONDS:g}"
+        )
+    if settings.llm_response_cache_max_entries < OPENAI_COST_GUARDRAIL_MIN_CACHE_ENTRIES:
+        violations.append(
+            "llm_response_cache_max_entries>="
+            f"{OPENAI_COST_GUARDRAIL_MIN_CACHE_ENTRIES}"
+        )
+
+    if not violations:
+        return
+
+    raise ChatExternalServiceError(
+        status_code=503,
+        code=ChatErrorCode.CHAT_LLM_001,
+        message=(
+            "OpenAI 비용 가드레일을 만족하지 않습니다: "
+            + ", ".join(violations)
+        ),
     )
 
 

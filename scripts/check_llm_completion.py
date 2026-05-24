@@ -11,6 +11,8 @@ from app.features.chat.answer_output_policy import AnswerOutputPolicy
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
 from app.features.chat.llm_client import (
+    OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS,
+    OPENAI_COST_GUARDRAIL_MAX_TOKENS,
     LlmClient,
     normalize_llm_provider,
     resolve_llm_base_url,
@@ -101,15 +103,23 @@ def build_smoke_settings(settings: Settings) -> Settings:
 
 def build_validate_only_result(settings: Settings) -> dict[str, Any]:
     validate_llm_smoke_settings(settings)
+    provider = normalize_llm_provider(settings.llm_provider)
     return {
         "checkStatus": "VALIDATED",
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "llmEnabled": settings.llm_enabled,
-        "provider": normalize_llm_provider(settings.llm_provider),
+        "provider": provider,
         "baseUrlConfigured": bool(resolve_llm_base_url(settings)),
         "modelConfigured": bool(settings.llm_model.strip()),
         "apiKeyConfigured": bool(settings.llm_api_key),
+        "openaiNetworkRequiresConfirmation": provider == "openai",
+        "openaiCostGuardrailPassed": True,
+        "runtimeMaxTokens": settings.llm_max_tokens,
+        "openaiMaxTokensLimit": OPENAI_COST_GUARDRAIL_MAX_TOKENS,
+        "promptMaxTotalChars": settings.prompt_max_total_chars,
+        "openaiMaxPromptCharsLimit": OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS,
+        "responseCacheEnabled": settings.llm_response_cache_enabled,
     }
 
 
@@ -161,6 +171,8 @@ async def check_llm_completion(
         "modelConfigured": True,
         "apiKeyConfigured": bool(settings.llm_api_key),
         "maxTokensUsed": smoke_settings.llm_max_tokens,
+        "runtimeMaxTokens": settings.llm_max_tokens,
+        "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": len(answer),
         "outputPolicyPassed": True,
@@ -177,7 +189,14 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"baseUrlConfigured={result['baseUrlConfigured']}",
         f"modelConfigured={result['modelConfigured']}",
         f"apiKeyConfigured={result['apiKeyConfigured']}",
+        f"openaiCostGuardrailPassed={result['openaiCostGuardrailPassed']}",
+        f"runtimeMaxTokens={result['runtimeMaxTokens']}",
     ]
+    if "openaiNetworkRequiresConfirmation" in result:
+        lines.append(
+            "openaiNetworkRequiresConfirmation="
+            f"{result['openaiNetworkRequiresConfirmation']}"
+        )
     if result.get("networkChecked"):
         lines.append(f"maxTokensUsed={result['maxTokensUsed']}")
         lines.append(f"answerReceived={result['answerReceived']}")
