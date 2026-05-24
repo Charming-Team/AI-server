@@ -87,6 +87,28 @@ def test_check_llm_completion_accepts_openai_provider_with_api_key() -> None:
     assert "secret-llm-token" not in check_llm_completion.format_json_result(result)
 
 
+def test_check_llm_completion_requires_explicit_openai_network_confirmation() -> None:
+    with pytest.raises(ChatServiceError) as exc_info:
+        check_llm_completion.validate_openai_network_allowed(
+            _ready_settings(
+                llm_provider="openai",
+                llm_model="gpt-test",
+                llm_api_key="secret-llm-token",
+            ),
+            allow_openai_network=False,
+        )
+
+    assert exc_info.value.code.value == "CHAT_LLM_001"
+    assert "--allow-openai-network" in exc_info.value.message
+
+
+def test_check_llm_completion_allows_non_openai_network_without_extra_confirmation() -> None:
+    check_llm_completion.validate_openai_network_allowed(
+        _ready_settings(),
+        allow_openai_network=False,
+    )
+
+
 def test_check_llm_completion_requires_openai_api_key() -> None:
     with pytest.raises(ChatServiceError) as exc_info:
         check_llm_completion.build_validate_only_result(
@@ -131,6 +153,7 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
     assert captured_request["url"] == "http://llm.local/v1/chat/completions"
     assert captured_request["auth"] == "Bearer secret-llm-token"
     assert "local-open-source-model" in captured_request["body"]
+    assert '"max_tokens":64' in captured_request["body"]
     assert result == {
         "checkStatus": "PASS",
         "mode": "NETWORK",
@@ -140,6 +163,7 @@ def test_check_llm_completion_network_calls_openai_compatible_endpoint() -> None
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": True,
+        "maxTokensUsed": 64,
         "answerReceived": True,
         "answerLength": 9,
         "outputPolicyPassed": True,
@@ -210,6 +234,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
         "baseUrlConfigured": True,
         "modelConfigured": True,
         "apiKeyConfigured": False,
+        "maxTokensUsed": 64,
         "answerReceived": True,
         "answerLength": 9,
         "outputPolicyPassed": True,
@@ -218,6 +243,7 @@ def test_check_llm_completion_text_result_includes_output_policy_status() -> Non
     output = check_llm_completion.format_text_result(result)
 
     assert "outputPolicyPassed=True" in output
+    assert "maxTokensUsed=64" in output
     assert "provider=openai_compatible" in output
 
 
@@ -256,6 +282,76 @@ def test_check_llm_completion_main_returns_zero_on_validate_only(
     output = stdout.getvalue()
     assert '"checkStatus": "VALIDATED"' in output
     assert "local-open-source-model" not in output
+
+
+def test_check_llm_completion_main_blocks_openai_network_without_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        check_llm_completion,
+        "build_settings",
+        lambda args: _ready_settings(
+            llm_provider="openai",
+            llm_model="gpt-test",
+            llm_api_key="secret-llm-token",
+        ),
+    )
+    stderr = StringIO()
+
+    exit_code = check_llm_completion.main(["--network"], stderr=stderr)
+
+    assert exit_code == 1
+    assert "--allow-openai-network" in stderr.getvalue()
+
+
+def test_check_llm_completion_main_allows_openai_network_with_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_check_llm_completion(
+        settings: Settings,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> dict:
+        nonlocal called
+        called = True
+        return {
+            "checkStatus": "PASS",
+            "mode": "NETWORK",
+            "networkChecked": True,
+            "llmEnabled": settings.llm_enabled,
+            "provider": "openai",
+            "baseUrlConfigured": True,
+            "modelConfigured": True,
+            "apiKeyConfigured": True,
+            "maxTokensUsed": 64,
+            "answerReceived": True,
+            "answerLength": 9,
+            "outputPolicyPassed": True,
+        }
+
+    monkeypatch.setattr(
+        check_llm_completion,
+        "build_settings",
+        lambda args: _ready_settings(
+            llm_provider="openai",
+            llm_model="gpt-test",
+            llm_api_key="secret-llm-token",
+        ),
+    )
+    monkeypatch.setattr(
+        check_llm_completion,
+        "check_llm_completion",
+        fake_check_llm_completion,
+    )
+
+    exit_code = check_llm_completion.main(
+        ["--network", "--allow-openai-network"],
+        stdout=StringIO(),
+    )
+
+    assert exit_code == 0
+    assert called is True
 
 
 def test_check_llm_completion_main_returns_one_on_settings_error(
