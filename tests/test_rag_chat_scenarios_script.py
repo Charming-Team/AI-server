@@ -54,6 +54,7 @@ def _answer_response(
     rdb_title: str = "생산계획 근거",
     rdb_url: str = "/plans/1?mode=read",
     document_title: str = "LINE-A01 병목 대응 기준",
+    document_url: str = "/company-info/line-a01-bottleneck-guide",
     used_llm_generation: bool = False,
     llm_usage: dict[str, int] | None = None,
 ) -> dict:
@@ -81,7 +82,7 @@ def _answer_response(
         urls.append(
             {
                 "label": "LINE-A01 병목 대응 기준",
-                "url": "/company-info/line-a01-bottleneck-guide",
+                "url": document_url,
                 "type": "COMPANY_INFO",
             }
         )
@@ -90,7 +91,7 @@ def _answer_response(
                 "sourceType": "COMPANY_INFO",
                 "title": document_title,
                 "summary": "Qdrant에서 조회한 회사정보 근거입니다.",
-                "url": "/company-info/line-a01-bottleneck-guide",
+                "url": document_url,
                 "referenceId": None,
                 "source": "company-line-a01-bottleneck-guide:chunk-0001",
                 "basisTime": "2026-05-12T10:35:00+09:00",
@@ -142,6 +143,12 @@ def _rdb_title_for_scenario(scenario_id: str) -> str:
         return "MAT-FOAM-ADD 발포 첨가제 SHORTAGE"
     if scenario_id == "line-bottleneck-with-company-guide":
         return "LINE-PE-01 MAINTENANCE"
+    if scenario_id == "operator-line-status-allowed":
+        return "LINE-ABS-01 RUNNING"
+    if scenario_id == "manager-material-shortage-action-allowed":
+        return "MAT-FOAM-ADD 발포 첨가제 SHORTAGE"
+    if scenario_id == "executive-delivery-risk-summary-allowed":
+        return "SM-2026-05-FR-004 CRITICAL"
     return "납기 위험 RDB 근거"
 
 
@@ -152,7 +159,23 @@ def _document_title_for_scenario(scenario_id: str) -> str:
         return "S-Map 매출 구조"
     if scenario_id == "line-bottleneck-with-company-guide":
         return "LINE-PE-01 병목 대응 기준"
+    if scenario_id == "operator-line-status-allowed":
+        return "LINE-ABS-01 생산 라인 구성"
+    if scenario_id == "manager-material-shortage-action-allowed":
+        return "MAT-FOAM-ADD 자재 대응 기준"
+    if scenario_id == "executive-delivery-risk-summary-allowed":
+        return "S-Map AI 지연 예측 기준"
     return "S-Map 생산 리스크 문서"
+
+
+def _rdb_url_for_scenario(scenario_id: str) -> str:
+    if scenario_id == "operator-line-status-allowed":
+        return "/production-lines/101?mode=read"
+    if scenario_id == "manager-material-shortage-action-allowed":
+        return "/materials/711?mode=read"
+    if scenario_id == "executive-delivery-risk-summary-allowed":
+        return "/predictions/41001?mode=read"
+    return "/plans/1?mode=read"
 
 
 def test_select_rag_scenarios_returns_core_by_default() -> None:
@@ -196,6 +219,35 @@ def test_select_rag_scenarios_supports_company_group() -> None:
     ]
     assert all(not scenario.require_rdb_evidence for scenario in scenarios)
     assert scenarios[2].expected_security_results == (
+        ("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),
+    )
+
+
+def test_select_rag_scenarios_supports_role_group() -> None:
+    scenarios = check_rag_chat_scenarios.select_scenarios(None, ["role"])
+
+    assert [scenario.scenario_id for scenario in scenarios] == [
+        "operator-line-status-allowed",
+        "manager-material-shortage-action-allowed",
+        "executive-delivery-risk-summary-allowed",
+        "operator-financial-detail-blocked",
+    ]
+    assert [scenario.role for scenario in scenarios] == [
+        "OPERATOR",
+        "MANUFACTURING_MANAGER",
+        "EXECUTIVE",
+        "OPERATOR",
+    ]
+    assert scenarios[0].forbidden_answer_fragments == (
+        "계약 금액",
+        "패널티",
+        "매출",
+        "비용",
+        "원가",
+        "수익",
+    )
+    assert scenarios[0].required_url_fragments == ("/production-lines/", "mode=read")
+    assert scenarios[3].expected_security_results == (
         ("BLOCKED_UNAUTHORIZED", "CHAT_SECURITY_004"),
     )
 
@@ -384,6 +436,68 @@ def test_check_rag_chat_scenarios_verifies_company_group() -> None:
         False,
         False,
         False,
+    ]
+
+
+def test_check_rag_chat_scenarios_verifies_role_group() -> None:
+    captured_roles: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode()
+        payload = json.loads(body)
+        for scenario in check_rag_chat_scenarios.ROLE_QUALITY_RAG_CHAT_SCENARIOS:
+            if scenario.question in body and payload["user"]["role"] == scenario.role:
+                captured_roles.append(payload["user"]["role"])
+                if scenario.scenario_id == "operator-financial-detail-blocked":
+                    return httpx.Response(
+                        200,
+                        json=_answer_response(
+                            scenario.intent,
+                            evidence_count=0,
+                            rdb_evidence_count=0,
+                            document_source_count=0,
+                            used_vector_search=False,
+                            security_status="BLOCKED_UNAUTHORIZED",
+                        ),
+                        request=request,
+                    )
+                return httpx.Response(
+                    200,
+                    json=_answer_response(
+                        scenario.intent,
+                        rdb_title=_rdb_title_for_scenario(scenario.scenario_id),
+                        rdb_url=_rdb_url_for_scenario(scenario.scenario_id),
+                        document_title=_document_title_for_scenario(
+                            scenario.scenario_id
+                        ),
+                    ),
+                    request=request,
+                )
+        return httpx.Response(500, json={}, request=request)
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(scenario_group=["role"]),
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    assert result["checkStatus"] == "PASS"
+    assert result["scenarioCount"] == 4
+    assert captured_roles == [
+        "OPERATOR",
+        "MANUFACTURING_MANAGER",
+        "EXECUTIVE",
+        "OPERATOR",
+    ]
+    assert [scenario["securityStatus"] for scenario in result["scenarios"]] == [
+        "PASSED",
+        "PASSED",
+        "PASSED",
+        "BLOCKED_UNAUTHORIZED",
     ]
 
 
@@ -725,6 +839,67 @@ def test_check_rag_chat_scenarios_fails_when_required_source_title_is_missing() 
 
     assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
     assert "출처 제목에 필요한 문구가 없습니다" in exc_info.value.message
+
+
+def test_check_rag_chat_scenarios_fails_when_forbidden_answer_fragment_exists() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                answer=(
+                    "핵심 답변: LINE-ABS-01 병목은 확인됐고 비용 영향도 있습니다.\n\n"
+                    "근거: LINE-ABS-01 RUNNING\n\n"
+                    "확인 필요: 추가 확인이 필요합니다."
+                ),
+                rdb_title="LINE-ABS-01 RUNNING",
+                rdb_url="/production-lines/101?mode=read",
+                document_title="LINE-ABS-01 생산 라인 구성",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(scenario=["operator-line-status-allowed"]),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "포함되면 안 되는 문구" in exc_info.value.message
+
+
+def test_check_rag_chat_scenarios_fails_when_required_url_fragment_is_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.LINE_BOTTLENECK,
+                rdb_title="LINE-ABS-01 RUNNING",
+                rdb_url="/lines/101?mode=read",
+                document_title="LINE-ABS-01 생산 라인 구성",
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rag_chat_scenarios.check_rag_chat_scenarios(
+                _build_args(scenario=["operator-line-status-allowed"]),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_EVIDENCE_001"
+    assert "화면 이동 URL에 필요한 문구가 없습니다" in exc_info.value.message
 
 
 def test_check_rag_chat_scenarios_formats_text_result() -> None:

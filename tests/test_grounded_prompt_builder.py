@@ -45,11 +45,16 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "일반 상식" in prompt.system_prompt
     assert "핵심 답변, 근거, 확인 필요 순서" in prompt.system_prompt
     assert "근거 원천(RDB 또는 QDRANT)" in prompt.system_prompt
+    assert "현재 상태, 수치, 진행률은 RDB 근거를 우선" in prompt.system_prompt
     assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
     assert "역할별 응답 제한:" in prompt.user_prompt
     assert "RDB 근거:\n없음" in prompt.user_prompt
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
     assert "수치, 상태, 날짜는 RDB 근거 또는 문서 검색 근거" in prompt.user_prompt
+    assert "현재 상태 판단은 RDB 근거를 우선" in prompt.user_prompt
+    assert "사용자 역할에서 제한되는 내용은 근거에 있어도 답변하지 않는다" in (
+        prompt.user_prompt
+    )
     assert "근거 섹션에는 최소 1개 이상의 출처 제목" in prompt.user_prompt
     assert "답변 형식은 핵심 답변, 근거, 확인 필요 순서" in prompt.user_prompt
     assert "[RDB 또는 QDRANT] 출처 제목" in prompt.user_prompt
