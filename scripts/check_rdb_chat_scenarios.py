@@ -272,6 +272,9 @@ async def check_rdb_chat_scenarios(
             if args.min_evidence_count is not None
             else scenario.min_evidence_count
         )
+        require_llm_generation = _should_require_llm_generation(args, scenario)
+        require_llm_cache_miss = _should_require_llm_cache_miss(args, scenario)
+        max_llm_total_tokens = _resolve_max_llm_total_tokens(args, scenario)
         result = await check_chat_answer.check_chat_answer(
             base_url=args.base_url,
             path=path,
@@ -283,9 +286,9 @@ async def check_rdb_chat_scenarios(
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
             expected_intent=scenario.intent.value,
-            require_llm_generation=args.require_llm_generation,
-            require_llm_cache_miss=args.require_llm_cache_miss,
-            max_llm_total_tokens=args.max_llm_total_tokens,
+            require_llm_generation=require_llm_generation,
+            require_llm_cache_miss=require_llm_cache_miss,
+            max_llm_total_tokens=max_llm_total_tokens,
             http_client=http_client,
         )
         if result["intent"] != scenario.intent.value:
@@ -324,9 +327,13 @@ async def check_rdb_chat_scenarios(
                     for status, code in scenario.expected_security_results
                 ],
                 "requireRdbEvidence": scenario.require_rdb_evidence,
-                "requireLlmGeneration": args.require_llm_generation,
-                "requireLlmCacheMiss": args.require_llm_cache_miss,
-                "maxLlmTotalTokens": args.max_llm_total_tokens,
+                "requireLlmGeneration": require_llm_generation,
+                "requireLlmCacheMiss": require_llm_cache_miss,
+                "maxLlmTotalTokens": max_llm_total_tokens,
+                "llmRequirementSkippedReason": _llm_requirement_skipped_reason(
+                    args,
+                    scenario,
+                ),
                 **result,
             }
         )
@@ -471,6 +478,47 @@ def _single_expected_security_code(scenario: RdbChatScenario) -> str | None:
     if expected_code is None:
         return "NONE"
     return expected_code
+
+
+def _should_require_llm_generation(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> bool:
+    return bool(args.require_llm_generation and _supports_llm_verification(scenario))
+
+
+def _should_require_llm_cache_miss(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> bool:
+    return bool(args.require_llm_cache_miss and _supports_llm_verification(scenario))
+
+
+def _resolve_max_llm_total_tokens(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> int | None:
+    if not _supports_llm_verification(scenario):
+        return None
+    return args.max_llm_total_tokens
+
+
+def _supports_llm_verification(scenario: RdbChatScenario) -> bool:
+    return scenario.expected_security_results == (("PASSED", None),)
+
+
+def _llm_requirement_skipped_reason(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> str | None:
+    llm_requirement_requested = (
+        args.require_llm_generation
+        or args.require_llm_cache_miss
+        or args.max_llm_total_tokens is not None
+    )
+    if not llm_requirement_requested or _supports_llm_verification(scenario):
+        return None
+    return "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
 
 
 def _format_security_results(

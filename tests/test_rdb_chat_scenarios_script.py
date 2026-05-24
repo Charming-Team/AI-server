@@ -362,6 +362,89 @@ def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
     ]
 
 
+def test_check_rdb_chat_scenarios_skips_llm_requirements_for_blocked_cases() -> None:
+    captured_requirements: list[tuple[str, bool, bool, int | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode()
+        for scenario in check_rdb_chat_scenarios.ACCESS_CONTROL_RDB_CHAT_SCENARIOS:
+            if scenario.question in body:
+                if scenario.expected_security_results == (("PASSED", None),):
+                    return httpx.Response(
+                        200,
+                        json=_answer_response(
+                            scenario.intent,
+                            used_llm_generation=True,
+                            llm_cache_hit=False,
+                            llm_usage={
+                                "promptTokens": 80,
+                                "completionTokens": 20,
+                                "totalTokens": 100,
+                            },
+                        ),
+                        request=request,
+                    )
+                return httpx.Response(
+                    200,
+                    json=_answer_response(
+                        scenario.intent,
+                        evidence_count=0,
+                        security_status="BLOCKED_UNAUTHORIZED",
+                    ),
+                    request=request,
+                )
+        return httpx.Response(500, json={}, request=request)
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            original_check = check_rdb_chat_scenarios.check_chat_answer.check_chat_answer
+
+            async def wrapped_check_chat_answer(**kwargs):
+                captured_requirements.append(
+                    (
+                        kwargs["request"].question,
+                        kwargs["require_llm_generation"],
+                        kwargs["require_llm_cache_miss"],
+                        kwargs["max_llm_total_tokens"],
+                    )
+                )
+                return await original_check(**kwargs)
+
+            check_rdb_chat_scenarios.check_chat_answer.check_chat_answer = (
+                wrapped_check_chat_answer
+            )
+            try:
+                return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
+                    _build_args(
+                        scenario_group=["access"],
+                        require_llm_generation=True,
+                        require_llm_cache_miss=True,
+                        max_llm_total_tokens=200,
+                    ),
+                    http_client=http_client,
+                )
+            finally:
+                check_rdb_chat_scenarios.check_chat_answer.check_chat_answer = (
+                    original_check
+                )
+
+    result = anyio.run(run)
+
+    assert captured_requirements == [
+        ("긴급 주문이 생산계획에 미치는 영향 알려줘", True, True, 200),
+        ("납기 지연 시 예상 패널티와 계약 금액 영향을 알려줘", False, False, None),
+        ("납기 위험이 있는 주문 알려줘", False, False, None),
+    ]
+    assert result["scenarios"][0]["llmRequirementSkippedReason"] is None
+    assert result["scenarios"][1]["llmRequirementSkippedReason"] == (
+        "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
+    )
+    assert result["scenarios"][2]["llmRequirementSkippedReason"] == (
+        "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
+    )
+
+
 def test_check_rdb_chat_scenarios_fails_when_intent_is_different() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

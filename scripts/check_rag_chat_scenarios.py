@@ -285,6 +285,9 @@ async def check_rag_chat_scenarios(
     scenario_results = []
 
     for index, scenario in enumerate(scenarios):
+        require_llm_generation = _should_require_llm_generation(args, scenario)
+        require_llm_cache_miss = _should_require_llm_cache_miss(args, scenario)
+        max_llm_total_tokens = _resolve_max_llm_total_tokens(args, scenario)
         result = await check_chat_answer.check_chat_answer(
             base_url=args.base_url,
             path=path,
@@ -298,9 +301,9 @@ async def check_rag_chat_scenarios(
                 scenario,
             ),
             require_vector_search=scenario.require_vector_search,
-            require_llm_generation=args.require_llm_generation,
-            require_llm_cache_miss=args.require_llm_cache_miss,
-            max_llm_total_tokens=args.max_llm_total_tokens,
+            require_llm_generation=require_llm_generation,
+            require_llm_cache_miss=require_llm_cache_miss,
+            max_llm_total_tokens=max_llm_total_tokens,
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
             expected_intent=scenario.intent.value,
@@ -325,8 +328,12 @@ async def check_rag_chat_scenarios(
                     args,
                     scenario,
                 ),
-                "maxLlmTotalTokens": args.max_llm_total_tokens,
-                "requireLlmCacheMiss": args.require_llm_cache_miss,
+                "maxLlmTotalTokens": max_llm_total_tokens,
+                "requireLlmCacheMiss": require_llm_cache_miss,
+                "llmRequirementSkippedReason": _llm_requirement_skipped_reason(
+                    args,
+                    scenario,
+                ),
                 **result,
             }
         )
@@ -581,6 +588,47 @@ def _select_scenario_groups(
             seen_scenario_ids.add(scenario.scenario_id)
             scenarios.append(scenario)
     return tuple(scenarios)
+
+
+def _should_require_llm_generation(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> bool:
+    return bool(args.require_llm_generation and _supports_llm_verification(scenario))
+
+
+def _should_require_llm_cache_miss(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> bool:
+    return bool(args.require_llm_cache_miss and _supports_llm_verification(scenario))
+
+
+def _resolve_max_llm_total_tokens(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> int | None:
+    if not _supports_llm_verification(scenario):
+        return None
+    return args.max_llm_total_tokens
+
+
+def _supports_llm_verification(scenario: RagChatScenario) -> bool:
+    return scenario.expected_security_results == (("PASSED", None),)
+
+
+def _llm_requirement_skipped_reason(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> str | None:
+    llm_requirement_requested = (
+        args.require_llm_generation
+        or args.require_llm_cache_miss
+        or args.max_llm_total_tokens is not None
+    )
+    if not llm_requirement_requested or _supports_llm_verification(scenario):
+        return None
+    return "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
 
 
 def _resolve_min_evidence_count(
