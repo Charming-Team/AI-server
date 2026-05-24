@@ -10,7 +10,16 @@ from app.core.config import Settings
 from app.features.chat.answer_output_policy import AnswerOutputPolicy
 from app.features.chat.exceptions import ChatServiceError
 from app.features.chat.grounded_prompt_builder import GroundedPrompt
-from app.features.chat.llm_client import LlmClient, validate_llm_settings
+from app.features.chat.llm_client import (
+    OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS,
+    OPENAI_COST_GUARDRAIL_MAX_TOKENS,
+    LlmClient,
+    normalize_llm_provider,
+    resolve_llm_api_key,
+    resolve_llm_base_url,
+    should_use_max_completion_tokens,
+    validate_llm_settings,
+)
 from app.features.chat.schemas import ChatErrorCode
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -18,11 +27,14 @@ DEFAULT_SYSTEM_PROMPT = (
     "제공된 요청에 한 문장으로만 답한다."
 )
 DEFAULT_USER_PROMPT = "LLM 연결 점검입니다. 짧게 정상 응답을 반환하세요."
+OPENAI_NETWORK_CONFIRM_FLAG = "--allow-openai-network"
+SMOKE_MAX_TOKENS = 64
+OPENAI_REASONING_SMOKE_MAX_TOKENS = 256
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="OpenAI-compatible LLM chat completions 연결을 점검합니다."
+        description="OpenAI 또는 OpenAI-compatible LLM chat completions 연결을 점검합니다."
     )
     parser.add_argument(
         "--env-file",
@@ -32,6 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--network",
         action="store_true",
         help="LLM 서버에 실제 chat completions 요청을 보냅니다.",
+    )
+    parser.add_argument(
+        OPENAI_NETWORK_CONFIRM_FLAG,
+        action="store_true",
+        help=(
+            "LLM_PROVIDER=openai 상태에서 실제 OpenAI API 호출을 허용합니다. "
+            "Credit이 차감될 수 있으므로 수동 점검 때만 사용합니다."
+        ),
     )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
@@ -60,16 +80,58 @@ def validate_llm_smoke_settings(settings: Settings) -> None:
     validate_llm_settings(settings)
 
 
+def validate_openai_network_allowed(settings: Settings, allow_openai_network: bool) -> None:
+    if normalize_llm_provider(settings.llm_provider) != "openai":
+        return
+    if allow_openai_network:
+        return
+
+    raise ChatServiceError(
+        status_code=400,
+        code=ChatErrorCode.CHAT_LLM_001,
+        message=(
+            "OpenAI 네트워크 점검은 Credit이 차감될 수 있어 "
+            f"{OPENAI_NETWORK_CONFIRM_FLAG} 옵션이 필요합니다."
+        ),
+    )
+
+
+def build_smoke_settings(settings: Settings) -> Settings:
+    max_tokens = (
+        OPENAI_REASONING_SMOKE_MAX_TOKENS
+        if should_use_max_completion_tokens(settings)
+        else SMOKE_MAX_TOKENS
+    )
+    return settings.model_copy(
+        update={
+            "llm_max_tokens": min(settings.llm_max_tokens, max_tokens),
+        }
+    )
+
+
 def build_validate_only_result(settings: Settings) -> dict[str, Any]:
     validate_llm_smoke_settings(settings)
+    provider = normalize_llm_provider(settings.llm_provider)
+    model_allowlist_configured, model_allowed = _build_model_allowlist_status(settings)
     return {
         "checkStatus": "VALIDATED",
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "llmEnabled": settings.llm_enabled,
-        "baseUrlConfigured": bool(settings.llm_base_url.strip()),
+        "provider": provider,
+        "baseUrlConfigured": bool(resolve_llm_base_url(settings)),
         "modelConfigured": bool(settings.llm_model.strip()),
-        "apiKeyConfigured": bool(settings.llm_api_key),
+        "modelAllowlistConfigured": model_allowlist_configured,
+        "modelAllowed": model_allowed,
+        "apiKeyConfigured": bool(resolve_llm_api_key(settings)),
+        "openaiNetworkRequiresConfirmation": provider == "openai",
+        "openaiCostGuardrailPassed": True,
+        "runtimeMaxTokens": settings.llm_max_tokens,
+        "reasoningEffort": settings.llm_reasoning_effort,
+        "openaiMaxTokensLimit": OPENAI_COST_GUARDRAIL_MAX_TOKENS,
+        "promptMaxTotalChars": settings.prompt_max_total_chars,
+        "openaiMaxPromptCharsLimit": OPENAI_COST_GUARDRAIL_MAX_PROMPT_CHARS,
+        "responseCacheEnabled": settings.llm_response_cache_enabled,
     }
 
 
@@ -99,14 +161,24 @@ async def check_llm_completion(
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     validate_llm_smoke_settings(settings)
-    answer = await LlmClient(settings, http_client=http_client).generate(
+    smoke_settings = build_smoke_settings(settings)
+    completion = await LlmClient(smoke_settings, http_client=http_client).generate_completion(
         build_smoke_prompt()
     )
+    answer = completion.answer
     if not answer:
+        usage = (
+            completion.usage.model_dump(by_alias=True)
+            if completion.usage
+            else None
+        )
         raise ChatServiceError(
             status_code=502,
             code=ChatErrorCode.CHAT_LLM_004,
-            message="LLM smoke check 응답이 비어 있습니다.",
+            message=(
+                "LLM smoke check 응답이 비어 있습니다. "
+                f"maxTokensUsed={smoke_settings.llm_max_tokens}, usage={usage}"
+            ),
         )
     validate_llm_smoke_answer(answer)
 
@@ -115,13 +187,37 @@ async def check_llm_completion(
         "mode": "NETWORK",
         "networkChecked": True,
         "llmEnabled": settings.llm_enabled,
+        "provider": normalize_llm_provider(settings.llm_provider),
         "baseUrlConfigured": True,
         "modelConfigured": True,
-        "apiKeyConfigured": bool(settings.llm_api_key),
+        "modelAllowlistConfigured": bool(settings.llm_allowed_models),
+        "modelAllowed": True,
+        "apiKeyConfigured": bool(resolve_llm_api_key(settings)),
+        "maxTokensUsed": smoke_settings.llm_max_tokens,
+        "runtimeMaxTokens": settings.llm_max_tokens,
+        "reasoningEffort": settings.llm_reasoning_effort,
+        "openaiCostGuardrailPassed": True,
         "answerReceived": True,
         "answerLength": len(answer),
+        "usage": (
+            completion.usage.model_dump(by_alias=True)
+            if completion.usage
+            else None
+        ),
         "outputPolicyPassed": True,
     }
+
+
+def _build_model_allowlist_status(settings: Settings) -> tuple[bool, bool]:
+    if normalize_llm_provider(settings.llm_provider) != "openai":
+        return bool(settings.llm_allowed_models), True
+
+    allowed_models = {
+        model.strip()
+        for model in settings.llm_allowed_models
+        if model.strip()
+    }
+    return bool(allowed_models), settings.llm_model.strip() in allowed_models
 
 
 def format_text_result(result: dict[str, Any]) -> str:
@@ -130,13 +226,27 @@ def format_text_result(result: dict[str, Any]) -> str:
         f"mode={result['mode']}",
         f"networkChecked={result['networkChecked']}",
         f"llmEnabled={result['llmEnabled']}",
+        f"provider={result['provider']}",
         f"baseUrlConfigured={result['baseUrlConfigured']}",
         f"modelConfigured={result['modelConfigured']}",
+        f"modelAllowlistConfigured={result['modelAllowlistConfigured']}",
+        f"modelAllowed={result['modelAllowed']}",
         f"apiKeyConfigured={result['apiKeyConfigured']}",
+        f"openaiCostGuardrailPassed={result['openaiCostGuardrailPassed']}",
+        f"runtimeMaxTokens={result['runtimeMaxTokens']}",
+        f"reasoningEffort={result['reasoningEffort']}",
     ]
+    if "openaiNetworkRequiresConfirmation" in result:
+        lines.append(
+            "openaiNetworkRequiresConfirmation="
+            f"{result['openaiNetworkRequiresConfirmation']}"
+        )
     if result.get("networkChecked"):
+        lines.append(f"maxTokensUsed={result['maxTokensUsed']}")
         lines.append(f"answerReceived={result['answerReceived']}")
         lines.append(f"answerLength={result['answerLength']}")
+        if result.get("usage"):
+            lines.append(f"usage={result['usage']}")
         lines.append(f"outputPolicyPassed={result['outputPolicyPassed']}")
     return "\n".join(lines)
 
@@ -157,6 +267,10 @@ def main(
     try:
         settings = build_settings(args)
         if args.network:
+            validate_openai_network_allowed(
+                settings,
+                allow_openai_network=args.allow_openai_network,
+            )
             result = asyncio.run(check_llm_completion(settings))
         else:
             result = build_validate_only_result(settings)

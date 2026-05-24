@@ -6,11 +6,16 @@ from app.features.chat.grounded_fallback_answer_builder import (
 )
 from app.features.chat.grounded_prompt_builder import GroundedPrompt, GroundedPromptBuilder
 from app.features.chat.llm_client import LlmClient, validate_llm_settings
+from app.features.chat.llm_response_cache import (
+    LlmResponseCache,
+    build_llm_response_cache_key,
+)
 from app.features.chat.schemas import (
     AnswerGenerationResult,
     ChatAnswerRequest,
     DocumentSearchResult,
     EvidenceResult,
+    LlmUsage,
 )
 from app.features.chat.skip_reasons import (
     ANSWER_BLOCKED_BY_OUTPUT_POLICY,
@@ -36,6 +41,7 @@ class AnswerGenerationService:
         fallback_answer_builder: GroundedFallbackAnswerBuilder | None = None,
         output_policy: AnswerOutputPolicy | None = None,
         llm_client: LlmClient | None = None,
+        llm_response_cache: LlmResponseCache | None = None,
     ) -> None:
         self.settings = settings
         self.prompt_builder = prompt_builder or GroundedPromptBuilder(settings)
@@ -44,6 +50,11 @@ class AnswerGenerationService:
         )
         self.output_policy = output_policy or AnswerOutputPolicy()
         self.llm_client = llm_client or LlmClient(settings)
+        self.llm_response_cache = llm_response_cache or LlmResponseCache(
+            enabled=settings.llm_response_cache_enabled,
+            ttl_seconds=settings.llm_response_cache_ttl_seconds,
+            max_entries=settings.llm_response_cache_max_entries,
+        )
 
     async def generate_answer(
         self,
@@ -69,8 +80,19 @@ class AnswerGenerationService:
 
         validate_llm_settings(self.settings)
         prompt = self.build_prompt(request, evidence_result, document_result)
+        cache_key = self._build_cache_key(prompt)
+        if cached_answer := self.llm_response_cache.get(cache_key):
+            return self._build_generated_result_from_llm_answer(
+                cached_answer,
+                role=request.user.role,
+                evidence_result=evidence_result,
+                document_result=document_result,
+                llm_cache_hit=True,
+                llm_usage=LlmUsage(promptTokens=0, completionTokens=0, totalTokens=0),
+            )
+
         try:
-            answer = await self.llm_client.generate(prompt)
+            completion = await self.llm_client.generate_completion(prompt)
         except ChatExternalServiceError:
             answer = self.fallback_answer_builder.build(evidence_result, document_result)
             return self._build_output_checked_result(
@@ -80,6 +102,28 @@ class AnswerGenerationService:
                 skipped_reason=LLM_UNAVAILABLE,
             )
 
+        result = self._build_generated_result_from_llm_answer(
+            completion.answer,
+            role=request.user.role,
+            evidence_result=evidence_result,
+            document_result=document_result,
+            llm_cache_hit=False,
+            llm_usage=completion.usage,
+        )
+        if result.was_generated and result.security_result is None:
+            self.llm_response_cache.put(cache_key, completion.answer)
+        return result
+
+    def _build_generated_result_from_llm_answer(
+        self,
+        answer: str,
+        *,
+        role: str,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+        llm_cache_hit: bool,
+        llm_usage: LlmUsage | None,
+    ) -> AnswerGenerationResult:
         if not answer:
             return AnswerGenerationResult(
                 answer="LLM 답변 생성 결과가 비어 있습니다.",
@@ -87,11 +131,28 @@ class AnswerGenerationService:
                 skipped_reason=LLM_EMPTY_ANSWER,
             )
 
+        answer = self._ensure_answer_sections(
+            answer,
+            evidence_result,
+            document_result,
+        )
         answer = self._ensure_source_titles(answer, evidence_result, document_result)
         return self._build_output_checked_result(
             answer,
-            role=request.user.role,
+            role=role,
             was_generated=True,
+            llm_cache_hit=llm_cache_hit,
+            llm_usage=llm_usage,
+        )
+
+    def _build_cache_key(self, prompt: GroundedPrompt) -> str:
+        return build_llm_response_cache_key(
+            prompt,
+            provider=self.settings.llm_provider,
+            model=self.settings.llm_model,
+            max_tokens=self.settings.llm_max_tokens,
+            temperature=self.settings.llm_temperature,
+            reasoning_effort=self.settings.llm_reasoning_effort,
         )
 
     def _build_output_checked_result(
@@ -100,6 +161,8 @@ class AnswerGenerationService:
         *,
         role: str,
         was_generated: bool,
+        llm_cache_hit: bool = False,
+        llm_usage: LlmUsage | None = None,
         skipped_reason: str | None = None,
     ) -> AnswerGenerationResult:
         output_security_result = self.output_policy.evaluate(
@@ -113,6 +176,7 @@ class AnswerGenerationService:
                     "업무 데이터에 대한 질문으로 다시 요청해 주세요."
                 ),
                 was_generated=False,
+                llm_usage=llm_usage,
                 skipped_reason=ANSWER_BLOCKED_BY_OUTPUT_POLICY,
                 security_result=output_security_result,
             )
@@ -121,6 +185,8 @@ class AnswerGenerationService:
         return AnswerGenerationResult(
             answer=answer,
             was_generated=was_generated,
+            llm_cache_hit=llm_cache_hit,
+            llm_usage=llm_usage,
             skipped_reason=skipped_reason,
         )
 
@@ -153,7 +219,11 @@ class AnswerGenerationService:
         if any(title.casefold() in normalized_answer for title in titles):
             return answer
 
-        return f"{answer}\n\n참조 근거: {', '.join(titles[:3])}"
+        source_references = self._collect_source_references(
+            evidence_result,
+            document_result,
+        )
+        return f"{answer}\n\n참조 근거: {', '.join(source_references[:3])}"
 
     def _collect_source_titles(
         self,
@@ -172,6 +242,78 @@ class AnswerGenerationService:
             seen_titles.add(normalized_title)
             titles.append(title)
         return titles
+
+    def _collect_source_references(
+        self,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> list[str]:
+        references: list[str] = []
+        seen_references: set[str] = set()
+        for item in evidence_result.items:
+            self._append_source_reference(
+                references,
+                seen_references,
+                f"[RDB] {item.title}",
+            )
+        for source in document_result.sources:
+            origin = source.source_origin or "QDRANT"
+            self._append_source_reference(
+                references,
+                seen_references,
+                f"[{origin}] {source.title}",
+            )
+        return references
+
+    def _append_source_reference(
+        self,
+        references: list[str],
+        seen_references: set[str],
+        reference: str,
+    ) -> None:
+        normalized_reference = reference.casefold()
+        if normalized_reference in seen_references:
+            return
+        seen_references.add(normalized_reference)
+        references.append(reference)
+
+    def _ensure_answer_sections(
+        self,
+        answer: str,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> str:
+        if self._has_required_sections(answer):
+            return answer
+
+        source_references = self._collect_source_references(
+            evidence_result,
+            document_result,
+        )
+        if source_references:
+            evidence_lines = "\n".join(
+                f"- {reference}" for reference in source_references[:3]
+            )
+        else:
+            evidence_lines = "- 제공된 내부 근거"
+
+        return "\n\n".join(
+            [
+                f"핵심 답변:\n{answer.strip()}",
+                f"근거:\n{evidence_lines}",
+                (
+                    "확인 필요:\n"
+                    "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
+                ),
+            ]
+        )
+
+    def _has_required_sections(self, answer: str) -> bool:
+        normalized_answer = answer.casefold()
+        return all(
+            section in normalized_answer
+            for section in ("핵심 답변", "근거", "확인 필요")
+        )
 
     def _limit_answer_length(self, answer: str) -> str:
         max_chars = self.settings.answer_max_chars

@@ -48,15 +48,22 @@ class Settings(BaseSettings):
     llm_provider: str = "openai_compatible"
     llm_base_url: str = "http://localhost:8001/v1"
     llm_api_key: str | None = None
+    openai_api_key: str | None = None
     llm_model: str = "local-open-source-model"
+    llm_allowed_models: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    llm_reasoning_effort: str = "minimal"
     llm_temperature: float = 0.1
-    llm_max_tokens: int = Field(default=1024, ge=1, le=4096)
+    llm_max_tokens: int = Field(default=512, ge=1, le=4096)
     llm_timeout_seconds: float = 60.0
+    llm_response_cache_enabled: bool = True
+    llm_response_cache_ttl_seconds: float = Field(default=60.0, ge=0.0, le=3600.0)
+    llm_response_cache_max_entries: int = Field(default=128, ge=0, le=10_000)
     answer_max_chars: int = Field(default=2000, ge=100, le=5000)
     prompt_max_evidence_items: int = Field(default=5, ge=0, le=20)
     prompt_max_document_sources: int = Field(default=5, ge=0, le=20)
-    prompt_max_summary_chars: int = 700
-    prompt_max_data_chars: int = 1000
+    prompt_max_summary_chars: int = Field(default=700, ge=1, le=2_000)
+    prompt_max_data_chars: int = Field(default=1000, ge=1, le=5_000)
+    prompt_max_total_chars: int = Field(default=6_000, ge=1_000, le=20_000)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -67,19 +74,32 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
+        return cls._parse_string_list(value, field_label="CORS_ORIGINS")
+
+    @field_validator("llm_allowed_models", mode="before")
+    @classmethod
+    def parse_llm_allowed_models(cls, value: str | list[str] | None) -> list[str]:
+        if value is None:
+            return []
+        return cls._parse_string_list(value, field_label="LLM_ALLOWED_MODELS")
+
+    @staticmethod
+    def _parse_string_list(value: str | list[str], field_label: str) -> list[str]:
         if isinstance(value, str):
             stripped_value = value.strip()
+            if not stripped_value:
+                return []
             if stripped_value.startswith("["):
                 parsed_value = json.loads(stripped_value)
                 if not isinstance(parsed_value, list):
-                    raise ValueError("CORS_ORIGINS JSON 값은 배열이어야 합니다.")
+                    raise ValueError(f"{field_label} JSON 값은 배열이어야 합니다.")
                 return [
                     origin.strip()
                     for origin in parsed_value
                     if isinstance(origin, str) and origin.strip()
                 ]
             return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
+        return [item.strip() for item in value if item.strip()]
 
     @model_validator(mode="after")
     def validate_document_chunk_settings(self) -> "Settings":

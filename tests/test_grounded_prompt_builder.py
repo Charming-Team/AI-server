@@ -44,12 +44,15 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "웹 검색" in prompt.system_prompt
     assert "일반 상식" in prompt.system_prompt
     assert "핵심 답변, 근거, 확인 필요 순서" in prompt.system_prompt
+    assert "근거 원천(RDB 또는 QDRANT)" in prompt.system_prompt
     assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
     assert "역할별 응답 제한:" in prompt.user_prompt
     assert "RDB 근거:\n없음" in prompt.user_prompt
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
     assert "수치, 상태, 날짜는 RDB 근거 또는 문서 검색 근거" in prompt.user_prompt
+    assert "근거 섹션에는 최소 1개 이상의 출처 제목" in prompt.user_prompt
     assert "답변 형식은 핵심 답변, 근거, 확인 필요 순서" in prompt.user_prompt
+    assert "[RDB 또는 QDRANT] 출처 제목" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
@@ -109,6 +112,7 @@ def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None
 
     assert "ORD-202605-001 납기 지연 위험" in prompt.user_prompt
     assert '"orderNo": "ORD-202605-001"' in prompt.user_prompt
+    assert "근거 원천: RDB" in prompt.user_prompt
     assert "2026년 5월 생산 리스크 보고서" in prompt.user_prompt
     assert "report-202605:summary" in prompt.user_prompt
     assert "근거 원천: QDRANT" in prompt.user_prompt
@@ -311,3 +315,47 @@ def test_grounded_prompt_builder_limits_sources_and_long_text() -> None:
     assert "AAAAAAAAAAAAAAAAA..." in prompt.user_prompt
     assert "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" not in prompt.user_prompt
     assert "CCCCCCCCCCCCCCCCC..." in prompt.user_prompt
+
+
+def test_grounded_prompt_builder_limits_total_prompt_length() -> None:
+    builder = GroundedPromptBuilder(
+        Settings(
+            prompt_max_evidence_items=20,
+            prompt_max_document_sources=20,
+            prompt_max_summary_chars=500,
+            prompt_max_data_chars=500,
+            prompt_max_total_chars=1000,
+        )
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.REPORT_LOOKUP,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="REPORT",
+                title=f"긴 RDB 근거 {index}",
+                summary="A" * 500,
+                source="reports",
+                data={"detail": "B" * 500},
+            )
+            for index in range(10)
+        ],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title=f"긴 문서 근거 {index}",
+                summary="C" * 500,
+            )
+            for index in range(10)
+        ]
+    )
+
+    prompt = builder.build(request, evidence_result, document_result)
+
+    assert len(prompt.user_prompt) <= 1000
+    assert "프롬프트 전체 길이 제한으로 일부 근거가 생략되었습니다." in (
+        prompt.user_prompt
+    )

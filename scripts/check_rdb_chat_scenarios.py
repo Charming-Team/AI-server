@@ -71,18 +71,6 @@ DEFAULT_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
 
 ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     RdbChatScenario(
-        scenario_id="operator-report-allowed",
-        intent=ChatIntent.REPORT_LOOKUP,
-        question="이번 달 월간 리포트 요약해줘",
-        role="OPERATOR",
-        expected_security_results=(
-            ("INSUFFICIENT_EVIDENCE", "CHAT_EVIDENCE_001"),
-            ("PASSED", None),
-        ),
-        require_rdb_evidence=False,
-        min_evidence_count=0,
-    ),
-    RdbChatScenario(
         scenario_id="operator-urgent-order-allowed",
         intent=ChatIntent.URGENT_ORDER_IMPACT,
         question="긴급 주문이 생산계획에 미치는 영향 알려줘",
@@ -111,6 +99,21 @@ ACCESS_CONTROL_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     ),
 )
 
+REPORT_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
+    RdbChatScenario(
+        scenario_id="operator-report-allowed",
+        intent=ChatIntent.REPORT_LOOKUP,
+        question="이번 달 월간 리포트 요약해줘",
+        role="OPERATOR",
+        expected_security_results=(
+            ("INSUFFICIENT_EVIDENCE", "CHAT_EVIDENCE_001"),
+            ("PASSED", None),
+        ),
+        require_rdb_evidence=False,
+        min_evidence_count=0,
+    ),
+)
+
 FILTERED_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
     RdbChatScenario(
         scenario_id="material-shortage-this-week-target",
@@ -132,6 +135,7 @@ FILTERED_RDB_CHAT_SCENARIOS: tuple[RdbChatScenario, ...] = (
 RDB_CHAT_SCENARIO_GROUPS = {
     "core": DEFAULT_RDB_CHAT_SCENARIOS,
     "access": ACCESS_CONTROL_RDB_CHAT_SCENARIOS,
+    "report": REPORT_RDB_CHAT_SCENARIOS,
     "filtered": FILTERED_RDB_CHAT_SCENARIOS,
 }
 ALL_RDB_CHAT_SCENARIOS = tuple(
@@ -177,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(RDB_CHAT_SCENARIO_GROUPS),
         help=(
-            "실행할 시나리오 묶음입니다. core, access, filtered 중 선택하며 "
+            "실행할 시나리오 묶음입니다. core, access, filtered, report 중 선택하며 "
             "여러 번 지정할 수 있습니다. 생략하면 core만 실행합니다."
         ),
     )
@@ -189,6 +193,30 @@ def build_parser() -> argparse.ArgumentParser:
             "모든 시나리오에 적용할 최소 RDB Evidence 개수. "
             "생략하면 시나리오 기본값을 사용합니다."
         ),
+    )
+    parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="챗봇 응답이 fallback이 아니라 LLM 생성 답변을 사용했는지 검증합니다.",
+    )
+    parser.add_argument(
+        "--require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "LLM 답변이 캐시가 아니라 실제 생성 경로에서 만들어졌는지 검증합니다. "
+            "배포 직후 LLM 연결 확인용으로만 사용합니다."
+        ),
+    )
+    parser.add_argument(
+        "--max-llm-total-tokens",
+        type=int,
+        default=None,
+        help="모든 RDB 시나리오에 적용할 LLM total token 최대 허용값",
+    )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
     )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
@@ -244,6 +272,9 @@ async def check_rdb_chat_scenarios(
             if args.min_evidence_count is not None
             else scenario.min_evidence_count
         )
+        require_llm_generation = _should_require_llm_generation(args, scenario)
+        require_llm_cache_miss = _should_require_llm_cache_miss(args, scenario)
+        max_llm_total_tokens = _resolve_max_llm_total_tokens(args, scenario)
         result = await check_chat_answer.check_chat_answer(
             base_url=args.base_url,
             path=path,
@@ -255,6 +286,9 @@ async def check_rdb_chat_scenarios(
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
             expected_intent=scenario.intent.value,
+            require_llm_generation=require_llm_generation,
+            require_llm_cache_miss=require_llm_cache_miss,
+            max_llm_total_tokens=max_llm_total_tokens,
             http_client=http_client,
         )
         if result["intent"] != scenario.intent.value:
@@ -293,6 +327,13 @@ async def check_rdb_chat_scenarios(
                     for status, code in scenario.expected_security_results
                 ],
                 "requireRdbEvidence": scenario.require_rdb_evidence,
+                "requireLlmGeneration": require_llm_generation,
+                "requireLlmCacheMiss": require_llm_cache_miss,
+                "maxLlmTotalTokens": max_llm_total_tokens,
+                "llmRequirementSkippedReason": _llm_requirement_skipped_reason(
+                    args,
+                    scenario,
+                ),
                 **result,
             }
         )
@@ -338,10 +379,74 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"securityCode={scenario['securityCode']} "
             f"requireRdbEvidence={scenario['requireRdbEvidence']} "
             f"rdbEvidenceCount={scenario['rdbEvidenceCount']} "
+            f"requireLlmGeneration={scenario.get('requireLlmGeneration')} "
+            f"requireLlmCacheMiss={scenario.get('requireLlmCacheMiss')} "
+            f"llmCacheHit={scenario.get('llmCacheHit')} "
             f"sourceCount={scenario['sourceCount']} "
             f"urlCount={scenario['urlCount']}"
         )
     return "\n".join(lines)
+
+
+def format_markdown_result(result: dict[str, Any]) -> str:
+    lines = [
+        "# RDB 챗봇 시나리오 점검 결과",
+        "",
+        f"- 점검 상태: `{_markdown_text(result.get('checkStatus'))}`",
+        f"- 시나리오 수: `{_markdown_text(result.get('scenarioCount'))}`",
+        "",
+        "## 시나리오 결과",
+        "",
+        (
+            "| 시나리오 | Role | Intent | 보안 상태 | 보안 코드 | RDB 필수 | "
+            "LLM 필수 | 캐시 미스 필수 | LLM 캐시 | RDB 근거 | 출처 | URL |"
+        ),
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for scenario in result["scenarios"]:
+        lines.append(
+            "| "
+            f"{_escape_markdown_cell(scenario.get('scenarioId'))} | "
+            f"{_escape_markdown_cell(scenario.get('role'))} | "
+            f"{_escape_markdown_cell(scenario.get('intent'))} | "
+            f"{_escape_markdown_cell(scenario.get('securityStatus'))} | "
+            f"{_escape_markdown_cell(scenario.get('securityCode'))} | "
+            f"{_format_markdown_bool(scenario.get('requireRdbEvidence'))} | "
+            f"{_format_markdown_bool(scenario.get('requireLlmGeneration'))} | "
+            f"{_format_markdown_bool(scenario.get('requireLlmCacheMiss'))} | "
+            f"{_format_markdown_bool(scenario.get('llmCacheHit'))} | "
+            f"{_escape_markdown_cell(scenario.get('rdbEvidenceCount'))} | "
+            f"{_escape_markdown_cell(scenario.get('sourceCount'))} | "
+            f"{_escape_markdown_cell(scenario.get('urlCount'))} |"
+        )
+
+    lines.extend(["", "## 질문", ""])
+    for scenario in result["scenarios"]:
+        lines.append(
+            f"- `{_markdown_text(scenario.get('scenarioId'))}`: "
+            f"{_markdown_text(scenario.get('question'))}"
+        )
+
+    return "\n".join(lines)
+
+
+def _markdown_text(value: object) -> str:
+    if value is None:
+        return "-"
+    return str(value)
+
+
+def _escape_markdown_cell(value: object) -> str:
+    if value is None or value == "":
+        return "-"
+    text = str(value)
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _format_markdown_bool(value: object) -> str:
+    if isinstance(value, bool):
+        return "`true`" if value else "`false`"
+    return _escape_markdown_cell(value)
 
 
 def _select_scenario_groups(
@@ -373,6 +478,47 @@ def _single_expected_security_code(scenario: RdbChatScenario) -> str | None:
     if expected_code is None:
         return "NONE"
     return expected_code
+
+
+def _should_require_llm_generation(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> bool:
+    return bool(args.require_llm_generation and _supports_llm_verification(scenario))
+
+
+def _should_require_llm_cache_miss(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> bool:
+    return bool(args.require_llm_cache_miss and _supports_llm_verification(scenario))
+
+
+def _resolve_max_llm_total_tokens(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> int | None:
+    if not _supports_llm_verification(scenario):
+        return None
+    return args.max_llm_total_tokens
+
+
+def _supports_llm_verification(scenario: RdbChatScenario) -> bool:
+    return scenario.expected_security_results == (("PASSED", None),)
+
+
+def _llm_requirement_skipped_reason(
+    args: argparse.Namespace,
+    scenario: RdbChatScenario,
+) -> str | None:
+    llm_requirement_requested = (
+        args.require_llm_generation
+        or args.require_llm_cache_miss
+        or args.max_llm_total_tokens is not None
+    )
+    if not llm_requirement_requested or _supports_llm_verification(scenario):
+        return None
+    return "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
 
 
 def _format_security_results(
@@ -414,6 +560,8 @@ def main(
 
     if args.json:
         print(format_json_result(result), file=output)
+    elif args.markdown:
+        print(format_markdown_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
     return 0

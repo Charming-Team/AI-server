@@ -65,9 +65,9 @@ CORE_RAG_CHAT_SCENARIOS: tuple[RagChatScenario, ...] = (
         required_source_title_fragments=("LINE-PE-01",),
     ),
     RagChatScenario(
-        scenario_id="delivery-risk-with-report",
+        scenario_id="delivery-risk-with-company-guide",
         intent=ChatIntent.DELIVERY_RISK,
-        question="납기 위험이 있는 주문과 관련 보고서 근거를 알려줘",
+        question="납기 위험이 있는 주문과 주요 원인, 대응 기준을 알려줘",
     ),
 )
 
@@ -212,6 +212,30 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="모든 시나리오에 적용할 최소 Qdrant 문서 출처 개수",
     )
+    parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="챗봇 응답이 fallback이 아니라 LLM 생성 답변을 사용했는지 검증합니다.",
+    )
+    parser.add_argument(
+        "--require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "LLM 답변이 캐시가 아니라 실제 생성 경로에서 만들어졌는지 검증합니다. "
+            "배포 직후 LLM 연결 확인용으로만 사용합니다."
+        ),
+    )
+    parser.add_argument(
+        "--max-llm-total-tokens",
+        type=int,
+        default=None,
+        help="모든 시나리오에 적용할 LLM total token 최대 허용값",
+    )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
+    )
     parser.add_argument("--json", action="store_true", help="Print result as JSON")
     return parser
 
@@ -261,6 +285,9 @@ async def check_rag_chat_scenarios(
     scenario_results = []
 
     for index, scenario in enumerate(scenarios):
+        require_llm_generation = _should_require_llm_generation(args, scenario)
+        require_llm_cache_miss = _should_require_llm_cache_miss(args, scenario)
+        max_llm_total_tokens = _resolve_max_llm_total_tokens(args, scenario)
         result = await check_chat_answer.check_chat_answer(
             base_url=args.base_url,
             path=path,
@@ -274,6 +301,9 @@ async def check_rag_chat_scenarios(
                 scenario,
             ),
             require_vector_search=scenario.require_vector_search,
+            require_llm_generation=require_llm_generation,
+            require_llm_cache_miss=require_llm_cache_miss,
+            max_llm_total_tokens=max_llm_total_tokens,
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
             expected_intent=scenario.intent.value,
@@ -295,6 +325,12 @@ async def check_rag_chat_scenarios(
                 "minRdbEvidenceCount": _resolve_min_rdb_evidence_count(args, scenario),
                 "maxRdbEvidenceCount": scenario.max_rdb_evidence_count,
                 "minDocumentSourceCount": _resolve_min_document_source_count(
+                    args,
+                    scenario,
+                ),
+                "maxLlmTotalTokens": max_llm_total_tokens,
+                "requireLlmCacheMiss": require_llm_cache_miss,
+                "llmRequirementSkippedReason": _llm_requirement_skipped_reason(
                     args,
                     scenario,
                 ),
@@ -450,6 +486,12 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"maxRdbEvidenceCount={scenario.get('maxRdbEvidenceCount')} "
             f"documentSourceCount={scenario['documentSourceCount']} "
             f"usedVectorSearch={scenario['usedVectorSearch']} "
+            f"requireLlmGeneration={scenario['requireLlmGeneration']} "
+            f"usedLlmGeneration={scenario['usedLlmGeneration']} "
+            f"llmCacheHit={scenario.get('llmCacheHit', False)} "
+            f"requireLlmCacheMiss={scenario.get('requireLlmCacheMiss', False)} "
+            f"llmUsage={check_chat_answer.format_llm_usage(scenario.get('llmUsage'))} "
+            f"maxLlmTotalTokens={scenario.get('maxLlmTotalTokens')} "
             f"sourceCount={scenario['sourceCount']} "
             f"urlCount={scenario['urlCount']}"
         )
@@ -458,6 +500,79 @@ def format_text_result(result: dict[str, Any]) -> str:
 
 def format_json_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def format_markdown_result(result: dict[str, Any]) -> str:
+    lines = [
+        "# RAG 챗봇 시나리오 점검 결과",
+        "",
+        f"- 점검 상태: `{result['checkStatus']}`",
+        f"- 시나리오 수: `{result['scenarioCount']}`",
+    ]
+
+    for scenario in result["scenarios"]:
+        lines.extend(
+            [
+                "",
+                f"## {scenario['scenarioId']}",
+                "",
+                f"- Role: `{scenario['role']}`",
+                f"- 질문: {scenario['question']}",
+                f"- Intent: `{scenario['intent']}`",
+                (
+                    "- 보안 결과: "
+                    f"`{scenario['securityStatus']}`"
+                    f"{_format_optional_code(scenario['securityCode'])}"
+                ),
+                (
+                    "- 근거 수: "
+                    f"전체 `{scenario['evidenceCount']}`, "
+                    f"RDB `{scenario['rdbEvidenceCount']}`, "
+                    f"Qdrant `{scenario['documentSourceCount']}`"
+                ),
+                (
+                    "- LLM 생성: "
+                    f"요구 `{scenario['requireLlmGeneration']}`, "
+                    f"사용 `{scenario['usedLlmGeneration']}`, "
+                    f"캐시 `{scenario.get('llmCacheHit', False)}`, "
+                    f"캐시 미스 요구 `{scenario.get('requireLlmCacheMiss', False)}`, "
+                    "토큰 "
+                    f"`{check_chat_answer.format_llm_usage(scenario.get('llmUsage'))}`, "
+                    f"최대 `{scenario.get('maxLlmTotalTokens') or '-'}`"
+                ),
+            ]
+        )
+        answer = scenario.get("answer")
+        if answer:
+            lines.extend(["", "### 답변", "", "```text", answer, "```"])
+
+        source_details = scenario.get("sourceDetails") or []
+        if source_details:
+            lines.extend(["", "### 출처", "", "| 유형 | 제목 | URL |", "| --- | --- | --- |"])
+            lines.extend(
+                (
+                    f"| `{source['sourceOrigin'] or '-'}` / `{source['sourceType']}` "
+                    f"| {_escape_markdown_cell(source['title'])} "
+                    f"| `{source['url'] or '-'}` |"
+                )
+                for source in source_details
+            )
+
+        url_details = scenario.get("urlDetails") or []
+        if url_details:
+            lines.extend(
+                ["", "### 화면 이동 URL", "", "| 유형 | 라벨 | URL |", "| --- | --- | --- |"]
+            )
+            lines.extend(
+                (
+                    f"| `{url['type']}` "
+                    f"| {_escape_markdown_cell(url['label'])} "
+                    f"| `{url['url']}` |"
+                )
+                for url in url_details
+            )
+
+    return "\n".join(lines)
 
 
 def _select_scenario_groups(
@@ -473,6 +588,47 @@ def _select_scenario_groups(
             seen_scenario_ids.add(scenario.scenario_id)
             scenarios.append(scenario)
     return tuple(scenarios)
+
+
+def _should_require_llm_generation(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> bool:
+    return bool(args.require_llm_generation and _supports_llm_verification(scenario))
+
+
+def _should_require_llm_cache_miss(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> bool:
+    return bool(args.require_llm_cache_miss and _supports_llm_verification(scenario))
+
+
+def _resolve_max_llm_total_tokens(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> int | None:
+    if not _supports_llm_verification(scenario):
+        return None
+    return args.max_llm_total_tokens
+
+
+def _supports_llm_verification(scenario: RagChatScenario) -> bool:
+    return scenario.expected_security_results == (("PASSED", None),)
+
+
+def _llm_requirement_skipped_reason(
+    args: argparse.Namespace,
+    scenario: RagChatScenario,
+) -> str | None:
+    llm_requirement_requested = (
+        args.require_llm_generation
+        or args.require_llm_cache_miss
+        or args.max_llm_total_tokens is not None
+    )
+    if not llm_requirement_requested or _supports_llm_verification(scenario):
+        return None
+    return "보안 차단 또는 근거 부족이 정상인 시나리오는 LLM 생성/토큰 검증을 제외합니다."
 
 
 def _resolve_min_evidence_count(
@@ -558,6 +714,18 @@ def _format_security_result(security_result: tuple[str, str | None]) -> str:
     return f"{status}:{code or 'NONE'}"
 
 
+def _format_optional_code(code: str | None) -> str:
+    if code is None:
+        return ""
+    return f" / `{code}`"
+
+
+def _escape_markdown_cell(value: str | None) -> str:
+    if value is None:
+        return "-"
+    return value.replace("|", "\\|").replace("\n", "<br>")
+
+
 def main(
     argv: list[str] | None = None,
     stdout: TextIO | None = None,
@@ -579,6 +747,8 @@ def main(
 
     if args.json:
         print(format_json_result(result), file=output)
+    elif args.markdown:
+        print(format_markdown_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
     return 0

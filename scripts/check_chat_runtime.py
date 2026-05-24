@@ -223,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=sorted(check_rdb_chat_scenarios.RDB_CHAT_SCENARIO_GROUPS),
         help=(
-            "RDB 챗봇 시나리오 그룹입니다. core, access, filtered 중 선택하며 "
+            "RDB 챗봇 시나리오 그룹입니다. core, access, filtered, report 중 선택하며 "
             "여러 번 지정할 수 있습니다. 생략하면 core/access를 실행합니다."
         ),
     )
@@ -339,6 +339,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--answer-api-max-llm-total-tokens",
+        type=int,
+        default=None,
+        help=(
+            "챗봇 답변 API와 RAG 시나리오 smoke check에서 허용할 LLM total token "
+            "최대값입니다."
+        ),
+    )
+    parser.add_argument(
+        "--answer-api-require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "챗봇 답변 API와 RAG 시나리오 smoke check에서 LLM 캐시가 아니라 "
+            "실제 생성 경로를 탔는지 검증합니다. 배포 직후 연결 확인용입니다."
+        ),
+    )
+    parser.add_argument(
         "--document-api-base-url",
         default=check_document_index_api.DEFAULT_BASE_URL,
         help="문서 인덱싱/삭제 API smoke check에 사용할 FastAPI base URL",
@@ -391,6 +408,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print result as JSON",
+    )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
     )
     return parser
 
@@ -964,6 +986,9 @@ async def run_rdb_chat_scenarios(
             "scenarioGroups": scenario_groups,
             "scenarioCount": len(scenarios),
             "scenarioIds": [scenario.scenario_id for scenario in scenarios],
+            "requireLlmGeneration": bool(args.require_llm_generation),
+            "maxLlmTotalTokens": args.answer_api_max_llm_total_tokens,
+            "requireLlmCacheMiss": bool(args.answer_api_require_llm_cache_miss),
         }
 
     scenario_args = argparse.Namespace(
@@ -981,7 +1006,11 @@ async def run_rdb_chat_scenarios(
         scenario=args.rdb_chat_scenario,
         scenario_group=scenario_groups,
         min_evidence_count=None,
+        require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
+        max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
         json=False,
+        markdown=False,
     )
     return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(scenario_args)
 
@@ -1012,6 +1041,9 @@ async def run_rag_chat_scenarios(
             "scenarioGroups": scenario_groups,
             "scenarioCount": len(scenarios),
             "scenarioIds": [scenario.scenario_id for scenario in scenarios],
+            "requireLlmGeneration": bool(args.require_llm_generation),
+            "maxLlmTotalTokens": args.answer_api_max_llm_total_tokens,
+            "requireLlmCacheMiss": bool(args.answer_api_require_llm_cache_miss),
         }
 
     scenario_args = argparse.Namespace(
@@ -1031,7 +1063,11 @@ async def run_rag_chat_scenarios(
         min_evidence_count=None,
         min_rdb_evidence_count=None,
         min_document_source_count=None,
+        require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
+        max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
         json=False,
+        markdown=False,
     )
     return await check_rag_chat_scenarios.check_rag_chat_scenarios(scenario_args)
 
@@ -1253,6 +1289,9 @@ async def run_rag_end_to_end_smoke(
         min_document_source_count=max(args.answer_api_min_document_source_count, 1),
         min_evidence_count=max(args.answer_api_min_evidence_count, 1),
         require_rdb_evidence=bool(args.require_rdb_evidence),
+        max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
+        require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
         keep_document=False,
         validate_only=not args.network,
         json=False,
@@ -1317,6 +1356,8 @@ async def run_answer_api_smoke(
             "minDocumentSourceCount": args.answer_api_min_document_source_count,
             "requireVectorSearch": require_vector_search,
             "requireLlmGeneration": bool(args.require_llm_generation),
+            "maxLlmTotalTokens": args.answer_api_max_llm_total_tokens,
+            "requireLlmCacheMiss": bool(args.answer_api_require_llm_cache_miss),
             "expectedLlmGenerationSkippedReason": expected_llm_skipped_reason,
         }
 
@@ -1331,6 +1372,8 @@ async def run_answer_api_smoke(
         min_document_source_count=args.answer_api_min_document_source_count,
         require_vector_search=require_vector_search,
         require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
+        max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
         expected_llm_skipped_reason=expected_llm_skipped_reason,
         expected_intent=args.answer_api_expected_intent,
     )
@@ -1440,6 +1483,129 @@ def format_text_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_markdown_result(result: dict[str, Any]) -> str:
+    summary = result.get("summary", {})
+    required_components = result.get("requiredComponents", [])
+    lines = [
+        "# 챗봇 런타임 통합 점검 결과",
+        "",
+        f"- 점검 상태: `{_markdown_text(result.get('checkStatus'))}`",
+        f"- 모드: `{_markdown_text(result.get('mode'))}`",
+        f"- 네트워크 점검: `{_markdown_text(result.get('networkChecked'))}`",
+        "- 필수 구성요소: "
+        f"`{_markdown_text(', '.join(required_components) or '-')}`",
+        (
+            "- Step 요약: "
+            f"전체 `{summary.get('totalStepCount', len(result['steps']))}`, "
+            f"통과 `{summary.get('passedStepCount', 0)}`, "
+            f"실패 `{summary.get('failedStepCount', 0)}`"
+        ),
+    ]
+
+    runtime_mode = result.get("runtimeMode")
+    if isinstance(runtime_mode, dict):
+        lines.extend(
+            [
+                "",
+                "## 런타임 모드",
+                "",
+                "| 항목 | 값 |",
+                "| --- | --- |",
+                (
+                    "| API Prefix | "
+                    f"{_escape_markdown_cell(runtime_mode.get('apiPrefix'))} |"
+                ),
+                (
+                    "| Grounding Mode | "
+                    f"{_escape_markdown_cell(runtime_mode.get('groundingMode'))} |"
+                ),
+                (
+                    "| Answer Mode | "
+                    f"{_escape_markdown_cell(runtime_mode.get('answerMode'))} |"
+                ),
+                (
+                    "| RAG Search Mode | "
+                    f"{_escape_markdown_cell(runtime_mode.get('ragSearchMode'))} |"
+                ),
+                "| Enabled Grounding Sources | "
+                f"{_format_markdown_list(runtime_mode.get('enabledGroundingSources'))} |",
+            ]
+        )
+        expected_skip = runtime_mode.get("expectedLlmSkippedReason")
+        if expected_skip:
+            lines.append(
+                "| Expected LLM Skip Reason | "
+                f"{_escape_markdown_cell(expected_skip)} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Step 결과",
+            "",
+            "| Step | 상태 | 코드 | 메시지 |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for step in result["steps"]:
+        if step.get("status") == "PASS":
+            code, message = None, "-"
+        else:
+            code, message = extract_failure_reason(step)
+        lines.append(
+            "| "
+            f"{_escape_markdown_cell(step.get('name'))} | "
+            f"`{_escape_markdown_cell(step.get('status'))}` | "
+            f"{_escape_markdown_cell(code)} | "
+            f"{_escape_markdown_cell(message)} |"
+        )
+
+    failed_steps = summary.get("failedSteps", [])
+    if failed_steps:
+        lines.extend(
+            [
+                "",
+                "## 실패 상세",
+                "",
+                "| Step | 코드 | 메시지 |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for item in failed_steps:
+            lines.append(
+                "| "
+                f"{_escape_markdown_cell(item.get('name'))} | "
+                f"{_escape_markdown_cell(item.get('code'))} | "
+                f"{_escape_markdown_cell(item.get('message'))} |"
+            )
+
+    next_actions = summary.get("nextActions", [])
+    if next_actions:
+        lines.extend(["", "## 다음 조치", ""])
+        lines.extend(f"- {action}" for action in next_actions)
+
+    return "\n".join(lines)
+
+
+def _markdown_text(value: object) -> str:
+    if value is None:
+        return "-"
+    return str(value)
+
+
+def _escape_markdown_cell(value: object) -> str:
+    if value is None or value == "":
+        return "-"
+    text = str(value)
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def _format_markdown_list(value: object) -> str:
+    if not isinstance(value, list):
+        return _escape_markdown_cell(value)
+    return _escape_markdown_cell(", ".join(str(item) for item in value))
+
+
 def format_json_result(result: dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -1462,6 +1628,8 @@ def main(
 
     if args.json:
         print(format_json_result(result), file=output)
+    elif args.markdown:
+        print(format_markdown_result(result), file=output)
     else:
         print(format_text_result(result), file=output)
     return 0 if result["checkStatus"] == "PASS" else 2

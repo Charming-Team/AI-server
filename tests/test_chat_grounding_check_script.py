@@ -5,6 +5,7 @@ import anyio
 import httpx
 import pytest
 
+from app.features.chat.exceptions import ChatServiceError
 from scripts import check_chat_grounding
 
 
@@ -28,6 +29,9 @@ def _build_args(**overrides):
         "requested_at": "2026-05-12T10:30:00+09:00",
         "min_evidence_count": 1,
         "allow_non_rdb_evidence": False,
+        "max_llm_total_tokens": None,
+        "require_llm_generation": False,
+        "require_llm_cache_miss": False,
         "json": False,
     }
     values.update(overrides)
@@ -61,7 +65,12 @@ def _spring_evidence_response() -> dict:
     }
 
 
-def _fastapi_answer_response() -> dict:
+def _fastapi_answer_response(
+    *,
+    used_llm_generation: bool = False,
+    llm_cache_hit: bool = False,
+    llm_usage: dict[str, int] | None = None,
+) -> dict:
     return {
         "sessionId": 10,
         "messageId": 24,
@@ -95,14 +104,30 @@ def _fastapi_answer_response() -> dict:
         "modelResult": {
             "usedVectorSearch": False,
             "usedRdbEvidence": True,
-            "usedLlmGeneration": False,
+            "usedLlmGeneration": used_llm_generation,
+            "llmCacheHit": llm_cache_hit,
+            "llmUsage": llm_usage,
             "rdbEvidenceCount": 1,
             "documentSourceCount": 0,
             "evidenceCount": 1,
             "vectorSearchSkippedReason": None,
-            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "llmGenerationSkippedReason": (
+                None
+                if used_llm_generation
+                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+            ),
         },
     }
+
+
+def _fastapi_answer_response_with_usage() -> dict:
+    return _fastapi_answer_response(
+        llm_usage={
+            "promptTokens": 120,
+            "completionTokens": 32,
+            "totalTokens": 152,
+        }
+    )
 
 
 def test_check_chat_grounding_script_builds_settings_from_cli() -> None:
@@ -165,11 +190,123 @@ def test_check_chat_grounding_script_calls_spring_and_fastapi_contracts() -> Non
     assert result["fastapiAnswer"]["evidenceCount"] == 1
 
 
+def test_check_chat_grounding_script_carries_llm_generation_and_cache_miss_requirements() -> None:
+    def spring_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_spring_evidence_response(), request=request)
+
+    def fastapi_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_fastapi_answer_response(
+                used_llm_generation=True,
+                llm_cache_hit=False,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> dict:
+        spring_transport = httpx.MockTransport(spring_handler)
+        fastapi_transport = httpx.MockTransport(fastapi_handler)
+        async with httpx.AsyncClient(transport=spring_transport) as spring_client:
+            async with httpx.AsyncClient(transport=fastapi_transport) as fastapi_client:
+                return await check_chat_grounding.check_chat_grounding(
+                    _build_args(
+                        require_llm_generation=True,
+                        require_llm_cache_miss=True,
+                        max_llm_total_tokens=200,
+                    ),
+                    spring_http_client=spring_client,
+                    fastapi_http_client=fastapi_client,
+                )
+
+    result = anyio.run(run)
+
+    assert result["requireLlmGeneration"] is True
+    assert result["requireLlmCacheMiss"] is True
+    assert result["fastapiAnswer"]["usedLlmGeneration"] is True
+    assert result["fastapiAnswer"]["llmCacheHit"] is False
+    assert result["fastapiAnswer"]["llmUsage"]["totalTokens"] == 152
+
+
+def test_check_chat_grounding_script_applies_llm_total_token_limit() -> None:
+    def spring_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_spring_evidence_response(), request=request)
+
+    def fastapi_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_fastapi_answer_response_with_usage(),
+            request=request,
+        )
+
+    async def run() -> None:
+        spring_transport = httpx.MockTransport(spring_handler)
+        fastapi_transport = httpx.MockTransport(fastapi_handler)
+        async with httpx.AsyncClient(transport=spring_transport) as spring_client:
+            async with httpx.AsyncClient(transport=fastapi_transport) as fastapi_client:
+                await check_chat_grounding.check_chat_grounding(
+                    _build_args(max_llm_total_tokens=100),
+                    spring_http_client=spring_client,
+                    fastapi_http_client=fastapi_client,
+                )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "expected<=100, actual=152" in str(exc_info.value)
+
+
+def test_check_chat_grounding_script_fails_when_cache_miss_required_but_cache_hit() -> None:
+    def spring_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_spring_evidence_response(), request=request)
+
+    def fastapi_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_fastapi_answer_response(
+                used_llm_generation=True,
+                llm_cache_hit=True,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        spring_transport = httpx.MockTransport(spring_handler)
+        fastapi_transport = httpx.MockTransport(fastapi_handler)
+        async with httpx.AsyncClient(transport=spring_transport) as spring_client:
+            async with httpx.AsyncClient(transport=fastapi_transport) as fastapi_client:
+                await check_chat_grounding.check_chat_grounding(
+                    _build_args(require_llm_cache_miss=True),
+                    spring_http_client=spring_client,
+                    fastapi_http_client=fastapi_client,
+                )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 캐시를 사용했습니다" in exc_info.value.message
+
+
 def test_check_chat_grounding_script_formats_text_result() -> None:
     result = {
         "checkStatus": "PASS",
         "intent": "MATERIAL_SHORTAGE",
         "minEvidenceCount": 1,
+        "maxLlmTotalTokens": None,
+        "requireLlmGeneration": False,
+        "requireLlmCacheMiss": False,
         "springEvidence": {
             "url": "http://spring.local/internal/chat/evidence",
             "itemCount": 1,
@@ -180,6 +317,8 @@ def test_check_chat_grounding_script_formats_text_result() -> None:
             "securityStatus": "PASSED",
             "evidenceCount": 1,
             "usedRdbEvidence": True,
+            "usedLlmGeneration": False,
+            "llmCacheHit": False,
             "sourceCount": 1,
             "urlCount": 1,
         },
@@ -189,6 +328,9 @@ def test_check_chat_grounding_script_formats_text_result() -> None:
 
     assert "status=PASS" in output
     assert "spring.itemCount=1" in output
+    assert "maxLlmTotalTokens=None" in output
+    assert "requireLlmGeneration=False" in output
+    assert "requireLlmCacheMiss=False" in output
     assert "fastapi.usedRdbEvidence=True" in output
 
 

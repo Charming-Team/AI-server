@@ -3,6 +3,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from app.core.config import Settings, get_settings
+from app.features.chat.exceptions import ChatExternalServiceError
+from app.features.chat.llm_client import (
+    OPENAI_COMPATIBLE_PROVIDER,
+    OPENAI_PROVIDER,
+    SUPPORTED_LLM_PROVIDERS,
+    normalize_llm_provider,
+    validate_llm_settings,
+)
 from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import ChatErrorCode
 from app.schemas.health import HealthResponse, ReadinessComponent, ReadinessResponse
@@ -109,18 +117,7 @@ def build_readiness_components(settings: Settings) -> list[ReadinessComponent]:
             },
         ),
         _rag_search_pipeline_component(settings),
-        _integration_component(
-            name="llm",
-            enabled=settings.llm_enabled,
-            required_fields={
-                "llm_base_url": settings.llm_base_url,
-                "llm_model": settings.llm_model,
-            },
-            field_error_codes={
-                "llm_base_url": ChatErrorCode.CHAT_LLM_001,
-                "llm_model": ChatErrorCode.CHAT_LLM_001,
-            },
-        ),
+        _llm_component(settings),
         _answer_generation_pipeline_component(settings),
     ]
 
@@ -163,6 +160,57 @@ def _answer_generation_pipeline_component(settings: Settings) -> ReadinessCompon
         configured=True,
         reason="LLM 기능이 비활성화되어 근거 기반 fallback 답변 생성을 사용합니다.",
     )
+
+
+def _llm_component(settings: Settings) -> ReadinessComponent:
+    if not settings.llm_enabled:
+        return ReadinessComponent(
+            name="llm",
+            enabled=False,
+            configured=True,
+            reason="비활성화되어 있습니다.",
+        )
+
+    provider = normalize_llm_provider(settings.llm_provider)
+    if provider not in SUPPORTED_LLM_PROVIDERS:
+        return ReadinessComponent(
+            name="llm",
+            enabled=True,
+            configured=False,
+            code=ChatErrorCode.CHAT_LLM_001,
+            reason=f"지원하지 않는 LLM provider입니다: {settings.llm_provider}",
+        )
+
+    required_fields = {"llm_model": settings.llm_model}
+    if provider == OPENAI_PROVIDER:
+        required_fields["llm_api_key"] = settings.llm_api_key
+    elif provider == OPENAI_COMPATIBLE_PROVIDER:
+        required_fields["llm_base_url"] = settings.llm_base_url
+
+    component = _integration_component(
+        name="llm",
+        enabled=True,
+        required_fields=required_fields,
+        field_error_codes={
+            "llm_api_key": ChatErrorCode.CHAT_LLM_001,
+            "llm_base_url": ChatErrorCode.CHAT_LLM_001,
+            "llm_model": ChatErrorCode.CHAT_LLM_001,
+        },
+    )
+    if not component.configured:
+        return component
+
+    try:
+        validate_llm_settings(settings)
+    except ChatExternalServiceError as exc:
+        return ReadinessComponent(
+            name="llm",
+            enabled=True,
+            configured=False,
+            code=exc.code,
+            reason=exc.message,
+        )
+    return component
 
 
 def _rag_search_pipeline_component(settings: Settings) -> ReadinessComponent:
