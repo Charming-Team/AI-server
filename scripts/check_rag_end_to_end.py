@@ -103,6 +103,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="챗봇 답변에서 허용할 LLM total token 최대값입니다.",
     )
     parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="챗봇 답변이 fallback이 아니라 LLM 생성 답변을 사용했는지 검증합니다.",
+    )
+    parser.add_argument(
+        "--require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "LLM 답변이 캐시가 아니라 실제 생성 경로에서 만들어졌는지 검증합니다. "
+            "배포 직후 LLM 연결 확인용으로만 사용합니다."
+        ),
+    )
+    parser.add_argument(
         "--keep-document",
         action="store_true",
         help="점검 후 임시 문서를 삭제하지 않고 Qdrant에 남깁니다.",
@@ -194,6 +207,8 @@ def build_validate_only_result(
         "minDocumentSourceCount": args.min_document_source_count,
         "requireRdbEvidence": args.require_rdb_evidence,
         "maxLlmTotalTokens": args.max_llm_total_tokens,
+        "requireLlmGeneration": args.require_llm_generation,
+        "requireLlmCacheMiss": args.require_llm_cache_miss,
         "keepDocument": args.keep_document,
     }
 
@@ -235,6 +250,8 @@ async def check_rag_end_to_end(
             min_document_source_count=args.min_document_source_count,
             require_vector_search=True,
             max_llm_total_tokens=args.max_llm_total_tokens,
+            require_llm_generation=args.require_llm_generation,
+            require_llm_cache_miss=args.require_llm_cache_miss,
             expected_security_status="PASSED",
             expected_security_code="NONE",
             http_client=http_client,
@@ -268,6 +285,8 @@ async def check_rag_end_to_end(
         "answer": answer_result,
         "cleanup": cleanup_result,
         "maxLlmTotalTokens": args.max_llm_total_tokens,
+        "requireLlmGeneration": args.require_llm_generation,
+        "requireLlmCacheMiss": args.require_llm_cache_miss,
         "usedCleanup": cleanup_result is not None,
         "keepDocument": args.keep_document,
     }
@@ -296,6 +315,8 @@ def format_text_result(result: dict[str, Any]) -> str:
                 f"minDocumentSourceCount={result['minDocumentSourceCount']}",
                 f"requireRdbEvidence={result['requireRdbEvidence']}",
                 f"maxLlmTotalTokens={result['maxLlmTotalTokens']}",
+                f"requireLlmGeneration={result['requireLlmGeneration']}",
+                f"requireLlmCacheMiss={result['requireLlmCacheMiss']}",
                 f"keepDocument={result['keepDocument']}",
             ]
         )
@@ -313,6 +334,10 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"answerDocumentSourceCount={answer['documentSourceCount']}",
             f"answerUsedVectorSearch={answer['usedVectorSearch']}",
             f"maxLlmTotalTokens={result.get('maxLlmTotalTokens')}",
+            f"requireLlmGeneration={result.get('requireLlmGeneration')}",
+            f"requireLlmCacheMiss={result.get('requireLlmCacheMiss')}",
+            f"answerUsedLlmGeneration={answer.get('usedLlmGeneration')}",
+            f"answerLlmCacheHit={answer.get('llmCacheHit')}",
             f"usedCleanup={result['usedCleanup']}",
             f"keepDocument={result['keepDocument']}",
         ]

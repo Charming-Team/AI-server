@@ -195,6 +195,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--require-llm-generation",
+        action="store_true",
+        help="챗봇 응답이 fallback이 아니라 LLM 생성 답변을 사용했는지 검증합니다.",
+    )
+    parser.add_argument(
+        "--require-llm-cache-miss",
+        action="store_true",
+        help=(
+            "LLM 답변이 캐시가 아니라 실제 생성 경로에서 만들어졌는지 검증합니다. "
+            "배포 직후 LLM 연결 확인용으로만 사용합니다."
+        ),
+    )
+    parser.add_argument(
+        "--max-llm-total-tokens",
+        type=int,
+        default=None,
+        help="모든 RDB 시나리오에 적용할 LLM total token 최대 허용값",
+    )
+    parser.add_argument(
         "--markdown",
         action="store_true",
         help="점검 결과를 리뷰용 Markdown으로 출력합니다.",
@@ -264,6 +283,9 @@ async def check_rdb_chat_scenarios(
             expected_security_status=_single_expected_security_status(scenario),
             expected_security_code=_single_expected_security_code(scenario),
             expected_intent=scenario.intent.value,
+            require_llm_generation=args.require_llm_generation,
+            require_llm_cache_miss=args.require_llm_cache_miss,
+            max_llm_total_tokens=args.max_llm_total_tokens,
             http_client=http_client,
         )
         if result["intent"] != scenario.intent.value:
@@ -302,6 +324,9 @@ async def check_rdb_chat_scenarios(
                     for status, code in scenario.expected_security_results
                 ],
                 "requireRdbEvidence": scenario.require_rdb_evidence,
+                "requireLlmGeneration": args.require_llm_generation,
+                "requireLlmCacheMiss": args.require_llm_cache_miss,
+                "maxLlmTotalTokens": args.max_llm_total_tokens,
                 **result,
             }
         )
@@ -347,6 +372,9 @@ def format_text_result(result: dict[str, Any]) -> str:
             f"securityCode={scenario['securityCode']} "
             f"requireRdbEvidence={scenario['requireRdbEvidence']} "
             f"rdbEvidenceCount={scenario['rdbEvidenceCount']} "
+            f"requireLlmGeneration={scenario.get('requireLlmGeneration')} "
+            f"requireLlmCacheMiss={scenario.get('requireLlmCacheMiss')} "
+            f"llmCacheHit={scenario.get('llmCacheHit')} "
             f"sourceCount={scenario['sourceCount']} "
             f"urlCount={scenario['urlCount']}"
         )
@@ -362,8 +390,11 @@ def format_markdown_result(result: dict[str, Any]) -> str:
         "",
         "## 시나리오 결과",
         "",
-        "| 시나리오 | Role | Intent | 보안 상태 | 보안 코드 | RDB 필수 | RDB 근거 | 출처 | URL |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        (
+            "| 시나리오 | Role | Intent | 보안 상태 | 보안 코드 | RDB 필수 | "
+            "LLM 필수 | 캐시 미스 필수 | LLM 캐시 | RDB 근거 | 출처 | URL |"
+        ),
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for scenario in result["scenarios"]:
         lines.append(
@@ -374,6 +405,9 @@ def format_markdown_result(result: dict[str, Any]) -> str:
             f"{_escape_markdown_cell(scenario.get('securityStatus'))} | "
             f"{_escape_markdown_cell(scenario.get('securityCode'))} | "
             f"{_format_markdown_bool(scenario.get('requireRdbEvidence'))} | "
+            f"{_format_markdown_bool(scenario.get('requireLlmGeneration'))} | "
+            f"{_format_markdown_bool(scenario.get('requireLlmCacheMiss'))} | "
+            f"{_format_markdown_bool(scenario.get('llmCacheHit'))} | "
             f"{_escape_markdown_cell(scenario.get('rdbEvidenceCount'))} | "
             f"{_escape_markdown_cell(scenario.get('sourceCount'))} | "
             f"{_escape_markdown_cell(scenario.get('urlCount'))} |"

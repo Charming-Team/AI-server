@@ -28,6 +28,9 @@ def _build_args(**overrides: Any) -> Namespace:
         "scenario": None,
         "scenario_group": None,
         "min_evidence_count": None,
+        "require_llm_generation": False,
+        "require_llm_cache_miss": False,
+        "max_llm_total_tokens": None,
         "markdown": False,
         "json": False,
     }
@@ -39,6 +42,9 @@ def _answer_response(
     intent: ChatIntent,
     evidence_count: int = 1,
     security_status: str = "PASSED",
+    used_llm_generation: bool = False,
+    llm_cache_hit: bool = False,
+    llm_usage: dict[str, int] | None = None,
 ) -> dict:
     security_code = None
     if security_status == "BLOCKED_UNAUTHORIZED":
@@ -95,13 +101,18 @@ def _answer_response(
         "modelResult": {
             "usedVectorSearch": False,
             "usedRdbEvidence": evidence_count > 0,
-            "usedLlmGeneration": False,
-            "llmCacheHit": False,
+            "usedLlmGeneration": used_llm_generation,
+            "llmCacheHit": llm_cache_hit,
+            "llmUsage": llm_usage,
             "rdbEvidenceCount": evidence_count,
             "documentSourceCount": 0,
             "evidenceCount": evidence_count,
             "vectorSearchSkippedReason": None,
-            "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
+            "llmGenerationSkippedReason": (
+                None
+                if used_llm_generation
+                else "LLM 답변 생성 기능이 비활성화되어 있습니다."
+            ),
         },
     }
 
@@ -220,6 +231,87 @@ def test_check_rdb_chat_scenarios_calls_fastapi_for_each_scenario() -> None:
         scenario["expectedSecurityResults"] == [{"status": "PASSED", "code": None}]
         for scenario in result["scenarios"]
     )
+
+
+def test_check_rdb_chat_scenarios_carries_llm_generation_and_cache_miss_requirements() -> None:
+    captured_bodies: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode()
+        captured_bodies.append(body)
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.MATERIAL_SHORTAGE,
+                used_llm_generation=True,
+                llm_cache_hit=False,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> dict[str, Any]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
+                _build_args(
+                    scenario=["material-shortage"],
+                    require_llm_generation=True,
+                    require_llm_cache_miss=True,
+                    max_llm_total_tokens=200,
+                ),
+                http_client=http_client,
+            )
+
+    result = anyio.run(run)
+
+    scenario = result["scenarios"][0]
+    assert len(captured_bodies) == 1
+    assert scenario["requireLlmGeneration"] is True
+    assert scenario["requireLlmCacheMiss"] is True
+    assert scenario["maxLlmTotalTokens"] == 200
+    assert scenario["usedLlmGeneration"] is True
+    assert scenario["llmCacheHit"] is False
+    assert scenario["llmUsage"]["totalTokens"] == 152
+
+
+def test_check_rdb_chat_scenarios_fails_when_cache_miss_required_but_cache_hit() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_answer_response(
+                ChatIntent.MATERIAL_SHORTAGE,
+                used_llm_generation=True,
+                llm_cache_hit=True,
+                llm_usage={
+                    "promptTokens": 120,
+                    "completionTokens": 32,
+                    "totalTokens": 152,
+                },
+            ),
+            request=request,
+        )
+
+    async def run() -> None:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            await check_rdb_chat_scenarios.check_rdb_chat_scenarios(
+                _build_args(
+                    scenario=["material-shortage"],
+                    require_llm_cache_miss=True,
+                ),
+                http_client=http_client,
+            )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        anyio.run(run)
+
+    assert exc_info.value.code.value == "CHAT_LLM_004"
+    assert "LLM 캐시를 사용했습니다" in exc_info.value.message
 
 
 def test_check_rdb_chat_scenarios_verifies_access_control_group() -> None:
@@ -378,6 +470,9 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
                 "expectedSecurityCodes": [None],
                 "expectedSecurityResults": [{"status": "PASSED", "code": None}],
                 "requireRdbEvidence": True,
+                "requireLlmGeneration": True,
+                "requireLlmCacheMiss": True,
+                "llmCacheHit": False,
                 "rdbEvidenceCount": 3,
                 "sourceCount": 3,
                 "urlCount": 2,
@@ -393,6 +488,9 @@ def test_check_rdb_chat_scenarios_formats_text_result() -> None:
     assert "role=MANUFACTURING_MANAGER" in output
     assert "securityCode=None" in output
     assert "requireRdbEvidence=True" in output
+    assert "requireLlmGeneration=True" in output
+    assert "requireLlmCacheMiss=True" in output
+    assert "llmCacheHit=False" in output
     assert "rdbEvidenceCount=3" in output
 
 
@@ -417,6 +515,9 @@ def test_check_rdb_chat_scenarios_formats_markdown_result() -> None:
                     }
                 ],
                 "requireRdbEvidence": False,
+                "requireLlmGeneration": True,
+                "requireLlmCacheMiss": True,
+                "llmCacheHit": False,
                 "rdbEvidenceCount": 0,
                 "sourceCount": 0,
                 "urlCount": 0,
@@ -431,7 +532,8 @@ def test_check_rdb_chat_scenarios_formats_markdown_result() -> None:
     assert "| 시나리오 | Role | Intent | 보안 상태 | 보안 코드 |" in output
     assert (
         "| operator-financial-blocked | OPERATOR | DELIVERY_RISK | "
-        "BLOCKED_UNAUTHORIZED | CHAT_SECURITY_004 | `false` | 0 | 0 | 0 |"
+        "BLOCKED_UNAUTHORIZED | CHAT_SECURITY_004 | `false` | `true` | "
+        "`true` | `false` | 0 | 0 | 0 |"
     ) in output
     assert (
         "- `operator-financial-blocked`: "

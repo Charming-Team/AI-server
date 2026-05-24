@@ -738,6 +738,9 @@ def test_check_chat_runtime_validate_only_checks_rdb_chat_scenarios() -> None:
         "scenarioGroups": ["access"],
         "scenarioCount": 1,
         "scenarioIds": ["operator-financial-blocked"],
+        "requireLlmGeneration": False,
+        "maxLlmTotalTokens": None,
+        "requireLlmCacheMiss": False,
     }
 
 
@@ -767,6 +770,9 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
     args = _build_args(
         network=True,
         include_rdb_chat_scenarios=True,
+        require_llm_generation=True,
+        answer_api_require_llm_cache_miss=True,
+        answer_api_max_llm_total_tokens=200,
         rdb_chat_scenario_group=["access"],
         rdb_chat_scenario=["operator-financial-blocked"],
     )
@@ -781,6 +787,9 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
         captured["token"] = scenario_args.token
         captured["scenario_group"] = scenario_args.scenario_group
         captured["scenario"] = scenario_args.scenario
+        captured["require_llm_generation"] = scenario_args.require_llm_generation
+        captured["require_llm_cache_miss"] = scenario_args.require_llm_cache_miss
+        captured["max_llm_total_tokens"] = scenario_args.max_llm_total_tokens
         return {
             "checkStatus": "PASS",
             "scenarioCount": 1,
@@ -815,6 +824,9 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
         "token": "answer-token",
         "scenario_group": ["access"],
         "scenario": ["operator-financial-blocked"],
+        "require_llm_generation": True,
+        "require_llm_cache_miss": True,
+        "max_llm_total_tokens": 200,
     }
 
 
@@ -891,6 +903,8 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
     args = _build_args(
         network=True,
         include_rag_end_to_end_smoke=True,
+        require_llm_generation=True,
+        answer_api_require_llm_cache_miss=True,
         answer_api_max_llm_total_tokens=200,
     )
     captured: dict[str, Any] = {}
@@ -899,6 +913,8 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
         captured["base_url"] = kwargs["args"].base_url
         captured["document_id"] = kwargs["args"].document_id
         captured["max_llm_total_tokens"] = kwargs["args"].max_llm_total_tokens
+        captured["require_llm_generation"] = kwargs["args"].require_llm_generation
+        captured["require_llm_cache_miss"] = kwargs["args"].require_llm_cache_miss
         captured["answer_token"] = kwargs["answer_token"]
         captured["document_token"] = kwargs["document_token"]
         return {
@@ -922,6 +938,8 @@ def test_check_chat_runtime_network_runs_rag_end_to_end_smoke(
         "base_url": "http://fastapi.local",
         "document_id": "smoke-document-api-contract",
         "max_llm_total_tokens": 200,
+        "require_llm_generation": True,
+        "require_llm_cache_miss": True,
         "answer_token": "answer-token",
         "document_token": "document-token",
     }

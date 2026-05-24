@@ -986,6 +986,9 @@ async def run_rdb_chat_scenarios(
             "scenarioGroups": scenario_groups,
             "scenarioCount": len(scenarios),
             "scenarioIds": [scenario.scenario_id for scenario in scenarios],
+            "requireLlmGeneration": bool(args.require_llm_generation),
+            "maxLlmTotalTokens": args.answer_api_max_llm_total_tokens,
+            "requireLlmCacheMiss": bool(args.answer_api_require_llm_cache_miss),
         }
 
     scenario_args = argparse.Namespace(
@@ -1003,7 +1006,11 @@ async def run_rdb_chat_scenarios(
         scenario=args.rdb_chat_scenario,
         scenario_group=scenario_groups,
         min_evidence_count=None,
+        require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
+        max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
         json=False,
+        markdown=False,
     )
     return await check_rdb_chat_scenarios.check_rdb_chat_scenarios(scenario_args)
 
@@ -1283,6 +1290,8 @@ async def run_rag_end_to_end_smoke(
         min_evidence_count=max(args.answer_api_min_evidence_count, 1),
         require_rdb_evidence=bool(args.require_rdb_evidence),
         max_llm_total_tokens=args.answer_api_max_llm_total_tokens,
+        require_llm_generation=bool(args.require_llm_generation),
+        require_llm_cache_miss=bool(args.answer_api_require_llm_cache_miss),
         keep_document=False,
         validate_only=not args.network,
         json=False,
