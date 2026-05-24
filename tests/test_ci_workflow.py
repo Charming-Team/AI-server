@@ -29,7 +29,7 @@ def test_docker_build_workflow_runs_python_quality_gates() -> None:
     assert "python -m pytest" in runs
     assert (
         "python -m scripts.check_chat_runtime --preset full "
-        "--answer-api-max-llm-total-tokens 2000 --json"
+        "--answer-api-max-llm-total-tokens 3500 --json"
     ) in runs
 
 
@@ -49,11 +49,15 @@ def test_docker_build_workflow_configures_chat_runtime_gate() -> None:
     assert env["LLM_PROVIDER"] == "openai_compatible"
     assert env["LLM_BASE_URL"] == "http://localhost:8001/v1"
     assert env["LLM_MODEL"] == "local-open-source-model"
-    assert env["LLM_MAX_TOKENS"] == "512"
+    assert env["LLM_MAX_TOKENS"] == "1024"
     assert env["LLM_RESPONSE_CACHE_ENABLED"] == "true"
     assert env["LLM_RESPONSE_CACHE_TTL_SECONDS"] == "60.0"
     assert env["LLM_RESPONSE_CACHE_MAX_ENTRIES"] == "128"
-    assert env["PROMPT_MAX_TOTAL_CHARS"] == "6000"
+    assert env["ANSWER_MAX_CHARS"] == "900"
+    assert env["PROMPT_MAX_EVIDENCE_ITEMS"] == "3"
+    assert env["PROMPT_MAX_DOCUMENT_SOURCES"] == "2"
+    assert env["PROMPT_MAX_SUMMARY_CHARS"] == "280"
+    assert env["PROMPT_MAX_TOTAL_CHARS"] == "3000"
 
 
 def test_docker_build_workflow_runs_on_project_branch_patterns() -> None:

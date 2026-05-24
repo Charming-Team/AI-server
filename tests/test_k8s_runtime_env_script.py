@@ -35,7 +35,11 @@ def _valid_env_values() -> dict[str, str]:
         "LLM_RESPONSE_CACHE_ENABLED": "true",
         "LLM_RESPONSE_CACHE_TTL_SECONDS": "60.0",
         "LLM_RESPONSE_CACHE_MAX_ENTRIES": "128",
-        "PROMPT_MAX_TOTAL_CHARS": "6000",
+        "ANSWER_MAX_CHARS": "900",
+        "PROMPT_MAX_EVIDENCE_ITEMS": "3",
+        "PROMPT_MAX_DOCUMENT_SOURCES": "2",
+        "PROMPT_MAX_SUMMARY_CHARS": "280",
+        "PROMPT_MAX_TOTAL_CHARS": "3000",
     }
 
 
@@ -109,7 +113,11 @@ def test_check_k8s_runtime_env_rejects_local_llm_runtime_values() -> None:
     values["LLM_MAX_TOKENS"] = "2048"
     values["LLM_REASONING_EFFORT"] = "medium"
     values["LLM_RESPONSE_CACHE_ENABLED"] = "false"
-    values["PROMPT_MAX_TOTAL_CHARS"] = "20000"
+    values["ANSWER_MAX_CHARS"] = "2000"
+    values["PROMPT_MAX_EVIDENCE_ITEMS"] = "5"
+    values["PROMPT_MAX_DOCUMENT_SOURCES"] = "5"
+    values["PROMPT_MAX_SUMMARY_CHARS"] = "700"
+    values["PROMPT_MAX_TOTAL_CHARS"] = "6000"
 
     result = check_k8s_runtime_env.check_k8s_runtime_env(values)
 
@@ -123,6 +131,10 @@ def test_check_k8s_runtime_env_rejects_local_llm_runtime_values() -> None:
         "LLM_MAX_TOKENS",
         "LLM_REASONING_EFFORT",
         "LLM_RESPONSE_CACHE_ENABLED",
+        "ANSWER_MAX_CHARS",
+        "PROMPT_MAX_EVIDENCE_ITEMS",
+        "PROMPT_MAX_DOCUMENT_SOURCES",
+        "PROMPT_MAX_SUMMARY_CHARS",
         "PROMPT_MAX_TOTAL_CHARS",
     } <= failed_names
 

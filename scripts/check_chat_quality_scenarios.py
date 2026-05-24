@@ -18,6 +18,8 @@ from scripts import (
 ScenarioChecker = Callable[[argparse.Namespace], Awaitable[dict[str, Any]]]
 
 QUALITY_CRITERIA = (
+    "Role별 실제 업무 질문 매트릭스 확인",
+    "OPERATOR 비금액성 조회 허용과 금액성 정보 차단 동시 확인",
     "Role 기반 금액성 정보 차단",
     "RDB Evidence 또는 Qdrant 문서 출처 확인",
     "화면 이동 URL 포함 여부 확인",
@@ -33,6 +35,10 @@ QUALITY_PROFILES: dict[str, dict[str, list[str]]] = {
     "standard": {
         "rdbGroups": ["core", "access"],
         "ragGroups": ["core", "access", "company"],
+    },
+    "business": {
+        "rdbGroups": ["core", "access", "filtered"],
+        "ragGroups": ["core", "company", "role"],
     },
 }
 

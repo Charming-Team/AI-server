@@ -213,7 +213,7 @@ def test_answer_generation_service_builds_grounded_prompt() -> None:
     assert "월간 생산 리스크" in prompt.user_prompt
 
 
-def test_answer_generation_prompt_includes_rdb_evidence_source_data() -> None:
+def test_answer_generation_prompt_excludes_raw_rdb_evidence_source_data() -> None:
     service = AnswerGenerationService(Settings())
     request = _build_request(role="MANUFACTURING_MANAGER")
     evidence_result = EvidenceResult(
@@ -249,11 +249,15 @@ def test_answer_generation_prompt_includes_rdb_evidence_source_data() -> None:
 
     prompt = service.build_prompt(request, evidence_result, document_result)
 
-    assert "원천 데이터" in prompt.user_prompt
-    assert '"planMaterialId": 7001' in prompt.user_prompt
-    assert '"availableInventoryQuantity": 30.0' in prompt.user_prompt
-    assert '"safetyStockQuantity": 50.0' in prompt.user_prompt
-    assert '"inventoryStatus": "LOW"' in prompt.user_prompt
+    assert "원천 데이터" not in prompt.user_prompt
+    assert '"planMaterialId": 7001' not in prompt.user_prompt
+    assert '"availableInventoryQuantity": 30.0' not in prompt.user_prompt
+    assert '"safetyStockQuantity": 50.0' not in prompt.user_prompt
+    assert '"inventoryStatus": "LOW"' not in prompt.user_prompt
+    assert "RM-AL-001 알루미늄 원자재 재고 부족" in prompt.user_prompt
+    assert "생산계획 1001에서 RM-AL-001 알루미늄 원자재 부족 상태입니다." in (
+        prompt.user_prompt
+    )
 
 
 def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:

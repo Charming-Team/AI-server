@@ -89,6 +89,20 @@ def test_check_chat_quality_scenarios_validate_only_builds_execution_plan() -> N
     assert result["requireLlmCacheMiss"] is True
     assert result["maxLlmTotalTokens"] == 300
     assert "Role 기반 금액성 정보 차단" in result["qualityCriteria"]
+    assert "Role별 실제 업무 질문 매트릭스 확인" in result["qualityCriteria"]
+
+
+def test_check_chat_quality_scenarios_business_profile_builds_role_execution_plan() -> None:
+    result = check_chat_quality_scenarios.build_validate_only_result(
+        _build_args(profile="business", max_llm_total_tokens=2500),
+        Settings(api_v1_prefix="/ai/api/v1"),
+    )
+
+    assert result["checkStatus"] == "VALIDATED"
+    assert result["profile"] == "business"
+    assert result["rdbScenarioGroups"] == ["core", "access", "filtered"]
+    assert result["ragScenarioGroups"] == ["core", "company", "role"]
+    assert result["maxLlmTotalTokens"] == 2500
 
 
 def test_check_chat_quality_scenarios_network_runs_rdb_rag_and_summarizes_quality() -> None:
@@ -187,6 +201,7 @@ def test_check_chat_quality_scenarios_formats_markdown_validate_only() -> None:
     assert "## 품질 기준" in output
     assert "- RDB 시나리오 그룹: `access`" in output
     assert "- RAG 시나리오 그룹: `company`" in output
+    assert "OPERATOR 비금액성 조회 허용" in output
 
 
 def test_check_chat_quality_scenarios_main_does_not_expose_secret(
