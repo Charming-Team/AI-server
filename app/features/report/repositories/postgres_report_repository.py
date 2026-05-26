@@ -21,6 +21,11 @@ class PostgresReportRepository:
             "risk_summary": self._fetch_risk_summary(start_date, end_date),
             "line_summary": self._fetch_line_summary(start_date, end_date),
             "machine_summary": self._fetch_machine_summary(start_date, end_date),
+
+            "top_risk_orders": self._fetch_top_risk_orders(start_date, end_date),
+            "top_material_shortages": self._fetch_top_material_shortages(start_date, end_date),
+            "top_line_statuses": self._fetch_top_line_statuses(start_date, end_date),
+            "top_machine_statuses": self._fetch_top_machine_statuses(start_date, end_date),
         }
 
     def _fetch_order_summary(
@@ -274,3 +279,181 @@ class PostgresReportRepository:
             ).mappings().first()
 
         return dict(row or {})
+    
+
+    # 납기 지연 위험이 높은 상위 5개 주문 조회
+    def _fetch_top_risk_orders(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, Any]]:
+        query = text(
+            """
+            SELECT
+                apr.prediction_id,
+                apr.order_id,
+                co.customer_name,
+                p.product_name,
+                co.order_quantity,
+                co.due_date,
+                apr.delay_probability,
+                apr.predicted_delay_days,
+                apr.risk_level::TEXT AS risk_level,
+                apr.analysis_summary,
+                apr.recommended_action,
+                apr.predicted_at
+            FROM ai_prediction_results apr
+            JOIN customer_orders co
+              ON apr.order_id = co.order_id
+            JOIN products p
+              ON co.product_id = p.product_id
+            WHERE apr.predicted_at::DATE BETWEEN :start_date AND :end_date
+              AND apr.risk_level::TEXT IN ('WARNING', 'CRITICAL')
+            ORDER BY
+                CASE
+                    WHEN apr.risk_level::TEXT = 'CRITICAL' THEN 1
+                    WHEN apr.risk_level::TEXT = 'WARNING' THEN 2
+                    ELSE 3
+                END,
+                apr.delay_probability DESC,
+                apr.predicted_delay_days DESC
+            LIMIT 5
+            """
+        )
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                query,
+                {"start_date": start_date, "end_date": end_date},
+            ).mappings().all()
+
+        return [dict(row) for row in rows]
+    
+    # 자재 부족 위험이 높은 상위 5개 자재 조회
+    def _fetch_top_material_shortages(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, Any]]:
+        query = text(
+            """
+            SELECT
+                ppm.plan_material_id,
+                ppm.plan_id,
+                pp.order_id,
+                m.material_id,
+                m.material_name,
+                ppm.required_quantity,
+                ppm.reserved_quantity,
+                ppm.shortage_quantity,
+                ppm.material_plan_status::TEXT AS material_plan_status,
+                pp.planned_start_at,
+                pp.planned_end_at
+            FROM production_plan_materials ppm
+            JOIN production_plans pp
+              ON ppm.plan_id = pp.plan_id
+            JOIN materials m
+              ON ppm.material_id = m.material_id
+            WHERE pp.planned_start_at::DATE <= :end_date
+              AND pp.planned_end_at::DATE >= :start_date
+              AND ppm.shortage_quantity > 0
+            ORDER BY ppm.shortage_quantity DESC
+            LIMIT 5
+            """
+        )
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                query,
+                {"start_date": start_date, "end_date": end_date},
+            ).mappings().all()
+
+        return [dict(row) for row in rows]
+    
+    # 비정상 상태가 자주 관측된 상위 5개 라인 조회
+    def _fetch_top_line_statuses(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, Any]]:
+        query = text(
+            """
+            SELECT
+                ls.line_status_id,
+                ls.line_id,
+                pl.line_code,
+                pl.line_name,
+                ls.operation_status::TEXT AS operation_status,
+                ls.utilization_rate,
+                ls.progress_rate,
+                ls.waiting_time_hr,
+                ls.processed_quantity,
+                ls.defect_quantity,
+                ls.recorded_at
+            FROM line_status ls
+            JOIN production_lines pl
+              ON ls.line_id = pl.line_id
+            WHERE ls.recorded_at::DATE BETWEEN :start_date AND :end_date
+            ORDER BY
+                CASE
+                    WHEN ls.operation_status::TEXT IN ('DOWN', 'ERROR', 'MAINTENANCE', 'STOPPED') THEN 1
+                    ELSE 2
+                END,
+                ls.waiting_time_hr DESC,
+                ls.utilization_rate DESC
+            LIMIT 5
+            """
+        )
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                query,
+                {"start_date": start_date, "end_date": end_date},
+            ).mappings().all()
+
+        return [dict(row) for row in rows]
+    
+    # 비정상 상태가 자주 관측된 상위 5개 설비 조회
+    def _fetch_top_machine_statuses(
+        self,
+        start_date: date,
+        end_date: date,
+    ) -> list[dict[str, Any]]:
+        query = text(
+            """
+            SELECT
+                ms.machine_status_id,
+                ms.machine_id,
+                pm.machine_code,
+                pm.machine_name,
+                pm.line_id,
+                pl.line_code,
+                ms.operation_status::TEXT AS operation_status,
+                ms.processed_quantity,
+                ms.defect_quantity,
+                ms.status_note,
+                ms.recorded_at
+            FROM machine_statuses ms
+            JOIN production_machines pm
+              ON ms.machine_id = pm.machine_id
+            JOIN production_lines pl
+              ON pm.line_id = pl.line_id
+            WHERE ms.recorded_at::DATE BETWEEN :start_date AND :end_date
+            ORDER BY
+                CASE
+                    WHEN ms.operation_status::TEXT IN ('ERROR', 'DOWN', 'MAINTENANCE', 'STOPPED') THEN 1
+                    ELSE 2
+                END,
+                ms.defect_quantity DESC,
+                ms.processed_quantity DESC
+            LIMIT 5
+            """
+        )
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                query,
+                {"start_date": start_date, "end_date": end_date},
+            ).mappings().all()
+
+        return [dict(row) for row in rows]

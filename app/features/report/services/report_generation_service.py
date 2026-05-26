@@ -125,6 +125,11 @@ class ReportGenerationService:
         line_summary = raw_data.get("line_summary", {})
         machine_summary = raw_data.get("machine_summary", {})
 
+        top_risk_orders = raw_data.get("top_risk_orders", [])
+        top_material_shortages = raw_data.get("top_material_shortages", [])
+        top_line_statuses = raw_data.get("top_line_statuses", [])
+        top_machine_statuses = raw_data.get("top_machine_statuses", [])
+
         total_planned_quantity = self._to_float(
             production_plan_summary.get("total_planned_quantity", 0)
         )
@@ -204,6 +209,21 @@ class ReportGenerationService:
             ),
         }
 
+        normalized_top_risk_orders = [
+            self._normalize_row(row) for row in top_risk_orders
+        ]
+        normalized_top_material_shortages = [
+            self._normalize_row(row) for row in top_material_shortages
+        ]
+        normalized_top_line_statuses = [
+            self._normalize_row(row) for row in top_line_statuses
+        ]
+        normalized_top_machine_statuses = [
+            self._normalize_row(row) for row in top_machine_statuses
+        ]
+
+        executive_summary = self._build_executive_summary(summary)
+
         return {
             "summary": summary,
             "linePerformance": {
@@ -263,6 +283,44 @@ class ReportGenerationService:
                 ),
                 "abnormalMachineStatusCount": summary["abnormalMachineStatusCount"],
             },
+
+            "topRiskOrders": normalized_top_risk_orders,
+            "topMaterialShortages": normalized_top_material_shortages,
+            "topLineStatuses": normalized_top_line_statuses,
+            "topMachineStatuses": normalized_top_machine_statuses,
+
+            "executiveSummary": executive_summary,
+            "issueHistory": {
+                "riskIssues": normalized_top_risk_orders,
+                "machineIssues": normalized_top_machine_statuses,
+                "lineIssues": normalized_top_line_statuses,
+            },
+            "delayResponseAnalysis": {
+                "orderImpact": normalized_top_risk_orders,
+                "productionPlanImpact": normalized_top_line_statuses,
+                "materialImpact": normalized_top_material_shortages,
+            },
+            "economicAnalysis": {
+                "simulationResults": [],
+                "bestScenario": None,
+                "comment": "시뮬레이션 결과 연동 후 솔루션 적용 전후 비용 비교 분석을 제공합니다.",
+            },
+            "conclusion": {
+                "priorityActions": executive_summary["keyFindings"],
+                "finalComment": "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다.",
+            },
+            "appendix": {
+                "sources": [
+                    "customer_orders",
+                    "production_plans",
+                    "production_results",
+                    "ai_prediction_results",
+                    "production_plan_materials",
+                    "material_inventories",
+                    "line_status",
+                    "machine_statuses",
+                ]
+            },
             "recommendation": {
                 "priority": "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다."
             },
@@ -273,6 +331,41 @@ class ReportGenerationService:
             return f"{request.period.start_date.strftime('%Y년 %m월')} 생산 운영 보고서"
 
         return f"{request.period.start_date} ~ {request.period.end_date} 수시 생산 운영 보고서"
+    
+    def _build_executive_summary(self, summary: dict[str, Any]) -> dict[str, Any]:
+        key_findings = []
+
+        if summary["criticalRiskCount"] > 0:
+            key_findings.append(
+                f"CRITICAL 위험 주문 {summary['criticalRiskCount']}건이 확인되어 우선 대응이 필요합니다."
+            )
+
+        if summary["materialRiskCount"] > 0 or summary["safetyStockShortageCount"] > 0:
+            key_findings.append(
+                f"자재 위험 품목 {summary['materialRiskCount']}건, 안전 재고 미만 자재 {summary['safetyStockShortageCount']}건이 확인되었습니다."
+            )
+
+        if summary["abnormalMachineStatusCount"] > 0:
+            key_findings.append(
+                f"비정상 또는 확인 필요 설비 상태 {summary['abnormalMachineStatusCount']}건이 확인되었습니다."
+            )
+
+        if not key_findings:
+            key_findings.append("보고서 기간 내 주요 고위험 이슈는 확인되지 않았습니다.")
+
+        return {
+            "period": summary["period"],
+            "totalOrderCount": summary["totalOrderCount"],
+            "totalPlanCount": summary["totalPlanCount"],
+            "delayRiskOrderCount": summary["delayRiskOrderCount"],
+            "criticalRiskCount": summary["criticalRiskCount"],
+            "warningRiskCount": summary["warningRiskCount"],
+            "materialRiskCount": summary["materialRiskCount"],
+            "avgDelayProbability": summary["avgDelayProbability"],
+            "avgPredictedDelayDays": summary["avgPredictedDelayDays"],
+            "keyFindings": key_findings,
+            "summaryMessage": "보고서 기간 동안 납기 위험, 자재 부족, 설비 상태를 중심으로 주요 운영 리스크가 확인되었습니다.",
+        }
 
     def _build_markdown(
         self,
@@ -280,76 +373,95 @@ class ReportGenerationService:
         period_text: str,
         sections: dict[str, Any],
     ) -> str:
-        summary = sections["summary"]
-        line = sections["linePerformance"]
-        material = sections["materialRisk"]
-        risk = sections["riskAnalysis"]
-        machine = sections["machineStatus"]
+        executive = sections["executiveSummary"]
+        issue_history = sections["issueHistory"]
+        delay_response = sections["delayResponseAnalysis"]
+        economic = sections["economicAnalysis"]
+        conclusion = sections["conclusion"]
+        appendix = sections["appendix"]
+
+        risk_issue_lines = self._build_top_risk_order_lines(
+            issue_history.get("riskIssues", [])
+        )
+        machine_issue_lines = self._build_top_machine_status_lines(
+            issue_history.get("machineIssues", [])
+        )
+        line_issue_lines = self._build_top_line_status_lines(
+            issue_history.get("lineIssues", [])
+        )
+        material_impact_lines = self._build_top_material_shortage_lines(
+            delay_response.get("materialImpact", [])
+        )
+        source_lines = self._build_source_lines(appendix.get("sources", []))
+        key_finding_lines = self._build_key_finding_lines(
+            executive.get("keyFindings", [])
+        )
+        priority_action_lines = self._build_key_finding_lines(
+            conclusion.get("priorityActions", [])
+        )
 
         return f"""# {title}
 
-## 1. 주요 요약
+## 1. Executive Summary
 
 - 보고서 기간: {period_text}
-- 총 주문 수: {summary["totalOrderCount"]}건
-- 총 주문 수량: {summary["totalOrderQuantity"]}
-- 생산계획 건수: {summary["totalPlanCount"]}건
-- 총 생산 계획 수량: {summary["totalPlannedQuantity"]}
-- 총 생산 완료 수량: {summary["totalCompletedQuantity"]}
-- 계획 대비 실적률: {summary["achievementRate"]}%
-- 평균 수율: {summary["avgYieldRate"]}%
-- 불량 수량: {summary["defectQuantity"]}
-- 불량률: {summary["defectRate"]}%
-- 총 지연 시간: {summary["totalDelayHours"]}시간
-- 납기 위험 주문 수: {summary["delayRiskOrderCount"]}건
-- 자재 위험 품목 수: {summary["materialRiskCount"]}건
+- 총 주문 수: {executive["totalOrderCount"]}건
+- 총 생산계획 수: {executive["totalPlanCount"]}건
+- 납기 위험 주문 수: {executive["delayRiskOrderCount"]}건
+- CRITICAL 위험 수: {executive["criticalRiskCount"]}건
+- WARNING 위험 수: {executive["warningRiskCount"]}건
+- 자재 위험 품목 수: {executive["materialRiskCount"]}건
+- 평균 지연 확률: {executive["avgDelayProbability"]}%
+- 평균 예상 지연일: {executive["avgPredictedDelayDays"]}일
 
-## 2. 생산 실적 분석
+### 핵심 요약
 
-보고서 기간 동안 총 {summary["totalPlanCount"]}건의 생산계획이 확인되었으며,
-계획 수량 {summary["totalPlannedQuantity"]} 대비 실제 생산 수량은 {summary["totalCompletedQuantity"]}입니다.
-계획 대비 실적률은 {summary["achievementRate"]}%입니다.
+{key_finding_lines}
 
-## 3. 라인별 성과
+## 2. 선택한 날짜 사이의 이슈 이력
 
-- 관측 라인 수: {line["observedLineCount"]}개
-- 평균 라인 가동률: {line["avgLineUtilizationRate"]}%
-- 평균 진행률: {line["avgLineProgressRate"]}%
-- 평균 대기 시간: {line["avgWaitingTimeHour"]}시간
-- 라인 처리 수량: {line["totalLineProcessedQuantity"]}
-- 라인 불량 수량: {line["totalLineDefectQuantity"]}
-- 비가동 또는 확인 필요 라인 상태 수: {line["nonRunningLineStatusCount"]}건
+### 2-1. 지연 예측 이슈
 
-## 4. 자재 및 재고 리스크
+{risk_issue_lines}
 
-- 전체 자재 수: {material["totalMaterialCount"]}건
-- 위험 자재 수: {material["riskMaterialCount"]}건
-- 안전 재고 미만 자재 수: {material["safetyStockShortageCount"]}건
-- 현재 재고 총량: {material["totalCurrentQuantity"]}
-- 가용 재고 총량: {material["totalAvailableQuantity"]}
-- 예약 재고 총량: {material["totalReservedQuantity"]}
-- 계획 기준 총 부족 수량: {material["totalShortageQuantity"]}
+### 2-2. 머신 이슈
 
-## 5. 리스크 분석
+{machine_issue_lines}
 
-- 전체 예측 결과 수: {risk["totalPredictionCount"]}건
-- 납기 위험 주문 수: {risk["delayRiskOrderCount"]}건
-- CRITICAL 위험 수: {risk["criticalRiskCount"]}건
-- WARNING 위험 수: {risk["warningRiskCount"]}건
-- 평균 지연 확률: {risk["avgDelayProbability"]}%
-- 평균 예상 지연일: {risk["avgPredictedDelayDays"]}일
+### 2-3. 라인 이슈
 
-## 6. 주요 설비 현황
+{line_issue_lines}
 
-- 관측 설비 수: {machine["observedMachineCount"]}개
-- 설비 처리 수량: {machine["totalMachineProcessedQuantity"]}
-- 설비 불량 수량: {machine["totalMachineDefectQuantity"]}
-- 비정상 또는 확인 필요 설비 상태 수: {machine["abnormalMachineStatusCount"]}건
+## 3. 지연 대응 Solution 분석
 
-## 7. 종합 의견 및 제안
+### 3-1. 주문 관점
 
-현재 보고서는 RDB 운영 데이터를 기반으로 생성된 1차 보고서입니다.
-납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다.
+{risk_issue_lines}
+
+### 3-2. 생산계획 관점
+
+{line_issue_lines}
+
+### 3-3. 자재 관점
+
+{material_impact_lines}
+
+## 4. 경제성 분석
+
+{economic["comment"]}
+
+- 시뮬레이션 결과 수: {len(economic.get("simulationResults", []))}
+- 최적 시나리오: {economic.get("bestScenario") or "시뮬레이션 결과 연동 필요"}
+
+## 5. 결론
+
+{priority_action_lines}
+
+{conclusion["finalComment"]}
+
+## 6. Appendix / 출처
+
+{source_lines}
 """
 
     def _to_int(self, value: Any) -> int:
@@ -363,3 +475,104 @@ class ReportGenerationService:
         if isinstance(value, Decimal):
             return float(value)
         return float(value)
+    
+    def _normalize_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        normalized = {}
+
+        for key, value in row.items():
+            if isinstance(value, Decimal):
+                normalized[key] = float(value)
+            elif hasattr(value, "isoformat"):
+                normalized[key] = value.isoformat()
+            else:
+                normalized[key] = value
+
+        return normalized
+    
+    def _build_top_risk_order_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 납기 위험 주문이 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            cause = row.get("cause_detail") or row.get("analysis_summary") or "원인 확인 필요"
+            action = row.get("recommended_action") or "추천 조치 확인 필요"
+            evidence = (
+                f"prediction_id={row.get('prediction_id')}, "
+                f"predicted_at={row.get('predicted_at')}"
+            )
+
+            lines.append(
+                f"- {index}. 위험 대상: 주문 {row.get('order_id')} / "
+                f"고객사: {row.get('customer_name')} / "
+                f"제품: {row.get('product_name')} / "
+                f"위험도: {row.get('risk_level')} / "
+                f"예상 지연 시간: {row.get('predicted_delay_days')}일 / "
+                f"주요 원인: {cause} / "
+                f"추천 조치: {action} / "
+                f"근거 데이터: {evidence}"
+            )
+
+        return "\n".join(lines)
+
+    def _build_top_material_shortage_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 자재 부족 계획이 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            lines.append(
+                f"- {index}. 계획 {row.get('plan_id')} / "
+                f"자재: {row.get('material_name')} / "
+                f"필요 수량: {row.get('required_quantity')} / "
+                f"예약 수량: {row.get('reserved_quantity')} / "
+                f"부족 수량: {row.get('shortage_quantity')} / "
+                f"상태: {row.get('material_plan_status')}"
+            )
+
+        return "\n".join(lines)
+
+    def _build_top_line_status_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 라인 상태가 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            lines.append(
+                f"- {index}. {row.get('line_code')} {row.get('line_name')} / "
+                f"상태: {row.get('operation_status')} / "
+                f"가동률: {row.get('utilization_rate')} / "
+                f"진행률: {row.get('progress_rate')} / "
+                f"대기 시간: {row.get('waiting_time_hr')}시간"
+            )
+
+        return "\n".join(lines)
+
+    def _build_top_machine_status_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 설비 상태가 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            lines.append(
+                f"- {index}. {row.get('machine_code')} {row.get('machine_name')} / "
+                f"라인: {row.get('line_code')} / "
+                f"상태: {row.get('operation_status')} / "
+                f"처리 수량: {row.get('processed_quantity')} / "
+                f"불량 수량: {row.get('defect_quantity')} / "
+                f"비고: {row.get('status_note')}"
+            )
+
+        return "\n".join(lines)
+    
+    def _build_key_finding_lines(self, findings: list[str]) -> str:
+        if not findings:
+            return "- 주요 요약 내용이 없습니다."
+
+        return "\n".join(f"- {finding}" for finding in findings)
+
+    def _build_source_lines(self, sources: list[str]) -> str:
+        if not sources:
+            return "- 참조한 데이터 출처가 없습니다."
+
+        return "\n".join(f"- {source}" for source in sources)
