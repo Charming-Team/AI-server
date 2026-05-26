@@ -5,3 +5,5 @@ pydantic-settings>=2.6.0
 pytest>=8.3.0
 ruff>=0.6.0
 uvicorn[standard]>=0.30.0
+sqlalchemy
+psycopg[binary]
