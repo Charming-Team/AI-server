@@ -1,8 +1,12 @@
 from decimal import Decimal
 from typing import Any
 
+from app.features.report.agents.llm_report_writing_agent import LlmReportWritingAgent
 from app.features.report.agents.rdb_data_collection_agent import RdbDataCollectionAgent
 from app.features.report.builders.report_markdown_builder import ReportMarkdownBuilder
+from app.features.report.repositories.report_persistence_repository import (
+    ReportPersistenceRepository,
+)
 from app.features.report.schemas.request import ReportGenerateRequest
 from app.features.report.schemas.response import (
     EvidenceType,
@@ -12,15 +16,13 @@ from app.features.report.schemas.response import (
     ReportValidationResult,
 )
 from app.features.report.schemas.state import ReportAgentState
-from app.features.report.repositories.report_persistence_repository import (
-    ReportPersistenceRepository,
-)
 
 
 class ReportGenerationService:
     def __init__(self) -> None:
         self.rdb_data_collection_agent = RdbDataCollectionAgent()
         self.markdown_builder = ReportMarkdownBuilder()
+        self.llm_report_writing_agent = LlmReportWritingAgent()
         self.report_persistence_repository = ReportPersistenceRepository()
 
     def generate_report(self, request: ReportGenerateRequest) -> ReportGenerateResponse:
@@ -55,7 +57,7 @@ class ReportGenerationService:
                 validation=validation,
                 errorMessage=str(error),
             )
-        
+
     def _build_response_from_state(
         self,
         state: ReportAgentState,
@@ -71,14 +73,20 @@ class ReportGenerationService:
             raw_data=raw_data,
         )
 
-        markdown = self.markdown_builder.build(
+        base_markdown = self.markdown_builder.build(
             title=title,
             period_text=period_text,
             sections=sections,
         )
 
-        evidence = self._build_evidence()
+        markdown = self.llm_report_writing_agent.run(
+            title=title,
+            period_text=period_text,
+            sections=sections,
+            base_markdown=base_markdown,
+        )
 
+        evidence = self._build_evidence()
         related_simulation_id = self._extract_related_simulation_id(sections)
 
         report_id = self.report_persistence_repository.save_report(
@@ -250,7 +258,10 @@ class ReportGenerationService:
             self._normalize_row(row) for row in top_machine_statuses
         ]
 
-        executive_summary = self._build_executive_summary(summary)
+        executive_summary = self._build_executive_summary(
+            summary=summary,
+            economic_analysis=economic_analysis,
+        )
 
         return {
             "summary": summary,
@@ -335,7 +346,7 @@ class ReportGenerationService:
             "economicAnalysis": economic_analysis,
             "conclusion": {
                 "priorityActions": executive_summary["keyFindings"],
-                "finalComment": "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다.",
+                "finalComment": self._build_final_comment(economic_analysis),
             },
             "appendix": {
                 "sources": [
@@ -352,7 +363,7 @@ class ReportGenerationService:
                 ]
             },
             "recommendation": {
-                "priority": "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다."
+                "priority": self._build_final_comment(economic_analysis)
             },
         }
 
@@ -365,7 +376,12 @@ class ReportGenerationService:
             "수시 생산 운영 보고서"
         )
 
-    def _build_executive_summary(self, summary: dict[str, Any]) -> dict[str, Any]:
+    def _build_executive_summary(
+        self,
+        *,
+        summary: dict[str, Any],
+        economic_analysis: dict[str, Any],
+    ) -> dict[str, Any]:
         key_findings = []
 
         if summary["criticalRiskCount"] > 0:
@@ -384,7 +400,7 @@ class ReportGenerationService:
                 f"비정상 또는 확인 필요 설비 상태 {summary['abnormalMachineStatusCount']}건이 확인되었습니다."
             )
 
-        economic_key_finding = self._build_economic_key_finding(summary)
+        economic_key_finding = self._build_economic_key_finding(economic_analysis)
         if economic_key_finding:
             key_findings.append(economic_key_finding)
 
@@ -405,15 +421,63 @@ class ReportGenerationService:
             "summaryMessage": "보고서 기간 동안 납기 위험, 자재 부족, 설비 상태를 중심으로 주요 운영 리스크가 확인되었습니다.",
         }
 
-    def _build_economic_key_finding(self, summary: dict[str, Any]) -> str | None:
-        total_delay_hours = summary.get("totalDelayHours", 0)
-        if total_delay_hours and total_delay_hours > 0:
+    def _build_economic_key_finding(
+        self,
+        economic_analysis: dict[str, Any],
+    ) -> str | None:
+        best_scenario = economic_analysis.get("bestScenario")
+
+        if not best_scenario:
+            return None
+
+        simulation_name = best_scenario.get("simulationName", "추천 대응안")
+        delay_reduction_hr = best_scenario.get("delayReductionHr")
+        cost_change_amount = best_scenario.get("costChangeAmount")
+
+        if delay_reduction_hr is None:
+            return None
+
+        if cost_change_amount is None:
             return (
-                f"보고서 기간 내 실제 지연 누적 시간이 {round(total_delay_hours, 2)}시간으로 집계되어 "
-                "지연 감소 대응안의 경제성 검토가 필요합니다."
+                f"{simulation_name} 적용 시 총 지연 시간을 "
+                f"{delay_reduction_hr}시간 감소시킬 수 있는 것으로 분석되었습니다."
             )
 
-        return None
+        return (
+            f"{simulation_name} 적용 시 총 지연 시간을 "
+            f"{delay_reduction_hr}시간 감소시킬 수 있으며, "
+            f"비용 변화 금액은 {float(cost_change_amount):,.0f}원으로 분석되었습니다."
+        )
+
+    def _build_final_comment(
+        self,
+        economic_analysis: dict[str, Any],
+    ) -> str:
+        best_scenario = economic_analysis.get("bestScenario")
+
+        if not best_scenario:
+            return "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다."
+
+        simulation_name = best_scenario.get("simulationName", "추천 대응안")
+        delay_reduction_hr = best_scenario.get("delayReductionHr")
+        cost_change_amount = best_scenario.get("costChangeAmount")
+
+        if delay_reduction_hr is None:
+            return (
+                f"{simulation_name}을 우선 검토하고, 납기 위험 주문과 자재 부족 계획을 함께 확인해야 합니다."
+            )
+
+        if cost_change_amount is None:
+            return (
+                f"{simulation_name}을 우선 검토해야 합니다. 해당 대응안은 총 지연 시간을 "
+                f"{delay_reduction_hr}시간 감소시키는 것으로 분석되었습니다."
+            )
+
+        return (
+            f"{simulation_name}을 우선 검토해야 합니다. 해당 대응안은 총 지연 시간을 "
+            f"{delay_reduction_hr}시간 감소시키며, 비용 변화 금액은 "
+            f"{float(cost_change_amount):,.0f}원으로 분석되었습니다."
+        )
 
     def _build_evidence(self) -> list[ReportEvidence]:
         return [
@@ -481,7 +545,7 @@ class ReportGenerationService:
                 normalized[key] = value
 
         return normalized
-    
+
     def _extract_related_simulation_id(
         self,
         sections: dict[str, Any],
