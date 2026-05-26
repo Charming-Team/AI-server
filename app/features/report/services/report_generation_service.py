@@ -50,6 +50,11 @@ class ReportGenerationService:
         request = state.request
         raw_data = state.raw_data
 
+        top_risk_orders = raw_data.get("top_risk_orders", [])
+        top_material_shortages = raw_data.get("top_material_shortages", [])
+        top_line_statuses = raw_data.get("top_line_statuses", [])
+        top_machine_statuses = raw_data.get("top_machine_statuses", [])
+
         period_text = f"{request.period.start_date} ~ {request.period.end_date}"
         title = self._build_title(request)
 
@@ -266,6 +271,19 @@ class ReportGenerationService:
             "recommendation": {
                 "priority": "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다."
             },
+
+            "topRiskOrders": [
+                self._normalize_row(row) for row in top_risk_orders
+            ],
+            "topMaterialShortages": [
+                self._normalize_row(row) for row in top_material_shortages
+            ],
+            "topLineStatuses": [
+                self._normalize_row(row) for row in top_line_statuses
+            ],
+            "topMachineStatuses": [
+                self._normalize_row(row) for row in top_machine_statuses
+            ],
         }
 
     def _build_title(self, request: ReportGenerateRequest) -> str:
@@ -286,8 +304,19 @@ class ReportGenerationService:
         risk = sections["riskAnalysis"]
         machine = sections["machineStatus"]
 
+        top_risk_orders = sections.get("topRiskOrders", [])
+        top_material_shortages = sections.get("topMaterialShortages", [])
+        top_line_statuses = sections.get("topLineStatuses", [])
+        top_machine_statuses = sections.get("topMachineStatuses", [])
+
+        top_risk_order_lines = self._build_top_risk_order_lines(top_risk_orders)
+        top_material_shortage_lines = self._build_top_material_shortage_lines(top_material_shortages)
+        top_line_status_lines = self._build_top_line_status_lines(top_line_statuses)
+        top_machine_status_lines = self._build_top_machine_status_lines(top_machine_statuses)
+
         return f"""# {title}
 
+        
 ## 1. 주요 요약
 
 - 보고서 기간: {period_text}
@@ -346,10 +375,27 @@ class ReportGenerationService:
 - 설비 불량 수량: {machine["totalMachineDefectQuantity"]}
 - 비정상 또는 확인 필요 설비 상태 수: {machine["abnormalMachineStatusCount"]}건
 
-## 7. 종합 의견 및 제안
+## 7. 주요 납기 위험 주문 TOP 5
+
+{top_risk_order_lines}
+
+## 8. 주요 자재 부족 계획 TOP 5
+
+{top_material_shortage_lines}
+
+## 9. 주요 라인 상태 TOP 5
+
+{top_line_status_lines}
+
+## 10. 주요 설비 상태 TOP 5
+
+{top_machine_status_lines}
+
+## 11. 종합 의견 및 제안
 
 현재 보고서는 RDB 운영 데이터를 기반으로 생성된 1차 보고서입니다.
 납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다.
+
 """
 
     def _to_int(self, value: Any) -> int:
@@ -363,3 +409,70 @@ class ReportGenerationService:
         if isinstance(value, Decimal):
             return float(value)
         return float(value)
+    
+    def _build_top_risk_order_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 납기 위험 주문이 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            lines.append(
+                f"- {index}. 주문 {row.get('order_id')} / "
+                f"고객사: {row.get('customer_name')} / "
+                f"제품: {row.get('product_name')} / "
+                f"위험도: {row.get('risk_level')} / "
+                f"지연확률: {row.get('delay_probability')} / "
+                f"예상 지연일: {row.get('predicted_delay_days')}"
+            )
+
+        return "\n".join(lines)
+
+    def _build_top_material_shortage_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 자재 부족 계획이 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            lines.append(
+                f"- {index}. 계획 {row.get('plan_id')} / "
+                f"자재: {row.get('material_name')} / "
+                f"필요 수량: {row.get('required_quantity')} / "
+                f"예약 수량: {row.get('reserved_quantity')} / "
+                f"부족 수량: {row.get('shortage_quantity')} / "
+                f"상태: {row.get('material_plan_status')}"
+            )
+
+        return "\n".join(lines)
+
+    def _build_top_line_status_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 라인 상태가 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            lines.append(
+                f"- {index}. {row.get('line_code')} {row.get('line_name')} / "
+                f"상태: {row.get('operation_status')} / "
+                f"가동률: {row.get('utilization_rate')} / "
+                f"진행률: {row.get('progress_rate')} / "
+                f"대기 시간: {row.get('waiting_time_hr')}시간"
+            )
+
+        return "\n".join(lines)
+
+    def _build_top_machine_status_lines(self, rows: list[dict[str, Any]]) -> str:
+        if not rows:
+            return "- 조회된 주요 설비 상태가 없습니다."
+
+        lines = []
+        for index, row in enumerate(rows, start=1):
+            lines.append(
+                f"- {index}. {row.get('machine_code')} {row.get('machine_name')} / "
+                f"라인: {row.get('line_code')} / "
+                f"상태: {row.get('operation_status')} / "
+                f"처리 수량: {row.get('processed_quantity')} / "
+                f"불량 수량: {row.get('defect_quantity')} / "
+                f"비고: {row.get('status_note')}"
+            )
+
+        return "\n".join(lines)
