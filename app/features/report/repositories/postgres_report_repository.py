@@ -1,12 +1,26 @@
+# 메인 레포지토리로, 보고서에 필요한 데이터를 PostgreSQL에서 조회하는 리포지토리 구현
+# 역할: 보고서 전체 데이터 수집 오케스트레이션
+
 from datetime import date
 from typing import Any
 
 from sqlalchemy import text
 
 from app.core.database import engine
+from app.features.report.repositories.schedule_simulation_repository import (
+    ScheduleSimulationRepository,
+)
 
 
 class PostgresReportRepository:
+    def __init__(
+        self,
+        schedule_simulation_repository: ScheduleSimulationRepository | None = None,
+    ) -> None:
+        self._schedule_simulation_repository = (
+            schedule_simulation_repository or ScheduleSimulationRepository()
+        )
+
     def fetch_report_source_data(
         self,
         start_date: date,
@@ -14,18 +28,36 @@ class PostgresReportRepository:
     ) -> dict[str, Any]:
         return {
             "order_summary": self._fetch_order_summary(start_date, end_date),
-            "production_plan_summary": self._fetch_production_plan_summary(start_date, end_date),
-            "production_result_summary": self._fetch_production_result_summary(start_date, end_date),
+            "production_plan_summary": self._fetch_production_plan_summary(
+                start_date,
+                end_date,
+            ),
+            "production_result_summary": self._fetch_production_result_summary(
+                start_date,
+                end_date,
+            ),
             "material_summary": self._fetch_material_summary(),
-            "plan_material_summary": self._fetch_plan_material_summary(start_date, end_date),
+            "plan_material_summary": self._fetch_plan_material_summary(
+                start_date,
+                end_date,
+            ),
             "risk_summary": self._fetch_risk_summary(start_date, end_date),
             "line_summary": self._fetch_line_summary(start_date, end_date),
             "machine_summary": self._fetch_machine_summary(start_date, end_date),
-
             "top_risk_orders": self._fetch_top_risk_orders(start_date, end_date),
-            "top_material_shortages": self._fetch_top_material_shortages(start_date, end_date),
+            "top_material_shortages": self._fetch_top_material_shortages(
+                start_date,
+                end_date,
+            ),
             "top_line_statuses": self._fetch_top_line_statuses(start_date, end_date),
-            "top_machine_statuses": self._fetch_top_machine_statuses(start_date, end_date),
+            "top_machine_statuses": self._fetch_top_machine_statuses(
+                start_date,
+                end_date,
+            ),
+            "economic_analysis": self._schedule_simulation_repository.fetch_economic_analysis(
+                start_date,
+                end_date,
+            ),
         }
 
     def _fetch_order_summary(
@@ -279,9 +311,7 @@ class PostgresReportRepository:
             ).mappings().first()
 
         return dict(row or {})
-    
 
-    # 납기 지연 위험이 높은 상위 5개 주문 조회
     def _fetch_top_risk_orders(
         self,
         start_date: date,
@@ -328,8 +358,7 @@ class PostgresReportRepository:
             ).mappings().all()
 
         return [dict(row) for row in rows]
-    
-    # 자재 부족 위험이 높은 상위 5개 자재 조회
+
     def _fetch_top_material_shortages(
         self,
         start_date: date,
@@ -369,8 +398,7 @@ class PostgresReportRepository:
             ).mappings().all()
 
         return [dict(row) for row in rows]
-    
-    # 비정상 상태가 자주 관측된 상위 5개 라인 조회
+
     def _fetch_top_line_statuses(
         self,
         start_date: date,
@@ -412,8 +440,7 @@ class PostgresReportRepository:
             ).mappings().all()
 
         return [dict(row) for row in rows]
-    
-    # 비정상 상태가 자주 관측된 상위 5개 설비 조회
+
     def _fetch_top_machine_statuses(
         self,
         start_date: date,

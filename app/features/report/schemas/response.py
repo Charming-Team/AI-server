@@ -1,4 +1,5 @@
 from enum import Enum
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -45,3 +46,49 @@ class ReportGenerateResponse(BaseModel):
 
     class Config:
         populate_by_name = True
+
+class ReportListItemResponse(BaseModel):
+    report_id: int = Field(..., alias="reportId")
+    report_type: str = Field(..., alias="reportType")
+    report_title: str = Field(..., alias="reportTitle")
+    author_id: int | None = Field(None, alias="authorId")
+    target_start_date: date = Field(..., alias="targetStartDate")
+    target_end_date: date = Field(..., alias="targetEndDate")
+    related_simulation_id: int | None = Field(None, alias="relatedSimulationId")
+    created_at: datetime = Field(..., alias="createdAt")
+    updated_at: datetime = Field(..., alias="updatedAt")
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class ReportListResponse(BaseModel):
+    reports: list[ReportListItemResponse]
+    total_count: int = Field(..., alias="totalCount")
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class ReportDetailResponse(BaseModel):
+    report_id: int = Field(..., alias="reportId")
+    report_type: str = Field(..., alias="reportType")
+    report_title: str = Field(..., alias="reportTitle")
+    author_id: int | None = Field(None, alias="authorId")
+    target_start_date: date = Field(..., alias="targetStartDate")
+    target_end_date: date = Field(..., alias="targetEndDate")
+    included_items: dict[str, Any] | None = Field(None, alias="includedItems")
+    report_content: str = Field(..., alias="reportContent")
+    report_evidence: list[dict[str, Any]] | dict[str, Any] | None = Field(
+        None,
+        alias="reportEvidence",
+    )
+    related_simulation_id: int | None = Field(None, alias="relatedSimulationId")
+    created_at: datetime = Field(..., alias="createdAt")
+    updated_at: datetime = Field(..., alias="updatedAt")
+
+    model_config = {
+        "populate_by_name": True,
+    }

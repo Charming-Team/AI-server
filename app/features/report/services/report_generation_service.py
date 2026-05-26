@@ -1,7 +1,12 @@
 from decimal import Decimal
 from typing import Any
 
+from app.features.report.agents.llm_report_writing_agent import LlmReportWritingAgent
 from app.features.report.agents.rdb_data_collection_agent import RdbDataCollectionAgent
+from app.features.report.builders.report_markdown_builder import ReportMarkdownBuilder
+from app.features.report.repositories.report_persistence_repository import (
+    ReportPersistenceRepository,
+)
 from app.features.report.schemas.request import ReportGenerateRequest
 from app.features.report.schemas.response import (
     EvidenceType,
@@ -16,6 +21,9 @@ from app.features.report.schemas.state import ReportAgentState
 class ReportGenerationService:
     def __init__(self) -> None:
         self.rdb_data_collection_agent = RdbDataCollectionAgent()
+        self.markdown_builder = ReportMarkdownBuilder()
+        self.llm_report_writing_agent = LlmReportWritingAgent()
+        self.report_persistence_repository = ReportPersistenceRepository()
 
     def generate_report(self, request: ReportGenerateRequest) -> ReportGenerateResponse:
         state = ReportAgentState(request=request)
@@ -25,6 +33,13 @@ class ReportGenerationService:
             return self._build_response_from_state(state)
 
         except Exception as error:
+            self.report_persistence_repository.mark_job_failed(
+                job_id=request.report_job_id,
+                requested_by=request.requested_by,
+                request_payload=request.model_dump(mode="json", by_alias=True),
+                error_message=str(error),
+            )
+
             validation = ReportValidationResult(
                 requiredSectionIncluded=False,
                 groundednessPassed=False,
@@ -48,50 +63,48 @@ class ReportGenerationService:
         state: ReportAgentState,
     ) -> ReportGenerateResponse:
         request = state.request
-        raw_data = state.raw_data
+        raw_data = state.raw_data or {}
 
         period_text = f"{request.period.start_date} ~ {request.period.end_date}"
         title = self._build_title(request)
 
-        sections = self._build_sections(period_text=period_text, raw_data=raw_data)
-        markdown = self._build_markdown(
+        sections = self._build_sections(
+            period_text=period_text,
+            raw_data=raw_data,
+        )
+
+        base_markdown = self.markdown_builder.build(
             title=title,
             period_text=period_text,
             sections=sections,
         )
 
-        evidence = [
-            ReportEvidence(
-                type=EvidenceType.RDB,
-                source="customer_orders",
-                description="보고서 기간과 겹치는 주문 데이터 집계 기준",
-            ),
-            ReportEvidence(
-                type=EvidenceType.RDB,
-                source="production_plans",
-                description="보고서 기간과 겹치는 생산계획 데이터 집계 기준",
-            ),
-            ReportEvidence(
-                type=EvidenceType.RDB,
-                source="production_results",
-                description="보고서 기간과 겹치는 생산실적 데이터 집계 기준",
-            ),
-            ReportEvidence(
-                type=EvidenceType.RDB,
-                source="material_inventories",
-                description="현재 자재 재고 및 안전 재고 기준",
-            ),
-            ReportEvidence(
-                type=EvidenceType.RDB,
-                source="ai_prediction_results",
-                description="보고서 기간 내 AI 지연 예측 결과 기준",
-            ),
-            ReportEvidence(
-                type=EvidenceType.RDB,
-                source="line_status, machine_statuses",
-                description="보고서 기간 내 라인 및 설비 상태 기록 기준",
-            ),
-        ]
+        markdown = self.llm_report_writing_agent.run(
+            title=title,
+            period_text=period_text,
+            sections=sections,
+            base_markdown=base_markdown,
+        )
+
+        evidence = self._build_evidence()
+        related_simulation_id = self._extract_related_simulation_id(sections)
+
+        report_id = self.report_persistence_repository.save_report(
+            report_type=request.report_type.value,
+            report_title=title,
+            author_id=request.requested_by,
+            target_start_date=request.period.start_date,
+            target_end_date=request.period.end_date,
+            markdown=markdown,
+            sections=sections,
+            evidence=[item.model_dump(mode="json") for item in evidence],
+            related_simulation_id=related_simulation_id,
+        )
+
+        self.report_persistence_repository.mark_job_success(
+            job_id=request.report_job_id,
+            report_id=report_id,
+        )
 
         validation = ReportValidationResult(
             requiredSectionIncluded=True,
@@ -130,6 +143,15 @@ class ReportGenerationService:
         top_line_statuses = raw_data.get("top_line_statuses", [])
         top_machine_statuses = raw_data.get("top_machine_statuses", [])
 
+        economic_analysis = raw_data.get(
+            "economic_analysis",
+            {
+                "simulationResults": [],
+                "bestScenario": None,
+                "comment": "선택 기간 내 조회 가능한 시뮬레이션 결과가 없습니다.",
+            },
+        )
+
         total_planned_quantity = self._to_float(
             production_plan_summary.get("total_planned_quantity", 0)
         )
@@ -157,17 +179,24 @@ class ReportGenerationService:
         summary = {
             "period": period_text,
             "totalOrderCount": self._to_int(order_summary.get("total_order_count", 0)),
-            "totalOrderQuantity": self._to_float(order_summary.get("total_order_quantity", 0)),
+            "totalOrderQuantity": self._to_float(
+                order_summary.get("total_order_quantity", 0)
+            ),
             "dueOrderCount": self._to_int(order_summary.get("due_order_count", 0)),
-            "delayedOrderCount": self._to_int(order_summary.get("delayed_order_count", 0)),
-            "totalPlanCount": self._to_int(production_plan_summary.get("total_plan_count", 0)),
+            "delayedOrderCount": self._to_int(
+                order_summary.get("delayed_order_count", 0)
+            ),
+            "totalPlanCount": self._to_int(
+                production_plan_summary.get("total_plan_count", 0)
+            ),
             "totalPlannedQuantity": total_planned_quantity,
             "totalCompletedQuantity": total_completed_quantity,
             "achievementRate": achievement_rate,
             "defectQuantity": total_defect_quantity,
             "defectRate": defect_rate,
             "avgYieldRate": round(
-                self._to_float(production_result_summary.get("avg_yield_rate", 0)) * 100,
+                self._to_float(production_result_summary.get("avg_yield_rate", 0))
+                * 100,
                 2,
             ),
             "totalDelayHours": self._to_float(
@@ -176,8 +205,12 @@ class ReportGenerationService:
             "delayRiskOrderCount": self._to_int(
                 risk_summary.get("delay_risk_order_count", 0)
             ),
-            "criticalRiskCount": self._to_int(risk_summary.get("critical_risk_count", 0)),
-            "warningRiskCount": self._to_int(risk_summary.get("warning_risk_count", 0)),
+            "criticalRiskCount": self._to_int(
+                risk_summary.get("critical_risk_count", 0)
+            ),
+            "warningRiskCount": self._to_int(
+                risk_summary.get("warning_risk_count", 0)
+            ),
             "avgDelayProbability": round(
                 self._to_float(risk_summary.get("avg_delay_probability", 0)) * 100,
                 2,
@@ -186,7 +219,9 @@ class ReportGenerationService:
                 self._to_float(risk_summary.get("avg_predicted_delay_days", 0)),
                 2,
             ),
-            "materialRiskCount": self._to_int(material_summary.get("risk_material_count", 0)),
+            "materialRiskCount": self._to_int(
+                material_summary.get("risk_material_count", 0)
+            ),
             "safetyStockShortageCount": self._to_int(
                 material_summary.get("safety_stock_shortage_count", 0)
             ),
@@ -197,7 +232,8 @@ class ReportGenerationService:
                 plan_material_summary.get("total_shortage_quantity", 0)
             ),
             "avgLineUtilizationRate": round(
-                self._to_float(line_summary.get("avg_line_utilization_rate", 0)) * 100,
+                self._to_float(line_summary.get("avg_line_utilization_rate", 0))
+                * 100,
                 2,
             ),
             "avgLineProgressRate": round(
@@ -222,12 +258,17 @@ class ReportGenerationService:
             self._normalize_row(row) for row in top_machine_statuses
         ]
 
-        executive_summary = self._build_executive_summary(summary)
+        executive_summary = self._build_executive_summary(
+            summary=summary,
+            economic_analysis=economic_analysis,
+        )
 
         return {
             "summary": summary,
             "linePerformance": {
-                "observedLineCount": self._to_int(line_summary.get("observed_line_count", 0)),
+                "observedLineCount": self._to_int(
+                    line_summary.get("observed_line_count", 0)
+                ),
                 "avgLineUtilizationRate": summary["avgLineUtilizationRate"],
                 "avgLineProgressRate": summary["avgLineProgressRate"],
                 "avgWaitingTimeHour": round(
@@ -245,8 +286,12 @@ class ReportGenerationService:
                 ),
             },
             "materialRisk": {
-                "totalMaterialCount": self._to_int(material_summary.get("total_material_count", 0)),
-                "riskMaterialCount": self._to_int(material_summary.get("risk_material_count", 0)),
+                "totalMaterialCount": self._to_int(
+                    material_summary.get("total_material_count", 0)
+                ),
+                "riskMaterialCount": self._to_int(
+                    material_summary.get("risk_material_count", 0)
+                ),
                 "safetyStockShortageCount": self._to_int(
                     material_summary.get("safety_stock_shortage_count", 0)
                 ),
@@ -283,12 +328,10 @@ class ReportGenerationService:
                 ),
                 "abnormalMachineStatusCount": summary["abnormalMachineStatusCount"],
             },
-
             "topRiskOrders": normalized_top_risk_orders,
             "topMaterialShortages": normalized_top_material_shortages,
             "topLineStatuses": normalized_top_line_statuses,
             "topMachineStatuses": normalized_top_machine_statuses,
-
             "executiveSummary": executive_summary,
             "issueHistory": {
                 "riskIssues": normalized_top_risk_orders,
@@ -300,14 +343,10 @@ class ReportGenerationService:
                 "productionPlanImpact": normalized_top_line_statuses,
                 "materialImpact": normalized_top_material_shortages,
             },
-            "economicAnalysis": {
-                "simulationResults": [],
-                "bestScenario": None,
-                "comment": "시뮬레이션 결과 연동 후 솔루션 적용 전후 비용 비교 분석을 제공합니다.",
-            },
+            "economicAnalysis": economic_analysis,
             "conclusion": {
                 "priorityActions": executive_summary["keyFindings"],
-                "finalComment": "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다.",
+                "finalComment": self._build_final_comment(economic_analysis),
             },
             "appendix": {
                 "sources": [
@@ -319,10 +358,12 @@ class ReportGenerationService:
                     "material_inventories",
                     "line_status",
                     "machine_statuses",
+                    "schedule_simulation_results",
+                    "schedule_simulation_details",
                 ]
             },
             "recommendation": {
-                "priority": "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다."
+                "priority": self._build_final_comment(economic_analysis)
             },
         }
 
@@ -330,9 +371,17 @@ class ReportGenerationService:
         if request.report_type.value == "MONTHLY":
             return f"{request.period.start_date.strftime('%Y년 %m월')} 생산 운영 보고서"
 
-        return f"{request.period.start_date} ~ {request.period.end_date} 수시 생산 운영 보고서"
-    
-    def _build_executive_summary(self, summary: dict[str, Any]) -> dict[str, Any]:
+        return (
+            f"{request.period.start_date} ~ {request.period.end_date} "
+            "수시 생산 운영 보고서"
+        )
+
+    def _build_executive_summary(
+        self,
+        *,
+        summary: dict[str, Any],
+        economic_analysis: dict[str, Any],
+    ) -> dict[str, Any]:
         key_findings = []
 
         if summary["criticalRiskCount"] > 0:
@@ -342,13 +391,18 @@ class ReportGenerationService:
 
         if summary["materialRiskCount"] > 0 or summary["safetyStockShortageCount"] > 0:
             key_findings.append(
-                f"자재 위험 품목 {summary['materialRiskCount']}건, 안전 재고 미만 자재 {summary['safetyStockShortageCount']}건이 확인되었습니다."
+                f"자재 위험 품목 {summary['materialRiskCount']}건, "
+                f"안전 재고 미만 자재 {summary['safetyStockShortageCount']}건이 확인되었습니다."
             )
 
         if summary["abnormalMachineStatusCount"] > 0:
             key_findings.append(
                 f"비정상 또는 확인 필요 설비 상태 {summary['abnormalMachineStatusCount']}건이 확인되었습니다."
             )
+
+        economic_key_finding = self._build_economic_key_finding(economic_analysis)
+        if economic_key_finding:
+            key_findings.append(economic_key_finding)
 
         if not key_findings:
             key_findings.append("보고서 기간 내 주요 고위험 이슈는 확인되지 않았습니다.")
@@ -367,115 +421,118 @@ class ReportGenerationService:
             "summaryMessage": "보고서 기간 동안 납기 위험, 자재 부족, 설비 상태를 중심으로 주요 운영 리스크가 확인되었습니다.",
         }
 
-    def _build_markdown(
+    def _build_economic_key_finding(
         self,
-        title: str,
-        period_text: str,
-        sections: dict[str, Any],
+        economic_analysis: dict[str, Any],
+    ) -> str | None:
+        best_scenario = economic_analysis.get("bestScenario")
+
+        if not best_scenario:
+            return None
+
+        simulation_name = best_scenario.get("simulationName", "추천 대응안")
+        delay_reduction_hr = best_scenario.get("delayReductionHr")
+        cost_change_amount = best_scenario.get("costChangeAmount")
+
+        if delay_reduction_hr is None:
+            return None
+
+        if cost_change_amount is None:
+            return (
+                f"{simulation_name} 적용 시 총 지연 시간을 "
+                f"{delay_reduction_hr}시간 감소시킬 수 있는 것으로 분석되었습니다."
+            )
+
+        return (
+            f"{simulation_name} 적용 시 총 지연 시간을 "
+            f"{delay_reduction_hr}시간 감소시킬 수 있으며, "
+            f"비용 변화 금액은 {float(cost_change_amount):,.0f}원으로 분석되었습니다."
+        )
+
+    def _build_final_comment(
+        self,
+        economic_analysis: dict[str, Any],
     ) -> str:
-        executive = sections["executiveSummary"]
-        issue_history = sections["issueHistory"]
-        delay_response = sections["delayResponseAnalysis"]
-        economic = sections["economicAnalysis"]
-        conclusion = sections["conclusion"]
-        appendix = sections["appendix"]
+        best_scenario = economic_analysis.get("bestScenario")
 
-        risk_issue_lines = self._build_top_risk_order_lines(
-            issue_history.get("riskIssues", [])
+        if not best_scenario:
+            return "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다."
+
+        simulation_name = best_scenario.get("simulationName", "추천 대응안")
+        delay_reduction_hr = best_scenario.get("delayReductionHr")
+        cost_change_amount = best_scenario.get("costChangeAmount")
+
+        if delay_reduction_hr is None:
+            return (
+                f"{simulation_name}을 우선 검토하고, 납기 위험 주문과 자재 부족 계획을 함께 확인해야 합니다."
+            )
+
+        if cost_change_amount is None:
+            return (
+                f"{simulation_name}을 우선 검토해야 합니다. 해당 대응안은 총 지연 시간을 "
+                f"{delay_reduction_hr}시간 감소시키는 것으로 분석되었습니다."
+            )
+
+        return (
+            f"{simulation_name}을 우선 검토해야 합니다. 해당 대응안은 총 지연 시간을 "
+            f"{delay_reduction_hr}시간 감소시키며, 비용 변화 금액은 "
+            f"{float(cost_change_amount):,.0f}원으로 분석되었습니다."
         )
-        machine_issue_lines = self._build_top_machine_status_lines(
-            issue_history.get("machineIssues", [])
-        )
-        line_issue_lines = self._build_top_line_status_lines(
-            issue_history.get("lineIssues", [])
-        )
-        material_impact_lines = self._build_top_material_shortage_lines(
-            delay_response.get("materialImpact", [])
-        )
-        source_lines = self._build_source_lines(appendix.get("sources", []))
-        key_finding_lines = self._build_key_finding_lines(
-            executive.get("keyFindings", [])
-        )
-        priority_action_lines = self._build_key_finding_lines(
-            conclusion.get("priorityActions", [])
-        )
 
-        return f"""# {title}
-
-## 1. Executive Summary
-
-- 보고서 기간: {period_text}
-- 총 주문 수: {executive["totalOrderCount"]}건
-- 총 생산계획 수: {executive["totalPlanCount"]}건
-- 납기 위험 주문 수: {executive["delayRiskOrderCount"]}건
-- CRITICAL 위험 수: {executive["criticalRiskCount"]}건
-- WARNING 위험 수: {executive["warningRiskCount"]}건
-- 자재 위험 품목 수: {executive["materialRiskCount"]}건
-- 평균 지연 확률: {executive["avgDelayProbability"]}%
-- 평균 예상 지연일: {executive["avgPredictedDelayDays"]}일
-
-### 핵심 요약
-
-{key_finding_lines}
-
-## 2. 선택한 날짜 사이의 이슈 이력
-
-### 2-1. 지연 예측 이슈
-
-{risk_issue_lines}
-
-### 2-2. 머신 이슈
-
-{machine_issue_lines}
-
-### 2-3. 라인 이슈
-
-{line_issue_lines}
-
-## 3. 지연 대응 Solution 분석
-
-### 3-1. 주문 관점
-
-{risk_issue_lines}
-
-### 3-2. 생산계획 관점
-
-{line_issue_lines}
-
-### 3-3. 자재 관점
-
-{material_impact_lines}
-
-## 4. 경제성 분석
-
-{economic["comment"]}
-
-- 시뮬레이션 결과 수: {len(economic.get("simulationResults", []))}
-- 최적 시나리오: {economic.get("bestScenario") or "시뮬레이션 결과 연동 필요"}
-
-## 5. 결론
-
-{priority_action_lines}
-
-{conclusion["finalComment"]}
-
-## 6. Appendix / 출처
-
-{source_lines}
-"""
+    def _build_evidence(self) -> list[ReportEvidence]:
+        return [
+            ReportEvidence(
+                type=EvidenceType.RDB,
+                source="customer_orders",
+                description="보고서 기간과 겹치는 주문 데이터 집계 기준",
+            ),
+            ReportEvidence(
+                type=EvidenceType.RDB,
+                source="production_plans",
+                description="보고서 기간과 겹치는 생산계획 데이터 집계 기준",
+            ),
+            ReportEvidence(
+                type=EvidenceType.RDB,
+                source="production_results",
+                description="보고서 기간과 겹치는 생산실적 데이터 집계 기준",
+            ),
+            ReportEvidence(
+                type=EvidenceType.RDB,
+                source="material_inventories",
+                description="현재 자재 재고 및 안전 재고 기준",
+            ),
+            ReportEvidence(
+                type=EvidenceType.RDB,
+                source="ai_prediction_results",
+                description="보고서 기간 내 AI 지연 예측 결과 기준",
+            ),
+            ReportEvidence(
+                type=EvidenceType.RDB,
+                source="line_status, machine_statuses",
+                description="보고서 기간 내 라인 및 설비 상태 기록 기준",
+            ),
+            ReportEvidence(
+                type=EvidenceType.RDB,
+                source="schedule_simulation_results, schedule_simulation_details",
+                description="보고서 기간 내 생산계획 대응안 시뮬레이션 결과 및 상세 변경 내역 기준",
+            ),
+        ]
 
     def _to_int(self, value: Any) -> int:
         if value is None:
             return 0
+
         return int(value)
 
     def _to_float(self, value: Any) -> float:
         if value is None:
             return 0.0
+
         if isinstance(value, Decimal):
             return float(value)
+
         return float(value)
-    
+
     def _normalize_row(self, row: dict[str, Any]) -> dict[str, Any]:
         normalized = {}
 
@@ -488,91 +545,20 @@ class ReportGenerationService:
                 normalized[key] = value
 
         return normalized
-    
-    def _build_top_risk_order_lines(self, rows: list[dict[str, Any]]) -> str:
-        if not rows:
-            return "- 조회된 주요 납기 위험 주문이 없습니다."
 
-        lines = []
-        for index, row in enumerate(rows, start=1):
-            cause = row.get("cause_detail") or row.get("analysis_summary") or "원인 확인 필요"
-            action = row.get("recommended_action") or "추천 조치 확인 필요"
-            evidence = (
-                f"prediction_id={row.get('prediction_id')}, "
-                f"predicted_at={row.get('predicted_at')}"
-            )
+    def _extract_related_simulation_id(
+        self,
+        sections: dict[str, Any],
+    ) -> int | None:
+        economic_analysis = sections.get("economicAnalysis", {})
+        best_scenario = economic_analysis.get("bestScenario")
 
-            lines.append(
-                f"- {index}. 위험 대상: 주문 {row.get('order_id')} / "
-                f"고객사: {row.get('customer_name')} / "
-                f"제품: {row.get('product_name')} / "
-                f"위험도: {row.get('risk_level')} / "
-                f"예상 지연 시간: {row.get('predicted_delay_days')}일 / "
-                f"주요 원인: {cause} / "
-                f"추천 조치: {action} / "
-                f"근거 데이터: {evidence}"
-            )
+        if not best_scenario:
+            return None
 
-        return "\n".join(lines)
+        simulation_id = best_scenario.get("simulationId")
 
-    def _build_top_material_shortage_lines(self, rows: list[dict[str, Any]]) -> str:
-        if not rows:
-            return "- 조회된 주요 자재 부족 계획이 없습니다."
+        if simulation_id is None:
+            return None
 
-        lines = []
-        for index, row in enumerate(rows, start=1):
-            lines.append(
-                f"- {index}. 계획 {row.get('plan_id')} / "
-                f"자재: {row.get('material_name')} / "
-                f"필요 수량: {row.get('required_quantity')} / "
-                f"예약 수량: {row.get('reserved_quantity')} / "
-                f"부족 수량: {row.get('shortage_quantity')} / "
-                f"상태: {row.get('material_plan_status')}"
-            )
-
-        return "\n".join(lines)
-
-    def _build_top_line_status_lines(self, rows: list[dict[str, Any]]) -> str:
-        if not rows:
-            return "- 조회된 주요 라인 상태가 없습니다."
-
-        lines = []
-        for index, row in enumerate(rows, start=1):
-            lines.append(
-                f"- {index}. {row.get('line_code')} {row.get('line_name')} / "
-                f"상태: {row.get('operation_status')} / "
-                f"가동률: {row.get('utilization_rate')} / "
-                f"진행률: {row.get('progress_rate')} / "
-                f"대기 시간: {row.get('waiting_time_hr')}시간"
-            )
-
-        return "\n".join(lines)
-
-    def _build_top_machine_status_lines(self, rows: list[dict[str, Any]]) -> str:
-        if not rows:
-            return "- 조회된 주요 설비 상태가 없습니다."
-
-        lines = []
-        for index, row in enumerate(rows, start=1):
-            lines.append(
-                f"- {index}. {row.get('machine_code')} {row.get('machine_name')} / "
-                f"라인: {row.get('line_code')} / "
-                f"상태: {row.get('operation_status')} / "
-                f"처리 수량: {row.get('processed_quantity')} / "
-                f"불량 수량: {row.get('defect_quantity')} / "
-                f"비고: {row.get('status_note')}"
-            )
-
-        return "\n".join(lines)
-    
-    def _build_key_finding_lines(self, findings: list[str]) -> str:
-        if not findings:
-            return "- 주요 요약 내용이 없습니다."
-
-        return "\n".join(f"- {finding}" for finding in findings)
-
-    def _build_source_lines(self, sources: list[str]) -> str:
-        if not sources:
-            return "- 참조한 데이터 출처가 없습니다."
-
-        return "\n".join(f"- {source}" for source in sources)
+        return int(simulation_id)
