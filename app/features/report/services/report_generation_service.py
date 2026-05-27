@@ -4,9 +4,6 @@ from typing import Any
 from app.features.report.agents.llm_report_writing_agent import LlmReportWritingAgent
 from app.features.report.agents.rdb_data_collection_agent import RdbDataCollectionAgent
 from app.features.report.builders.report_markdown_builder import ReportMarkdownBuilder
-from app.features.report.repositories.report_persistence_repository import (
-    ReportPersistenceRepository,
-)
 from app.features.report.schemas.request import ReportGenerateRequest
 from app.features.report.schemas.response import (
     EvidenceType,
@@ -23,7 +20,6 @@ class ReportGenerationService:
         self.rdb_data_collection_agent = RdbDataCollectionAgent()
         self.markdown_builder = ReportMarkdownBuilder()
         self.llm_report_writing_agent = LlmReportWritingAgent()
-        self.report_persistence_repository = ReportPersistenceRepository()
 
     def generate_report(self, request: ReportGenerateRequest) -> ReportGenerateResponse:
         state = ReportAgentState(request=request)
@@ -33,13 +29,6 @@ class ReportGenerationService:
             return self._build_response_from_state(state)
 
         except Exception as error:
-            self.report_persistence_repository.mark_job_failed(
-                job_id=request.report_job_id,
-                requested_by=request.requested_by,
-                request_payload=request.model_dump(mode="json", by_alias=True),
-                error_message=str(error),
-            )
-
             validation = ReportValidationResult(
                 requiredSectionIncluded=False,
                 groundednessPassed=False,
@@ -87,24 +76,6 @@ class ReportGenerationService:
         )
 
         evidence = self._build_evidence()
-        related_simulation_id = self._extract_related_simulation_id(sections)
-
-        report_id = self.report_persistence_repository.save_report(
-            report_type=request.report_type.value,
-            report_title=title,
-            author_id=request.requested_by,
-            target_start_date=request.period.start_date,
-            target_end_date=request.period.end_date,
-            markdown=markdown,
-            sections=sections,
-            evidence=[item.model_dump(mode="json") for item in evidence],
-            related_simulation_id=related_simulation_id,
-        )
-
-        self.report_persistence_repository.mark_job_success(
-            job_id=request.report_job_id,
-            report_id=report_id,
-        )
 
         validation = ReportValidationResult(
             requiredSectionIncluded=True,
