@@ -127,33 +127,24 @@ class PostgresReportRepository:
         query = text(
             """
             SELECT
-                COUNT(pr.*) AS total_result_count,
-                COALESCE(SUM(pp.planned_quantity), 0) AS result_planned_quantity,
-                COALESCE(SUM(pr.actual_quantity), 0) AS total_actual_quantity,
-                COALESCE(SUM(pr.defect_quantity), 0) AS total_defect_quantity,
-                COALESCE(AVG(pr.yield_rate), 0) AS avg_yield_rate,
-                COALESCE(
-                    SUM(
-                        CASE
-                            WHEN pr.actual_end_at IS NOT NULL
-                             AND pp.planned_end_at IS NOT NULL
-                             AND pr.actual_end_at > pp.planned_end_at
-                            THEN EXTRACT(EPOCH FROM (pr.actual_end_at - pp.planned_end_at)) / 3600
-                            ELSE 0
-                        END
-                    ),
-                    0
-                ) AS total_actual_delay_hr,
+                COUNT(*) AS total_result_count,
+                COALESCE(SUM(planned_quantity), 0) AS result_planned_quantity,
+                COALESCE(SUM(actual_quantity), 0) AS total_actual_quantity,
+                COALESCE(SUM(defect_quantity), 0) AS total_defect_quantity,
+                COALESCE(AVG(yield_rate), 0) AS avg_yield_rate,
+                COALESCE(SUM(actual_delay_hr), 0) AS total_actual_delay_hr,
                 COUNT(*) FILTER (
-                    WHERE pr.actual_end_at IS NOT NULL
-                      AND pp.planned_end_at IS NOT NULL
-                      AND pr.actual_end_at > pp.planned_end_at
-                ) AS delayed_result_count
-            FROM production_results pr
-            JOIN production_plans pp
-              ON pr.plan_id = pp.plan_id
-            WHERE pp.planned_start_at::DATE <= :end_date
-              AND pp.planned_end_at::DATE >= :start_date
+                    WHERE is_delayed = true
+                ) AS delayed_result_count,
+                COUNT(*) FILTER (
+                    WHERE result_status::TEXT = 'PARTIAL'
+                ) AS partial_result_count,
+                COUNT(*) FILTER (
+                    WHERE result_status::TEXT = 'REWORK'
+                ) AS rework_result_count
+            FROM production_results
+            WHERE planned_start_at::DATE <= :end_date
+            AND planned_end_at::DATE >= :start_date
             """
         )
 
@@ -229,19 +220,23 @@ class PostgresReportRepository:
             """
             SELECT
                 COUNT(*) AS total_prediction_count,
-                COUNT(*) FILTER (
-                    WHERE risk_level::TEXT IN ('WARNING', 'CRITICAL')
+                COUNT(DISTINCT apr.order_id) FILTER (
+                    WHERE apr.risk_level::TEXT IN ('WARNING', 'CRITICAL')
                 ) AS delay_risk_order_count,
-                COUNT(*) FILTER (
-                    WHERE risk_level::TEXT = 'CRITICAL'
+                COUNT(DISTINCT apr.order_id) FILTER (
+                    WHERE apr.risk_level::TEXT = 'CRITICAL'
                 ) AS critical_risk_count,
-                COUNT(*) FILTER (
-                    WHERE risk_level::TEXT = 'WARNING'
+                COUNT(DISTINCT apr.order_id) FILTER (
+                    WHERE apr.risk_level::TEXT = 'WARNING'
                 ) AS warning_risk_count,
-                COALESCE(AVG(delay_probability), 0) AS avg_delay_probability,
-                COALESCE(AVG(predicted_delay_days), 0) AS avg_predicted_delay_days
-            FROM ai_prediction_results
-            WHERE predicted_at::DATE BETWEEN :start_date AND :end_date
+                COALESCE(AVG(apr.delay_probability), 0) AS avg_delay_probability,
+                COALESCE(AVG(apr.predicted_delay_days), 0) AS avg_predicted_delay_days
+            FROM ai_prediction_results apr
+            JOIN customer_orders co
+            ON apr.order_id = co.order_id
+            WHERE apr.predicted_at::DATE BETWEEN :start_date AND :end_date
+            AND co.order_date <= :end_date
+            AND co.due_date >= :start_date
             """
         )
 
