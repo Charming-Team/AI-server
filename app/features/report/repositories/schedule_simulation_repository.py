@@ -1,6 +1,7 @@
 # 경제성 분석 전용 시뮬레이션 레포지토리
 # 역할: 경제성 분석에 필요한 시뮬레이션 데이터 조회
-# schedule_simulation_results 조회, schedule_simulation_details 조회, economicAnalysis 생성, bestScenario 계산
+# schedule_simulation_results 조회, schedule_simulation_details 조회
+# economicAnalysis 생성, bestScenario 계산
 
 from collections import defaultdict
 from datetime import date, timedelta
@@ -51,7 +52,10 @@ class ScheduleSimulationRepository:
         return {
             "simulationResults": simulation_results,
             "bestScenario": best_scenario,
-            "comment": "선택 기간 내 시뮬레이션 결과를 기준으로 적용 전후 지연 시간, 비용 변화, 라인 가동률을 비교했습니다.",
+            "comment": (
+                "선택 기간 내 시뮬레이션 결과를 기준으로 적용 전후 지연 시간, "
+                "비용 변화, 라인 가동률을 비교했습니다."
+            ),
         }
 
     def _fetch_simulation_results(
@@ -240,12 +244,12 @@ class ScheduleSimulationRepository:
         cost_change_amount = best.get("costChangeAmount")
         after_total_delay_hr = best.get("afterTotalDelayHr")
 
-        parts = [
-            f"{simulation_name}은 추천 등급이 {grade}입니다."
-        ]
+        parts = [f"{simulation_name}은 추천 등급이 {grade}입니다."]
 
         if delay_reduction_hr is not None:
-            parts.append(f"총 지연 시간을 {delay_reduction_hr}시간 감소시키는 것으로 분석되었습니다.")
+            parts.append(
+                f"총 지연 시간을 {delay_reduction_hr}시간 감소시키는 것으로 분석되었습니다."
+            )
 
         if after_total_delay_hr is not None:
             parts.append(f"적용 후 총 지연 시간은 {after_total_delay_hr}시간입니다.")
