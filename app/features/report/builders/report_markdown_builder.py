@@ -132,7 +132,8 @@ class ReportMarkdownBuilder:
         lines.append("### 4-2. 대응안별 적용 전후 비교")
         lines.append("")
         lines.append(
-            "| 대응안 | 유형 | 적용 전 지연(hr) | 적용 후 지연(hr) | 지연 감소(hr) | 비용 변화 | 추천 등급 |"
+            "| 대응안 | 유형 | 적용 전 지연(hr) | 적용 후 지연(hr) | "
+            "지연 감소(hr) | 비용 변화 | 추천 등급 |"
         )
         lines.append("|---|---|---:|---:|---:|---:|---|")
 
@@ -163,14 +164,18 @@ class ReportMarkdownBuilder:
             lines.append(f"#### {item.get('simulationName')}")
             lines.append("")
             lines.append(
-                "| 주문 ID | 계획 ID | 변경 전 라인 | 변경 후 라인 | 변경 후 지연 여부 | 변경 사유 |"
+                "| 주문 ID | 계획 ID | 변경 전 라인 | 변경 후 라인 | "
+                "변경 후 지연 여부 | 변경 사유 |"
             )
             lines.append("|---:|---:|---:|---:|---|---|")
 
             for detail in details[:5]:
                 detail_count += 1
                 lines.append(
-                    "| {order_id} | {plan_id} | {before_line} | {after_line} | {after_delayed} | {reason} |".format(
+                    (
+                        "| {order_id} | {plan_id} | {before_line} | {after_line} | "
+                        "{after_delayed} | {reason} |"
+                    ).format(
                         order_id=detail.get("orderId", "-"),
                         plan_id=detail.get("planId", "-"),
                         before_line=detail.get("beforeLineId", "-"),

@@ -357,7 +357,8 @@ class ReportGenerationService:
 
         if summary["criticalRiskCount"] > 0:
             key_findings.append(
-                f"CRITICAL 위험 주문 {summary['criticalRiskCount']}건이 확인되어 우선 대응이 필요합니다."
+                f"CRITICAL 위험 주문 {summary['criticalRiskCount']}건이 확인되어 "
+                "우선 대응이 필요합니다."
             )
 
         if summary["materialRiskCount"] > 0 or summary["safetyStockShortageCount"] > 0:
@@ -368,7 +369,8 @@ class ReportGenerationService:
 
         if summary["abnormalMachineStatusCount"] > 0:
             key_findings.append(
-                f"비정상 또는 확인 필요 설비 상태 {summary['abnormalMachineStatusCount']}건이 확인되었습니다."
+                "비정상 또는 확인 필요 설비 상태 "
+                f"{summary['abnormalMachineStatusCount']}건이 확인되었습니다."
             )
 
         economic_key_finding = self._build_economic_key_finding(economic_analysis)
@@ -389,7 +391,10 @@ class ReportGenerationService:
             "avgDelayProbability": summary["avgDelayProbability"],
             "avgPredictedDelayDays": summary["avgPredictedDelayDays"],
             "keyFindings": key_findings,
-            "summaryMessage": "보고서 기간 동안 납기 위험, 자재 부족, 설비 상태를 중심으로 주요 운영 리스크가 확인되었습니다.",
+            "summaryMessage": (
+                "보고서 기간 동안 납기 위험, 자재 부족, 설비 상태를 중심으로 "
+                "주요 운영 리스크가 확인되었습니다."
+            ),
         }
 
     def _build_economic_key_finding(
@@ -427,7 +432,10 @@ class ReportGenerationService:
         best_scenario = economic_analysis.get("bestScenario")
 
         if not best_scenario:
-            return "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 우선 검토해야 합니다."
+            return (
+                "납기 위험 주문, 자재 부족 계획, 비가동 라인 및 설비 상태를 "
+                "우선 검토해야 합니다."
+            )
 
         simulation_name = best_scenario.get("simulationName", "추천 대응안")
         delay_reduction_hr = best_scenario.get("delayReductionHr")
@@ -435,7 +443,8 @@ class ReportGenerationService:
 
         if delay_reduction_hr is None:
             return (
-                f"{simulation_name}을 우선 검토하고, 납기 위험 주문과 자재 부족 계획을 함께 확인해야 합니다."
+                f"{simulation_name}을 우선 검토하고, 납기 위험 주문과 "
+                "자재 부족 계획을 함께 확인해야 합니다."
             )
 
         if cost_change_amount is None:

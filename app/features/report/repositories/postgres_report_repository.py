@@ -419,7 +419,9 @@ class PostgresReportRepository:
             WHERE ls.recorded_at::DATE BETWEEN :start_date AND :end_date
             ORDER BY
                 CASE
-                    WHEN ls.operation_status::TEXT IN ('DOWN', 'ERROR', 'MAINTENANCE', 'STOPPED') THEN 1
+                    WHEN ls.operation_status::TEXT IN (
+                        'DOWN', 'ERROR', 'MAINTENANCE', 'STOPPED'
+                    ) THEN 1
                     ELSE 2
                 END,
                 ls.waiting_time_hr DESC,
@@ -463,7 +465,9 @@ class PostgresReportRepository:
             WHERE ms.recorded_at::DATE BETWEEN :start_date AND :end_date
             ORDER BY
                 CASE
-                    WHEN ms.operation_status::TEXT IN ('ERROR', 'DOWN', 'MAINTENANCE', 'STOPPED') THEN 1
+                    WHEN ms.operation_status::TEXT IN (
+                        'ERROR', 'DOWN', 'MAINTENANCE', 'STOPPED'
+                    ) THEN 1
                     ELSE 2
                 END,
                 ms.defect_quantity DESC,

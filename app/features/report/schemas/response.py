@@ -1,18 +1,18 @@
-from enum import Enum
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ReportStatus(str, Enum):
+class ReportStatus(StrEnum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     TIMEOUT = "TIMEOUT"
 
 
-class EvidenceType(str, Enum):
+class EvidenceType(StrEnum):
     RDB = "RDB"
     QDRANT = "QDRANT"
     AGENT = "AGENT"
@@ -46,6 +46,7 @@ class ReportGenerateResponse(BaseModel):
 
     class Config:
         populate_by_name = True
+
 
 class ReportListItemResponse(BaseModel):
     report_id: int = Field(..., alias="reportId")

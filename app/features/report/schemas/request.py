@@ -1,17 +1,17 @@
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class UserRole(str, Enum):
+class UserRole(StrEnum):
     PRODUCTION_MANAGER = "PRODUCTION_MANAGER"
     EXECUTIVE = "EXECUTIVE"
     WORKER = "WORKER"
     ADMIN = "ADMIN"
 
 
-class ReportType(str, Enum):
+class ReportType(StrEnum):
     MONTHLY = "MONTHLY"
     AD_HOC = "AD_HOC"
 
