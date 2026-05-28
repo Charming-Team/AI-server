@@ -60,6 +60,7 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "사용자 역할에서 제한되는 내용은 근거에 있어도 답변하지 않는다" in (
         prompt.user_prompt
     )
+    assert "권한 제한 안내는 질문이 제한된 정보를 요구할 때만" in prompt.user_prompt
     assert "전체 답변은 700~900자 안쪽" in prompt.user_prompt
     assert "원천 JSON, 전체 데이터 덤프" in prompt.user_prompt
     assert "섹션명은 각각 한 번만 출력" in prompt.user_prompt
@@ -88,7 +89,10 @@ def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
         prompt.user_prompt
     )
     assert "Qdrant 문서 검색 근거 중 금액, 계약" in prompt.user_prompt
-    assert "금액성을 제외한 생산계획" in prompt.user_prompt
+    assert "질문이 금액성 정보를 요구하지 않으면 권한 제한 안내" in (
+        prompt.user_prompt
+    )
+    assert "금액성을 제외한 회사 개요" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None:
