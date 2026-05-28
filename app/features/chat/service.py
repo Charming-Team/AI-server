@@ -16,6 +16,7 @@ from app.features.chat.schemas import (
     ChatAnswerResponse,
     ChatErrorCode,
     ChatIntent,
+    ChatSource,
     DocumentSearchResult,
     EvidenceResult,
     ModelResult,
@@ -122,6 +123,7 @@ class ChatService:
                     evidence_result,
                     document_result,
                     answer_result,
+                    sources,
                 ),
             ),
         )
@@ -174,9 +176,14 @@ class ChatService:
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
         answer_result: AnswerGenerationResult,
+        sources: list[ChatSource],
     ) -> ModelResult:
-        rdb_evidence_count = len(evidence_result.items)
-        document_source_count = len(document_result.sources)
+        rdb_evidence_count = sum(
+            1 for source in sources if source.source_origin == "RDB"
+        )
+        document_source_count = sum(
+            1 for source in sources if source.source_origin != "RDB"
+        )
         return ModelResult(
             used_vector_search=document_result.was_searched,
             used_rdb_evidence=evidence_result.has_evidence,

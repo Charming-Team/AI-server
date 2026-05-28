@@ -78,8 +78,9 @@ class DocumentIndexBuilder:
                 continue
 
             self._append_current_chunk(chunks, current_parts)
-            current_parts = [paragraph]
-            current_length = len(paragraph)
+            previous_chunk = chunks[-1] if chunks else None
+            current_parts = self._build_next_chunk_parts(previous_chunk, paragraph)
+            current_length = self._calculate_parts_length(current_parts)
 
         self._append_current_chunk(chunks, current_parts)
         return chunks
@@ -101,6 +102,37 @@ class DocumentIndexBuilder:
         if not current_parts:
             return
         chunks.append("\n\n".join(current_parts).strip())
+
+    def _build_next_chunk_parts(
+        self,
+        previous_chunk: str | None,
+        paragraph: str,
+    ) -> list[str]:
+        overlap_text = self._build_overlap_text(previous_chunk, len(paragraph))
+        if not overlap_text:
+            return [paragraph]
+        return [overlap_text, paragraph]
+
+    def _build_overlap_text(
+        self,
+        previous_chunk: str | None,
+        next_text_length: int,
+    ) -> str:
+        if not previous_chunk or self.chunk_overlap <= 0:
+            return ""
+
+        separator_length = 2
+        available_overlap = self.chunk_size - next_text_length - separator_length
+        if available_overlap <= 0:
+            return ""
+
+        overlap_length = min(self.chunk_overlap, available_overlap, len(previous_chunk))
+        return previous_chunk[-overlap_length:].strip()
+
+    def _calculate_parts_length(self, parts: list[str]) -> int:
+        if not parts:
+            return 0
+        return sum(len(part) for part in parts) + (2 * (len(parts) - 1))
 
     def _normalize_text(self, text: str) -> str:
         lines = [line.strip() for line in text.splitlines()]

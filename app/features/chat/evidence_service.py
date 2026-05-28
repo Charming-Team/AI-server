@@ -4,6 +4,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.features.chat.evidence_aggregation_policy import EvidenceAggregationPolicy
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.query_filter_extractor import QueryFilterExtractor
 from app.features.chat.rdb_evidence_service import RdbEvidenceService
@@ -52,6 +53,7 @@ class EvidenceService:
         http_client: httpx.AsyncClient | None = None,
         query_filter_extractor: QueryFilterExtractor | None = None,
         rdb_evidence_service: RdbEvidenceService | None = None,
+        evidence_aggregation_policy: EvidenceAggregationPolicy | None = None,
     ) -> None:
         self.settings = settings
         self.http_client = http_client
@@ -60,6 +62,9 @@ class EvidenceService:
             settings,
             query_filter_extractor=self.query_filter_extractor,
         )
+        self.evidence_aggregation_policy = (
+            evidence_aggregation_policy or EvidenceAggregationPolicy()
+        )
 
     async def get_evidence(
         self,
@@ -67,7 +72,8 @@ class EvidenceService:
         intent: ChatIntent,
     ) -> EvidenceResult:
         if self.settings.rdb_evidence_enabled:
-            return await self.rdb_evidence_service.get_evidence(request, intent)
+            result = await self.rdb_evidence_service.get_evidence(request, intent)
+            return self.evidence_aggregation_policy.apply(request, result)
 
         if not self.settings.evidence_lookup_enabled:
             return self._empty_result(request, intent)
@@ -81,7 +87,8 @@ class EvidenceService:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response, expected_intent=intent)
+                result = self._parse_response(response, expected_intent=intent)
+                return self.evidence_aggregation_policy.apply(request, result)
 
             async with httpx.AsyncClient(
                 timeout=self.settings.evidence_lookup_timeout_seconds
@@ -91,7 +98,8 @@ class EvidenceService:
                     json=payload,
                     headers=self._headers,
                 )
-                return self._parse_response(response, expected_intent=intent)
+                result = self._parse_response(response, expected_intent=intent)
+                return self.evidence_aggregation_policy.apply(request, result)
         except httpx.HTTPError as exc:
             raise ChatExternalServiceError(
                 status_code=503,

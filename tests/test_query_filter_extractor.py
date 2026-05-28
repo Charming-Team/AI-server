@@ -42,6 +42,14 @@ def test_query_filter_extractor_returns_none_without_business_code() -> None:
     }
 
 
+def test_query_filter_extractor_expands_limit_for_count_questions() -> None:
+    extractor = QueryFilterExtractor()
+
+    filters = extractor.extract_filters("우리 공정 라인은 몇개 있어?")
+
+    assert filters["limit"] == 50
+
+
 @pytest.mark.parametrize(
     ("question", "expected_from_date", "expected_to_date"),
     [
