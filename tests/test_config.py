@@ -148,6 +148,41 @@ def test_settings_default_internal_tokens_are_optional() -> None:
     assert settings.document_index_internal_token is None
 
 
+def test_settings_report_postgres_url_uses_psycopg_driver_for_plain_report_dsn() -> None:
+    settings = Settings(
+        report_rdb_dsn="postgresql://report:secret@postgres.local:5432/smap",
+        rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
+    )
+
+    assert (
+        settings.report_postgres_url
+        == "postgresql+psycopg://report:secret@postgres.local:5432/smap"
+    )
+
+
+def test_settings_report_postgres_url_uses_psycopg_driver_for_fallback_dsn() -> None:
+    settings = Settings(
+        report_rdb_dsn=" ",
+        rdb_evidence_dsn="postgres://reader:secret@postgres.local:5432/smap",
+    )
+
+    assert (
+        settings.report_postgres_url
+        == "postgresql+psycopg://reader:secret@postgres.local:5432/smap"
+    )
+
+
+def test_settings_report_postgres_url_keeps_explicit_driver_dsn() -> None:
+    settings = Settings(
+        report_rdb_dsn=" postgresql+psycopg://report:secret@postgres.local:5432/smap ",
+    )
+
+    assert (
+        settings.report_postgres_url
+        == "postgresql+psycopg://report:secret@postgres.local:5432/smap"
+    )
+
+
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [
