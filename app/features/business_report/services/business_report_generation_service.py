@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -58,6 +59,9 @@ class BusinessReportGenerationService:
             ) from error
 
         transformed_payload = self._parse_llm_json(transformed_text)
+        current_timestamp = datetime.now(timezone.utc)
+        transformed_payload["created_at"] = current_timestamp.isoformat().replace("+00:00", "Z")
+        transformed_payload["updated_at"] = current_timestamp.isoformat().replace("+00:00", "Z")
         return BusinessReportGenerateResponse.model_validate(transformed_payload)
 
     def _validate_source(self, source: BusinessReportSource) -> None:
