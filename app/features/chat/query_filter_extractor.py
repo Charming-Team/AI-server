@@ -16,6 +16,8 @@ class TargetPattern:
 
 
 class QueryFilterExtractor:
+    _default_limit = 5
+    _count_query_limit = 50
     _explicit_date_pattern = re.compile(
         r"(?<!\d)(20\d{2})[-./](0?[1-9]|1[0-2])[-./](0?[1-9]|[12]\d|3[01])(?!\d)"
     )
@@ -53,12 +55,32 @@ class QueryFilterExtractor:
         target = self.extract_target(question)
         date_range = self.extract_date_range(question, reference_datetime)
         return {
-            "limit": 5,
+            "limit": self._extract_limit(question),
             "fromDate": date_range[0],
             "toDate": date_range[1],
             "targetType": target.target_type if target else None,
             "targetCode": target.target_code if target else None,
         }
+
+    def _extract_limit(self, question: str) -> int:
+        if self._is_count_question(question):
+            return self._count_query_limit
+        return self._default_limit
+
+    def _is_count_question(self, question: str) -> bool:
+        compact_question = self._compact(question.casefold())
+        return any(
+            term in compact_question
+            for term in (
+                "몇개",
+                "몇개의",
+                "몇대",
+                "개수",
+                "총몇",
+                "총수",
+                "전체몇",
+            )
+        )
 
     def extract_target_code(self, question: str) -> str | None:
         target = self.extract_target(question)
@@ -152,3 +174,6 @@ class QueryFilterExtractor:
             next_month_start = date(year, month + 1, 1)
         end_date = next_month_start - timedelta(days=1)
         return start_date.isoformat(), end_date.isoformat()
+
+    def _compact(self, text: str) -> str:
+        return "".join(text.split())
