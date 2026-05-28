@@ -51,6 +51,40 @@ def test_query_filter_extractor_expands_limit_for_count_questions() -> None:
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "현재 가동 중인 라인은 뭐야?",
+        "생산 라인 구성 알려줘",
+        "전체 라인 상태 알려줘",
+    ],
+)
+def test_query_filter_extractor_expands_limit_for_line_overview_questions(
+    question: str,
+) -> None:
+    extractor = QueryFilterExtractor()
+
+    filters = extractor.extract_filters(question)
+
+    assert filters["limit"] == 50
+
+
+def test_query_filter_extractor_keeps_default_limit_for_line_bottleneck_question() -> None:
+    extractor = QueryFilterExtractor()
+
+    filters = extractor.extract_filters("라인 병목 현황 알려줘")
+
+    assert filters["limit"] == 5
+
+
+def test_query_filter_extractor_keeps_default_limit_for_all_line_bottleneck_question() -> None:
+    extractor = QueryFilterExtractor()
+
+    filters = extractor.extract_filters("전체 라인 병목 현황 알려줘")
+
+    assert filters["limit"] == 5
+
+
+@pytest.mark.parametrize(
     ("question", "expected_from_date", "expected_to_date"),
     [
         ("오늘 납기 위험 알려줘", "2026-05-12", "2026-05-12"),
