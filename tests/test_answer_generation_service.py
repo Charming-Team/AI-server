@@ -491,6 +491,78 @@ def test_answer_generation_keeps_structured_llm_answer() -> None:
     assert result.answer == structured_answer
 
 
+def test_answer_generation_normalizes_duplicated_llm_sections() -> None:
+    duplicated_answer = (
+        "핵심 답변:\n"
+        "핵심 답변:\n"
+        "LINE-ABS-01은 대기 수량과 대기 시간이 높아 병목 가능성이 있습니다.\n\n"
+        "근거:\n"
+        "- RDB 출처 제목: LINE-ABS-01 RUNNING — 대기 수량 3200건, 대기 시간 2.5시간\n"
+        "- QDRANT 출처 제목: S-Map 생산 라인 구성 — 라인 역할 보조 설명\n\n"
+        "근거:\n"
+        "- [RDB] LINE-ABS-01 RUNNING\n"
+        "- [QDRANT] S-Map 생산 라인 구성\n"
+        "- [QDRANT] S-Map 도메인 용어 사전\n\n"
+        "확인 필요:\n"
+        "- 설비 구간별 상세 병목은 추가 확인이 필요합니다.\n"
+        "- 자재 대기 여부는 추가 확인이 필요합니다."
+    )
+    llm_client = FakeLlmClient(duplicated_answer)
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request(role="MANUFACTURING_MANAGER")
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.LINE_BOTTLENECK,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="LINE",
+                title="LINE-ABS-01 RUNNING",
+                summary="대기 수량 3200건, 대기 시간 2.5시간입니다.",
+                source="chat_line_bottleneck_evidence_view",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title="S-Map 생산 라인 구성",
+                summary="라인별 역할 설명입니다.",
+                sourceOrigin="QDRANT",
+            ),
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title="S-Map 도메인 용어 사전",
+                summary="병목 관련 용어 설명입니다.",
+                sourceOrigin="QDRANT",
+            ),
+        ]
+    )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is True
+    assert result.answer.count("핵심 답변:") == 1
+    assert result.answer.count("근거:") == 1
+    assert result.answer.count("확인 필요:") == 1
+    evidence_section = result.answer.split("근거:\n", 1)[1].split(
+        "\n\n확인 필요:",
+        1,
+    )[0]
+    follow_up_section = result.answer.split("확인 필요:\n", 1)[1]
+    assert len(evidence_section.splitlines()) == 2
+    assert len(follow_up_section.splitlines()) == 1
+    assert "S-Map 도메인 용어 사전" not in evidence_section
+
+
 def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> None:
     llm_client = FakeFailingLlmClient()
     service = AnswerGenerationService(
@@ -739,7 +811,7 @@ def test_answer_generation_blocks_sensitive_grounded_fallback_output() -> None:
     assert result.security_result.code == "CHAT_SECURITY_002"
 
 
-def test_answer_generation_blocks_operator_financial_llm_output() -> None:
+def test_answer_generation_blocks_operator_financial_llm_output_from_qdrant() -> None:
     llm_client = FakeLlmClient("계약 금액과 예상 패널티 영향은 다음과 같습니다.")
     service = AnswerGenerationService(
         Settings(llm_enabled=True),
@@ -760,6 +832,42 @@ def test_answer_generation_blocks_operator_financial_llm_output() -> None:
             )
         ]
     )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is False
+    assert result.answer == BLOCKED_GENERATED_ANSWER
+    assert result.skipped_reason == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
+    assert result.security_result is not None
+    assert result.security_result.status == "BLOCKED_UNAUTHORIZED"
+    assert result.security_result.code == "CHAT_SECURITY_004"
+
+
+def test_answer_generation_blocks_operator_financial_llm_output_without_qdrant() -> None:
+    llm_client = FakeLlmClient("계약 금액과 예상 패널티 영향은 다음과 같습니다.")
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request(role="OPERATOR")
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.DELIVERY_RISK,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="ORDER",
+                title="ORD-202605-001 납기 위험",
+                summary="납기 지연 위험 등급은 WARNING입니다.",
+                source="ai_prediction_results",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(sources=[])
 
     result = anyio.run(
         service.generate_answer,

@@ -47,6 +47,9 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "근거 원천(RDB 또는 QDRANT)" in prompt.system_prompt
     assert "700~900자 안쪽" in prompt.system_prompt
     assert "원천 JSON, 전체 데이터 덤프" in prompt.system_prompt
+    assert "각 섹션명은 한 번만 출력" in prompt.system_prompt
+    assert "같은 제목과 같은 출처의 근거를 여러 bullet" in prompt.system_prompt
+    assert "수치에는 가능한 경우 시간, 일, %, 수량" in prompt.system_prompt
     assert "현재 상태, 수치, 진행률은 RDB 근거를 우선" in prompt.system_prompt
     assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
     assert "역할별 응답 제한:" in prompt.user_prompt
@@ -59,6 +62,9 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     )
     assert "전체 답변은 700~900자 안쪽" in prompt.user_prompt
     assert "원천 JSON, 전체 데이터 덤프" in prompt.user_prompt
+    assert "섹션명은 각각 한 번만 출력" in prompt.user_prompt
+    assert "RDB 근거가 1개뿐이면 해당 RDB 근거는 1개 bullet" in prompt.user_prompt
+    assert "비율 값은 % 단위" in prompt.user_prompt
     assert "근거 섹션에는 최소 1개 이상의 출처 제목" in prompt.user_prompt
     assert "답변 형식은 핵심 답변, 근거, 확인 필요 순서" in prompt.user_prompt
     assert "[RDB 또는 QDRANT] 출처 제목" in prompt.user_prompt
@@ -78,10 +84,11 @@ def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
     prompt = builder.build(request, evidence_result, document_result)
 
     assert "사용자 역할:\nOPERATOR" in prompt.user_prompt
-    assert "OPERATOR에게는 금액, 계약, 패널티, 비용, 매출, 수익" in (
+    assert "OPERATOR에게는 RDB 근거에서 제공된 권한 허용 정보만 답변한다" in (
         prompt.user_prompt
     )
-    assert "비금액성 보고서 근거만 요약" in prompt.user_prompt
+    assert "Qdrant 문서 검색 근거 중 금액, 계약" in prompt.user_prompt
+    assert "금액성을 제외한 생산계획" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None:

@@ -92,6 +92,47 @@ def test_response_builder_builds_unique_urls_from_sources() -> None:
     assert urls[0].type == "REPORT"
 
 
+def test_response_builder_limits_display_sources_and_urls() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = _build_evidence_result(
+        [
+            EvidenceItem(
+                type="LINE",
+                title=f"RDB 근거 {index}",
+                summary="요약",
+                url=f"/lines/{index}",
+                source="chat_line_bottleneck_evidence_view",
+                referenceId=index,
+            )
+            for index in range(1, 6)
+        ]
+    )
+    document_result = DocumentSearchResult(
+        sources=[
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title=f"문서 근거 {index}",
+                summary="요약",
+                url=f"/company-info/{index}",
+                sourceOrigin="QDRANT",
+            )
+            for index in range(1, 5)
+        ]
+    )
+
+    sources = builder.build_sources(evidence_result, document_result)
+    urls = builder.build_urls(sources)
+
+    assert [source.title for source in sources] == [
+        "RDB 근거 1",
+        "RDB 근거 2",
+        "RDB 근거 3",
+        "문서 근거 1",
+        "문서 근거 2",
+    ]
+    assert [url.url for url in urls] == ["/lines/1", "/lines/2", "/lines/3"]
+
+
 def test_response_builder_deduplicates_sources_by_safe_url() -> None:
     builder = ChatResponseBuilder()
     evidence_result = _build_evidence_result(
@@ -206,7 +247,7 @@ def test_response_builder_keeps_only_safe_internal_urls() -> None:
     sources = builder.build_sources(evidence_result, document_result)
     urls = builder.build_urls(sources)
 
-    assert [source.url for source in sources] == [None, None, "/materials/11", None]
+    assert [source.url for source in sources] == [None, None, "/materials/11"]
     assert [url.url for url in urls] == ["/materials/11"]
     assert urls[0].label == "안전한 내부 URL 문서"
 

@@ -405,7 +405,8 @@ class FakeOperatorRestrictedContentQdrantClient:
                     "documentType": "COMPANY_INFO",
                     "title": "납기 위험 계약 금액 기준",
                     "chunkText": "납기 지연 시 패널티 금액을 검토합니다.",
-                    "allowedRoles": ["OPERATOR"],
+                    "url": "/company-info/financial-guide",
+                    "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["DELIVERY_RISK"],
                 },
             },
@@ -442,7 +443,8 @@ class FakeOnlyOperatorRestrictedContentQdrantClient:
                     "documentType": "COMPANY_INFO",
                     "title": "납기 위험 계약 금액 기준",
                     "chunkText": "납기 지연 시 패널티 금액을 검토합니다.",
-                    "allowedRoles": ["OPERATOR"],
+                    "url": "/company-info/financial-guide",
+                    "allowedRoles": ["EXECUTIVE"],
                     "intentTags": ["DELIVERY_RISK"],
                 },
             }
@@ -504,6 +506,7 @@ class FakeOnlyOperatorFinancialReportQdrantClient:
                     "documentType": "REPORT",
                     "title": "납기 지연 패널티 보고서",
                     "chunkText": "계약 금액과 패널티 금액을 함께 검토합니다.",
+                    "url": "/reports/finance?mode=read",
                     "allowedRoles": ["OPERATOR"],
                     "intentTags": ["REPORT_LOOKUP"],
                 },
@@ -667,7 +670,12 @@ def test_document_search_service_builds_qdrant_search_payload() -> None:
     assert payload["with_payload"] is True
     assert payload["filter"] == {
         "must": [
-            {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
+            {
+                "key": "allowedRoles",
+                "match": {
+                    "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                },
+            },
             {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
         ]
     }
@@ -685,7 +693,12 @@ def test_document_search_service_does_not_require_company_name_for_qdrant_search
 
     assert payload["filter"] == {
         "must": [
-            {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
+            {
+                "key": "allowedRoles",
+                "match": {
+                    "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                },
+            },
             {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
         ]
     }
@@ -930,14 +943,14 @@ def test_document_search_service_marks_document_type_reason_when_all_filtered() 
     )
 
 
-def test_document_search_service_marks_role_reason_when_all_points_are_not_allowed() -> None:
+def test_document_search_service_marks_role_reason_for_non_business_role() -> None:
     qdrant_client = FakeUnauthorizedRoleQdrantClient()
     service = DocumentSearchService(
         Settings(qdrant_search_enabled=True),
         embedding_service=FakeEmbeddingService(),
         qdrant_client=qdrant_client,
     )
-    request = _build_request()
+    request = _build_request(role="UNKNOWN")
 
     result = anyio.run(service.search, request, ChatIntent.REPORT_LOOKUP)
 
@@ -946,7 +959,7 @@ def test_document_search_service_marks_role_reason_when_all_points_are_not_allow
     assert result.skipped_reason == "Qdrant 검색 결과가 사용자 권한 범위를 통과하지 못했습니다."
 
 
-def test_document_search_service_filters_operator_restricted_content() -> None:
+def test_document_search_service_filters_operator_financial_qdrant_content() -> None:
     qdrant_client = FakeOperatorRestrictedContentQdrantClient()
     service = DocumentSearchService(
         Settings(qdrant_search_enabled=True),
@@ -958,11 +971,23 @@ def test_document_search_service_filters_operator_restricted_content() -> None:
     result = anyio.run(service.search, request, ChatIntent.DELIVERY_RISK)
 
     assert qdrant_client.search_payload is not None
-    assert len(result.sources) == 1
-    assert result.sources[0].title == "LINE-A01 현장 확인 기준"
+    assert qdrant_client.search_payload["filter"] == {
+        "must": [
+            {
+                "key": "allowedRoles",
+                "match": {
+                    "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                },
+            },
+            {"key": "intentTags", "match": {"any": ["DELIVERY_RISK"]}},
+        ]
+    }
+    assert [source.title for source in result.sources] == [
+        "LINE-A01 현장 확인 기준",
+    ]
 
 
-def test_document_search_service_allows_operator_non_financial_report() -> None:
+def test_document_search_service_filters_operator_financial_report() -> None:
     qdrant_client = FakeOperatorReportQdrantClient()
     service = DocumentSearchService(
         Settings(qdrant_search_enabled=True),
@@ -976,13 +1001,19 @@ def test_document_search_service_allows_operator_non_financial_report() -> None:
     assert qdrant_client.search_payload is not None
     assert qdrant_client.search_payload["filter"] == {
         "must": [
-            {"key": "allowedRoles", "match": {"any": ["OPERATOR"]}},
+            {
+                "key": "allowedRoles",
+                "match": {
+                    "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                },
+            },
             {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
         ]
     }
-    assert len(result.sources) == 1
+    assert [source.title for source in result.sources] == [
+        "월간 생산 리스크 보고서",
+    ]
     assert result.sources[0].source_type == "REPORT"
-    assert result.sources[0].title == "월간 생산 리스크 보고서"
     assert result.sources[0].url == "/reports/20?mode=read"
 
 

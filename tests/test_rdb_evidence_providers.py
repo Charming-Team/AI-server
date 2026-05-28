@@ -99,7 +99,7 @@ def test_catalog_rdb_evidence_provider_converts_material_view_rows_to_evidence()
     assert item.type == "MATERIAL"
     assert item.title == "RM-AL-001 알루미늄 원자재 SHORTAGE"
     assert "생산계획 ID: 1001" in item.summary
-    assert "부족 수량: 60.0" in item.summary
+    assert "부족 수량: 60" in item.summary
     assert item.url == "/materials/inventory/11?mode=read"
     assert item.source == "chat_material_shortage_evidence_view"
     assert item.reference_id == 7001
@@ -113,6 +113,43 @@ def test_catalog_rdb_evidence_provider_converts_material_view_rows_to_evidence()
         "MANUFACTURING_MANAGER",
     ]
     assert view_client.calls == [(definition, filters, 5)]
+
+
+def test_catalog_rdb_evidence_provider_formats_line_units_and_rates() -> None:
+    definition = get_rdb_evidence_view_definition(ChatIntent.LINE_BOTTLENECK)
+    assert definition is not None
+    row = {
+        "line_status_id": 1,
+        "line_id": 101,
+        "line_code": "LINE-ABS-01",
+        "line_name": "ABS 주 생산 Line",
+        "operation_status": "RUNNING",
+        "throughput_rate": Decimal("0.8700"),
+        "current_yield_rate": Decimal("0.9340"),
+        "waiting_quantity": 3200,
+        "waiting_time_hr": Decimal("2.5000"),
+        "utilization_rate": Decimal("0.8800"),
+        "progress_rate": Decimal("0.5160"),
+        "processed_quantity": 8256,
+        "defect_quantity": 545,
+        "recorded_at": datetime.fromisoformat("2026-06-01T00:00:00+00:00"),
+        "abnormal_machine_count": 0,
+    }
+    view_client = FakeRdbEvidenceViewClient([row])
+    provider = CatalogRdbEvidenceProvider(definition, view_client)
+
+    items = anyio.run(
+        provider.get_evidence,
+        _build_request(role="MANUFACTURING_MANAGER"),
+        EvidenceLookupFilters(limit=5, targetType="LINE", targetCode="LINE-ABS-01"),
+    )
+
+    assert len(items) == 1
+    assert "처리량: 87%" in items[0].summary
+    assert "현재 수율: 93.4%" in items[0].summary
+    assert "대기 시간: 2.5시간" in items[0].summary
+    assert "가동률: 88%" in items[0].summary
+    assert "진행률: 51.6%" in items[0].summary
 
 
 def test_catalog_rdb_evidence_provider_builds_read_only_url_for_non_material_source() -> None:

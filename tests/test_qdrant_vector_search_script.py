@@ -154,7 +154,10 @@ def test_qdrant_vector_search_script_indexes_searches_and_cleans_sample() -> Non
     ]
     assert search_client.search_payload is not None
     assert search_client.search_payload["filter"]["must"] == [
-        {"key": "allowedRoles", "match": {"any": ["MANUFACTURING_MANAGER"]}},
+        {
+            "key": "allowedRoles",
+            "match": {"any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]},
+        },
         {"key": "intentTags", "match": {"any": ["LINE_BOTTLENECK"]}},
     ]
 

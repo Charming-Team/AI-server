@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings
-from app.main import app
+from app.main import app, create_app
 
 client = TestClient(app)
 _MISSING_OVERRIDE = object()
@@ -25,6 +25,21 @@ def test_health_check() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_health_check_supports_ai_alias_for_nested_ai_prefix(monkeypatch) -> None:
+    monkeypatch.setenv("API_V1_PREFIX", "/ai/api/v1")
+    get_settings.cache_clear()
+    try:
+        test_client = TestClient(create_app())
+        canonical_response = test_client.get("/ai/api/v1/health")
+        alias_response = test_client.get("/ai/health")
+    finally:
+        get_settings.cache_clear()
+
+    assert canonical_response.status_code == 200
+    assert alias_response.status_code == 200
+    assert alias_response.json()["status"] == "ok"
 
 
 def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() -> None:
