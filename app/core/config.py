@@ -78,13 +78,22 @@ class Settings(BaseSettings):
 
     @property
     def report_postgres_url(self) -> str:
-        if self.report_rdb_dsn:
-            return self.report_rdb_dsn
+        if self.report_rdb_dsn and self.report_rdb_dsn.strip():
+            return self._to_sqlalchemy_psycopg_url(self.report_rdb_dsn)
 
-        if self.rdb_evidence_dsn:
-            return self.rdb_evidence_dsn
+        if self.rdb_evidence_dsn and self.rdb_evidence_dsn.strip():
+            return self._to_sqlalchemy_psycopg_url(self.rdb_evidence_dsn)
 
         return "postgresql+psycopg://postgres:postgres@localhost:5432/smap"
+
+    @staticmethod
+    def _to_sqlalchemy_psycopg_url(dsn: str) -> str:
+        stripped_dsn = dsn.strip()
+        if stripped_dsn.startswith("postgresql://"):
+            return f"postgresql+psycopg://{stripped_dsn.removeprefix('postgresql://')}"
+        if stripped_dsn.startswith("postgres://"):
+            return f"postgresql+psycopg://{stripped_dsn.removeprefix('postgres://')}"
+        return stripped_dsn
 
     @field_validator("cors_origins", mode="before")
     @classmethod
