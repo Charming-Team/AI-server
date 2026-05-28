@@ -84,10 +84,11 @@ def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
     prompt = builder.build(request, evidence_result, document_result)
 
     assert "사용자 역할:\nOPERATOR" in prompt.user_prompt
-    assert "OPERATOR에게는 금액, 계약, 패널티, 비용, 매출, 수익" in (
+    assert "OPERATOR에게는 RDB 근거에서 제공된 권한 허용 정보만 답변한다" in (
         prompt.user_prompt
     )
-    assert "비금액성 보고서 근거만 요약" in prompt.user_prompt
+    assert "Qdrant 문서 검색 근거 중 금액, 계약" in prompt.user_prompt
+    assert "금액성을 제외한 생산계획" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_formats_evidence_and_document_sources() -> None:

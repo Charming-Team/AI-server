@@ -199,7 +199,10 @@ def test_qdrant_readonly_search_uses_embedding_and_existing_qdrant_points() -> N
     assert result["endpointSummary"]["embeddingEndpointScope"] == "LOCALHOST"
     assert qdrant_client.search_payload is not None
     assert qdrant_client.search_payload["filter"]["must"] == [
-        {"key": "allowedRoles", "match": {"any": ["MANUFACTURING_MANAGER"]}},
+        {
+            "key": "allowedRoles",
+            "match": {"any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]},
+        },
         {"key": "intentTags", "match": {"any": ["LINE_BOTTLENECK"]}},
     ]
 
