@@ -12,6 +12,7 @@ from app.features.chat.schemas import (
     ChatErrorCode,
     ChatIntent,
     ChatUserContext,
+    EvidenceItem,
     EvidenceResult,
 )
 
@@ -43,6 +44,32 @@ class FakeRdbEvidenceService:
         )
 
 
+class FakeLineRdbEvidenceService:
+    def __init__(self) -> None:
+        self.request: ChatAnswerRequest | None = None
+        self.intent: ChatIntent | None = None
+
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        self.request = request
+        self.intent = intent
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                _build_line_item(1, "LINE-ABS-01", "RUNNING"),
+                _build_line_item(2, "LINE-ABS-02", "RUNNING"),
+                _build_line_item(3, "LINE-PP-01", "RUNNING"),
+                _build_line_item(4, "LINE-PP-02", "MAINTENANCE"),
+                _build_line_item(5, "LINE-PE-01", "SETUP"),
+                _build_line_item(6, "LINE-PE-02", "RUNNING"),
+            ],
+        )
+
+
 def _build_request() -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -55,6 +82,28 @@ def _build_request() -> ChatAnswerRequest:
         ),
         question="자재 부족으로 영향받는 생산계획 알려줘",
         requestedAt=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+    )
+
+
+def _build_line_item(
+    line_id: int,
+    line_code: str,
+    operation_status: str,
+) -> EvidenceItem:
+    return EvidenceItem(
+        type="LINE",
+        title=f"{line_code} {operation_status}",
+        summary=f"라인 코드: {line_code}, 가동 상태: {operation_status}",
+        url=f"/production-lines/{line_id}?mode=read",
+        source="chat_line_bottleneck_evidence_view",
+        referenceId=line_id,
+        data={
+            "lineId": line_id,
+            "lineCode": line_code,
+            "operationStatus": operation_status,
+            "recordedAt": "2026-06-01T00:00:00+00:00",
+        },
+        allowedRoles=["OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"],
     )
 
 
@@ -88,6 +137,36 @@ def test_evidence_service_uses_rdb_evidence_service_when_rdb_view_mode_is_enable
     assert result.items[0].source == "chat_material_shortage_evidence_view"
 
 
+def test_evidence_service_adds_line_count_summary_for_line_count_question() -> None:
+    rdb_evidence_service = FakeLineRdbEvidenceService()
+    request = _build_request().model_copy(
+        update={"question": "우리 공정 라인은 몇개 있어?"}
+    )
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.LINE_BOTTLENECK)
+
+    assert result.items[0].title == "공정 라인 전체 현황"
+    assert "공정 라인 수: 총 6개" in result.items[0].summary
+    assert "LINE-ABS-01" in result.items[0].summary
+    assert "RUNNING 4개" in result.items[0].summary
+    assert "MAINTENANCE 1개" in result.items[0].summary
+    assert "SETUP 1개" in result.items[0].summary
+    assert result.items[0].url == "/production-lines?mode=read"
+    assert result.items[0].data["lineCount"] == 6
+    assert result.items[0].data["operationStatusCounts"] == {
+        "MAINTENANCE": 1,
+        "RUNNING": 4,
+        "SETUP": 1,
+    }
+
+
 def test_evidence_service_builds_internal_request_payload() -> None:
     service = EvidenceService(Settings(evidence_lookup_internal_token="internal-token"))
     request = _build_request().model_copy(
@@ -112,6 +191,17 @@ def test_evidence_service_builds_internal_request_payload() -> None:
         "targetType": "LINE",
         "targetCode": "LINE-A01",
     }
+
+
+def test_evidence_service_expands_internal_request_limit_for_count_question() -> None:
+    service = EvidenceService(Settings(evidence_lookup_internal_token="internal-token"))
+    request = _build_request().model_copy(
+        update={"question": "우리 공정 라인은 몇개 있어?"}
+    )
+
+    payload = service._build_payload(request, ChatIntent.LINE_BOTTLENECK)
+
+    assert payload["filters"]["limit"] == 50
 
 
 def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:

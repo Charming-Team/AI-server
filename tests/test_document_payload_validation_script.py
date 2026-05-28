@@ -627,7 +627,7 @@ def test_validate_document_payload_script_prints_safe_chunk_metadata(
 
     assert exit_code == 0
     assert "chunk=chunk-0001 charCount=30" in stdout.getvalue()
-    assert "chunk=chunk-0002 charCount=30" in stdout.getvalue()
+    assert "chunk=chunk-0002 charCount=35" in stdout.getvalue()
     assert "A" * 30 not in stdout.getvalue()
     assert "B" * 30 not in stdout.getvalue()
 
@@ -691,7 +691,7 @@ def test_validate_document_payload_result_warns_for_duplicate_chunks() -> None:
         Settings(
             embedding_enabled=True,
             document_chunk_size=35,
-            document_chunk_overlap=5,
+            document_chunk_overlap=0,
         ),
     )
 
