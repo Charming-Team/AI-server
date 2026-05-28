@@ -57,6 +57,9 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
     assert "수치, 상태, 날짜는 RDB 근거 또는 문서 검색 근거" in prompt.user_prompt
     assert "총 개수나 몇 개인지 묻는 질문은 RDB 집계 근거" in prompt.user_prompt
+    assert "라인 구성, 전체 라인 상태, 가동 중 라인 질문은 RDB 집계 근거" in (
+        prompt.user_prompt
+    )
     assert "현재 상태 판단은 RDB 근거를 우선" in prompt.user_prompt
     assert "사용자 역할에서 제한되는 내용은 근거에 있어도 답변하지 않는다" in (
         prompt.user_prompt

@@ -167,6 +167,88 @@ def test_evidence_service_adds_line_count_summary_for_line_count_question() -> N
     }
 
 
+def test_evidence_service_adds_running_line_summary_for_running_question() -> None:
+    rdb_evidence_service = FakeLineRdbEvidenceService()
+    request = _build_request().model_copy(
+        update={"question": "현재 가동 중인 라인은 뭐야?"}
+    )
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.LINE_BOTTLENECK)
+
+    assert result.items[0].title == "가동 라인 전체 현황"
+    assert "RUNNING 라인은 총 4개" in result.items[0].summary
+    assert "RUNNING 라인 코드: LINE-ABS-01, LINE-ABS-02, LINE-PE-02, LINE-PP-01" in (
+        result.items[0].summary
+    )
+    assert result.items[0].data["runningLineCount"] == 4
+    assert result.items[0].data["runningLineCodes"] == [
+        "LINE-ABS-01",
+        "LINE-ABS-02",
+        "LINE-PE-02",
+        "LINE-PP-01",
+    ]
+    assert result.items[0].data["operationStatusCounts"] == {
+        "MAINTENANCE": 1,
+        "RUNNING": 4,
+        "SETUP": 1,
+    }
+
+
+def test_evidence_service_adds_line_composition_summary_for_composition_question() -> None:
+    rdb_evidence_service = FakeLineRdbEvidenceService()
+    request = _build_request().model_copy(
+        update={"question": "생산 라인 구성 알려줘"}
+    )
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.LINE_BOTTLENECK)
+
+    assert result.items[0].title == "생산 라인 구성 전체 현황"
+    assert "생산 라인은 총 6개" in result.items[0].summary
+    assert "LINE-ABS-01(RUNNING)" in result.items[0].summary
+    assert "LINE-PP-02(MAINTENANCE)" in result.items[0].summary
+    assert result.items[0].data["lineCount"] == 6
+    assert result.items[0].data["lineCodes"] == [
+        "LINE-ABS-01",
+        "LINE-ABS-02",
+        "LINE-PE-01",
+        "LINE-PE-02",
+        "LINE-PP-01",
+        "LINE-PP-02",
+    ]
+
+
+def test_evidence_service_does_not_add_composition_summary_for_bottleneck_question() -> None:
+    rdb_evidence_service = FakeLineRdbEvidenceService()
+    request = _build_request().model_copy(
+        update={"question": "전체 라인 병목 현황 알려줘"}
+    )
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.LINE_BOTTLENECK)
+
+    assert result.items[0].title == "LINE-ABS-01 RUNNING"
+
+
 def test_evidence_service_builds_internal_request_payload() -> None:
     service = EvidenceService(Settings(evidence_lookup_internal_token="internal-token"))
     request = _build_request().model_copy(

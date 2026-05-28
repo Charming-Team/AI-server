@@ -18,6 +18,7 @@ class TargetPattern:
 class QueryFilterExtractor:
     _default_limit = 5
     _count_query_limit = 50
+    _line_overview_query_limit = 50
     _explicit_date_pattern = re.compile(
         r"(?<!\d)(20\d{2})[-./](0?[1-9]|1[0-2])[-./](0?[1-9]|[12]\d|3[01])(?!\d)"
     )
@@ -65,6 +66,8 @@ class QueryFilterExtractor:
     def _extract_limit(self, question: str) -> int:
         if self._is_count_question(question):
             return self._count_query_limit
+        if self._is_line_overview_question(question):
+            return self._line_overview_query_limit
         return self._default_limit
 
     def _is_count_question(self, question: str) -> bool:
@@ -79,6 +82,63 @@ class QueryFilterExtractor:
                 "총몇",
                 "총수",
                 "전체몇",
+            )
+        )
+
+    def _is_line_overview_question(self, question: str) -> bool:
+        compact_question = self._compact(question.casefold())
+        has_line_term = any(term in compact_question for term in ("라인", "공정", "line"))
+        if not has_line_term:
+            return False
+
+        running_terms = (
+            "가동중",
+            "가동중인",
+            "현재가동",
+            "운영중",
+            "운영중인",
+            "running",
+        )
+        if any(term in compact_question for term in running_terms):
+            return True
+
+        strong_overview_terms = (
+            "구성",
+            "목록",
+            "리스트",
+        )
+        if any(term in compact_question for term in strong_overview_terms):
+            return True
+
+        broad_overview_terms = (
+            "전체라인",
+            "라인전체",
+            "생산라인전체",
+            "공정라인전체",
+        )
+        if (
+            any(term in compact_question for term in broad_overview_terms)
+            and not self._has_bottleneck_term(compact_question)
+        ):
+            return True
+
+        status_terms = ("상태", "현황")
+        return (
+            any(term in compact_question for term in status_terms)
+            and not self._has_bottleneck_term(compact_question)
+        )
+
+    def _has_bottleneck_term(self, compact_question: str) -> bool:
+        return any(
+            term in compact_question
+            for term in (
+                "병목",
+                "대기",
+                "지연",
+                "위험",
+                "문제",
+                "원인",
+                "이상",
             )
         )
 
