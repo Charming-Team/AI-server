@@ -501,7 +501,12 @@ class FakeDeliveryRiskQdrantClient:
     async def search(self, payload: dict) -> list[dict]:
         assert payload["filter"] == {
             "must": [
-                {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
+                {
+                    "key": "allowedRoles",
+                    "match": {
+                        "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                    },
+                },
                 {"key": "intentTags", "match": {"any": ["DELIVERY_RISK"]}},
             ]
         }
@@ -583,7 +588,12 @@ class FakeEmptyQdrantClient:
     async def search(self, payload: dict) -> list[dict]:
         assert payload["filter"] == {
             "must": [
-                {"key": "allowedRoles", "match": {"any": ["MANUFACTURING_MANAGER"]}},
+                {
+                    "key": "allowedRoles",
+                    "match": {
+                        "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                    },
+                },
                 {"key": "intentTags", "match": {"any": ["LINE_BOTTLENECK"]}},
             ]
         }
@@ -594,7 +604,12 @@ class FakeRoleOutsideQdrantClient:
     async def search(self, payload: dict) -> list[dict]:
         assert payload["filter"] == {
             "must": [
-                {"key": "allowedRoles", "match": {"any": ["OPERATOR"]}},
+                {
+                    "key": "allowedRoles",
+                    "match": {
+                        "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                    },
+                },
                 {"key": "intentTags", "match": {"any": ["DELIVERY_RISK"]}},
             ]
         }
@@ -620,7 +635,12 @@ class FakeReportLookupQdrantClient:
     async def search(self, payload: dict) -> list[dict]:
         assert payload["filter"] == {
             "must": [
-                {"key": "allowedRoles", "match": {"any": ["EXECUTIVE"]}},
+                {
+                    "key": "allowedRoles",
+                    "match": {
+                        "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                    },
+                },
                 {"key": "intentTags", "match": {"any": ["REPORT_LOOKUP"]}},
             ]
         }
@@ -653,7 +673,9 @@ class FakeCompanyInfoQdrantClient:
             "must": [
                 {
                     "key": "allowedRoles",
-                    "match": {"any": ["MANUFACTURING_MANAGER"]},
+                    "match": {
+                        "any": ["EXECUTIVE", "MANUFACTURING_MANAGER", "OPERATOR"]
+                    },
                 },
                 {"key": "intentTags", "match": {"any": ["LINE_BOTTLENECK"]}},
             ]
@@ -1870,7 +1892,7 @@ def test_chat_answer_evaluation_returns_insufficient_evidence_when_qdrant_is_emp
     }
 
 
-def test_chat_answer_evaluation_returns_insufficient_evidence_for_role_blocked_qdrant() -> None:
+def test_chat_answer_evaluation_allows_operator_role_outside_qdrant_source() -> None:
     previous_override = app.dependency_overrides.get(get_chat_service, _MISSING_OVERRIDE)
     app.dependency_overrides[get_chat_service] = _build_role_outside_qdrant_chat_service
     try:
@@ -1889,10 +1911,28 @@ def test_chat_answer_evaluation_returns_insufficient_evidence_for_role_blocked_q
     assert response.status_code == 200
     body = response.json()
     assert body["intent"] == "DELIVERY_RISK"
-    assert body["securityResult"]["status"] == "INSUFFICIENT_EVIDENCE"
-    assert body["securityResult"]["code"] == "CHAT_EVIDENCE_001"
-    assert body["sources"] == []
-    assert body["urls"] == []
+    assert body["securityResult"]["status"] == "PASSED"
+    assert "경영진 납기 위험 보고서" in body["answer"]
+    assert body["sources"] == [
+        {
+            "sourceType": "REPORT",
+            "title": "경영진 납기 위험 보고서",
+            "summary": "경영진에게만 허용된 납기 위험 보고서입니다.",
+            "url": "/reports/executive-risk",
+            "referenceId": None,
+            "source": "executive-risk-report:chunk-0001",
+            "basisTime": None,
+            "sourceOrigin": "QDRANT",
+            "relevanceScore": 0.9,
+        }
+    ]
+    assert body["urls"] == [
+        {
+            "label": "경영진 납기 위험 보고서",
+            "url": "/reports/executive-risk",
+            "type": "REPORT",
+        }
+    ]
     assert body["modelResult"] == {
         "usedVectorSearch": True,
         "usedRdbEvidence": False,
@@ -1900,10 +1940,8 @@ def test_chat_answer_evaluation_returns_insufficient_evidence_for_role_blocked_q
         "llmCacheHit": False,
         "llmUsage": None,
         "rdbEvidenceCount": 0,
-        "documentSourceCount": 0,
-        "evidenceCount": 0,
-        "vectorSearchSkippedReason": (
-            "Qdrant 검색 결과가 사용자 권한 범위를 통과하지 못했습니다."
-        ),
-        "llmGenerationSkippedReason": "RDB Evidence와 문서 검색 근거가 없습니다.",
+        "documentSourceCount": 1,
+        "evidenceCount": 1,
+        "vectorSearchSkippedReason": None,
+        "llmGenerationSkippedReason": "LLM 답변 생성 기능이 비활성화되어 있습니다.",
     }

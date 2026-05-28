@@ -811,7 +811,7 @@ def test_answer_generation_blocks_sensitive_grounded_fallback_output() -> None:
     assert result.security_result.code == "CHAT_SECURITY_002"
 
 
-def test_answer_generation_blocks_operator_financial_llm_output() -> None:
+def test_answer_generation_blocks_operator_financial_llm_output_from_qdrant() -> None:
     llm_client = FakeLlmClient("계약 금액과 예상 패널티 영향은 다음과 같습니다.")
     service = AnswerGenerationService(
         Settings(llm_enabled=True),
@@ -832,6 +832,42 @@ def test_answer_generation_blocks_operator_financial_llm_output() -> None:
             )
         ]
     )
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is False
+    assert result.answer == BLOCKED_GENERATED_ANSWER
+    assert result.skipped_reason == "생성 답변이 출력 보안 정책에 의해 차단되었습니다."
+    assert result.security_result is not None
+    assert result.security_result.status == "BLOCKED_UNAUTHORIZED"
+    assert result.security_result.code == "CHAT_SECURITY_004"
+
+
+def test_answer_generation_blocks_operator_financial_llm_output_without_qdrant() -> None:
+    llm_client = FakeLlmClient("계약 금액과 예상 패널티 영향은 다음과 같습니다.")
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request(role="OPERATOR")
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.DELIVERY_RISK,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="ORDER",
+                title="ORD-202605-001 납기 위험",
+                summary="납기 지연 위험 등급은 WARNING입니다.",
+                source="ai_prediction_results",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(sources=[])
 
     result = anyio.run(
         service.generate_answer,
