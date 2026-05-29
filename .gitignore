@@ -57,3 +57,4 @@ wandb/
 docs/
 *.md
 !pull_request_template.md
+prac.py
