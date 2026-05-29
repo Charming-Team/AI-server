@@ -13,7 +13,9 @@ httpx==0.28.1
 idna==3.16
 iniconfig==2.3.0
 jiter==0.15.0
+langgraph==1.2.1
 openai==2.38.0
+ortools==9.15.6755
 packaging==26.2
 pluggy==1.6.0
 psycopg==3.3.4
