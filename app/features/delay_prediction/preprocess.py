@@ -5,7 +5,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from src.training.features import (
+from app.features.delay_prediction.features import (
     CATEGORICAL_COLUMNS,
     FEATURE_COLUMNS,
     NUMERIC_COLUMNS,

@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 
-from src.training.features import FEATURE_COLUMNS
-from src.training.metrics import clip_predictions
+from app.features.delay_prediction.features import FEATURE_COLUMNS
 
 
 def prepare_inference_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -19,7 +19,8 @@ def prepare_inference_frame(df: pd.DataFrame) -> pd.DataFrame:
 
 def predict_delay_hours(model, df: pd.DataFrame):
     inference_frame = prepare_inference_frame(df)
-    return clip_predictions(model.predict(inference_frame))
+    predictions = model.predict(inference_frame)
+    return np.clip(predictions, a_min=0.0, a_max=None)
 
 
 def save_model_artifacts(model, artifact_dir: Path, metadata: dict[str, object]) -> None:
