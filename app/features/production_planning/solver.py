@@ -22,13 +22,13 @@ class _LoggingCallback(cp_model.CpSolverSolutionCallback):
 
 def solve_model(
     bundle: CpsatModelBundle,
-    plan_type: str,
+    variant_code: str,
     config: SolverConfig,
 ) -> RawSolverResult:
     """
     Parameters:
         - bundle: CP-SAT model bundle with objective already applied.
-        - plan_type: Human-readable plan type being solved.
+        - variant_code: Plan variant code being solved (e.g. "DUE_DATE_MIN_DELAY_COUNT").
         - config: Solver execution configuration.
 
     Methodology:
@@ -50,7 +50,7 @@ def solve_model(
         status = solver.StatusName(status_code)
         has_solution = status_code in (cp_model.OPTIMAL, cp_model.FEASIBLE)
         return RawSolverResult(
-            plan_type=plan_type,
+            plan_variant_code=variant_code,
             status=status,
             objective_value=solver.ObjectiveValue() if has_solution else None,
             wall_time_seconds=solver.WallTime(),
@@ -60,4 +60,4 @@ def solve_model(
             solver=solver,
         )
     except (RuntimeError, ValueError) as exc:
-        raise SolverExecutionError(f"Failed to solve {plan_type} model: {exc}") from exc
+        raise SolverExecutionError(f"Failed to solve {variant_code} model: {exc}") from exc

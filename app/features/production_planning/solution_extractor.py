@@ -323,7 +323,7 @@ def _empty_metrics(data: NormalizedPlanningData) -> PlanMetrics:
 
 def _solver_metadata(raw_result: RawSolverResult) -> dict:
     return {
-        "plan_type": raw_result.plan_type,
+        "plan_variant_code": raw_result.plan_variant_code,
         "status": raw_result.status,
         "objective_value": raw_result.objective_value,
         "wall_time_seconds": raw_result.wall_time_seconds,

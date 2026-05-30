@@ -49,6 +49,7 @@ class SolverConfig(BaseModel):
     makespan_weight: int = Field(default=1, ge=0)
     changeover_weight: int = Field(default=1, ge=0)
     use_existing_schedule_locks: bool = True
+    use_material_constraints: bool = True
     log_solver: bool = False
     excluded_order_statuses: list[str] = Field(
         default_factory=lambda: ["CANCELLED", "COMPLETED"]

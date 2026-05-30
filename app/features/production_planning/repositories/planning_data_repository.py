@@ -9,7 +9,9 @@ All queries target ai_planning.v_* views only — no direct access to public bas
 
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass
+from decimal import Decimal
 from math import ceil
 from typing import Any
 
@@ -28,6 +30,13 @@ from app.features.production_planning.schemas import (
     ProductionLineInput,
     ProductLineCapabilityInput,
 )
+
+
+def _due_date_to_datetime(value: _dt.date | _dt.datetime) -> _dt.datetime:
+    """DB의 date 타입 납기일을 당일 23:59:59 UTC datetime으로 변환한다."""
+    if isinstance(value, _dt.datetime):
+        return value if value.tzinfo else value.replace(tzinfo=_dt.UTC)
+    return _dt.datetime.combine(value, _dt.time(23, 59, 59), tzinfo=_dt.UTC)
 
 
 @dataclass
@@ -117,6 +126,7 @@ class PlanningDataRepository:
                 late_penalty_amount,
                 order_status
             FROM ai_planning.v_orders_for_planning
+            WHERE order_status IN ('WAITING', 'IN_PROGRESS', 'DELAYED')
             ORDER BY order_id
             """
         )
@@ -139,8 +149,8 @@ class PlanningDataRepository:
             OrderInput(
                 order_id=str(row["order_id"]),
                 product_id=str(row["product_id"]),
-                quantity=int(row["order_quantity"]),
-                due_date=row["due_date"],
+                order_quantity=int(row["order_quantity"]),
+                due_date=_due_date_to_datetime(row["due_date"]),
                 order_amount=int(row["contract_amount"] or 0),
                 late_penalty_amount=int(row["late_penalty_amount"] or 0),
                 status=str(row["order_status"]),
@@ -165,7 +175,10 @@ class PlanningDataRepository:
             SELECT
                 product_id,
                 product_name,
-                product_category
+                product_category,
+                unit,
+                average_yield_rate,
+                min_production_quantity
             FROM ai_planning.v_products_for_planning
             ORDER BY product_id
             """
@@ -190,6 +203,17 @@ class PlanningDataRepository:
                 product_id=str(row["product_id"]),
                 product_name=str(row["product_name"]),
                 grade=str(row["product_category"]) if row["product_category"] else None,
+                unit=str(row["unit"]) if row["unit"] else None,
+                average_yield_rate=(
+                    Decimal(str(row["average_yield_rate"]))
+                    if row["average_yield_rate"] is not None
+                    else None
+                ),
+                min_production_quantity=(
+                    int(row["min_production_quantity"])
+                    if row["min_production_quantity"] is not None
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -214,7 +238,9 @@ class PlanningDataRepository:
                 line_id,
                 line_name,
                 is_active,
-                max_capacity_per_day
+                max_capacity_per_day,
+                capacity_unit,
+                supports_changeover
             FROM ai_planning.v_production_lines_for_planning
             WHERE is_active = true
             ORDER BY line_id
@@ -240,9 +266,13 @@ class PlanningDataRepository:
                 line_id=str(row["line_id"]),
                 line_name=str(row["line_name"]),
                 is_active=bool(row["is_active"]),
-                daily_capacity_minutes=int(row["max_capacity_per_day"]) if row["max_capacity_per_day"] else None,
-                # available_from / available_to left as None:
-                # preprocessing will default to planning_start and planning_end.
+                max_capacity_per_day=(
+                    int(row["max_capacity_per_day"])
+                    if row["max_capacity_per_day"] is not None
+                    else None
+                ),
+                capacity_unit=str(row["capacity_unit"]) if row["capacity_unit"] else None,
+                supports_changeover=bool(row["supports_changeover"]),
             )
             for row in rows
         ]
@@ -271,6 +301,7 @@ class PlanningDataRepository:
                 product_id,
                 line_id,
                 standard_production_time_hr,
+                capacity_per_day,
                 standard_yield_rate,
                 priority_rank
             FROM ai_planning.v_product_line_capabilities_for_planning
@@ -293,8 +324,15 @@ class PlanningDataRepository:
                 process_time_per_unit_minutes=_to_process_time_minutes(
                     row["standard_production_time_hr"]
                 ),
+                capacity_per_day=(
+                    int(row["capacity_per_day"])
+                    if row["capacity_per_day"] is not None
+                    else None
+                ),
                 yield_rate_scaled=_to_yield_rate_scaled(row["standard_yield_rate"]),
-                priority_rank=int(row["priority_rank"]) if row["priority_rank"] is not None else None,
+                priority_rank=(
+                    int(row["priority_rank"]) if row["priority_rank"] is not None else None
+                ),
             )
             for row in rows
         ]
@@ -324,8 +362,10 @@ class PlanningDataRepository:
                 product_id,
                 order_id,
                 start_time,
-                end_time
+                end_time,
+                plan_status
             FROM ai_planning.v_existing_schedules_for_planning
+            WHERE plan_status IN ('SCHEDULED', 'IN_PROGRESS', 'DELAYED')
             ORDER BY line_id, start_time
             """
         )
@@ -347,6 +387,7 @@ class PlanningDataRepository:
                 start_time=row["start_time"],
                 end_time=row["end_time"],
                 is_locked=True,
+                plan_status=str(row["plan_status"]) if row["plan_status"] else None,
             )
             for row in rows
         ]
@@ -373,8 +414,11 @@ class PlanningDataRepository:
                 line_id,
                 from_product_id,
                 to_product_id,
+                cleaning_time_hr,
+                stabilization_time_hr,
                 total_changeover_time_hr,
-                changeover_cost
+                changeover_cost,
+                changeover_difficulty
             FROM ai_planning.v_changeover_rules_for_planning
             ORDER BY from_product_id, to_product_id
             """
@@ -393,8 +437,17 @@ class PlanningDataRepository:
                 from_product_id=str(row["from_product_id"]),
                 to_product_id=str(row["to_product_id"]),
                 line_id=str(row["line_id"]) if row["line_id"] else None,
-                changeover_minutes=ceil(float(row["total_changeover_time_hr"]) * 60),
-                changeover_cost=int(row["changeover_cost"]) if row["changeover_cost"] is not None else 0,
+                cleaning_time_hr=_to_decimal(row["cleaning_time_hr"]),
+                stabilization_time_hr=_to_decimal(row["stabilization_time_hr"]),
+                total_changeover_time_hr=_to_decimal(row["total_changeover_time_hr"]),
+                changeover_cost=(
+                    int(row["changeover_cost"]) if row["changeover_cost"] is not None else 0
+                ),
+                changeover_difficulty=(
+                    str(row["changeover_difficulty"])
+                    if row["changeover_difficulty"]
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -441,13 +494,9 @@ class PlanningDataRepository:
             MaterialInput(
                 material_id=str(row["material_id"]),
                 material_name=str(row["material_id"]),
-                available_quantity=int(row["available_now_quantity"] or 0),
-                confirmed_inbound_quantity=(
-                    int(row["expected_inbound_quantity"])
-                    if row["expected_inbound_quantity"] is not None
-                    else None
-                ),
-                confirmed_inbound_time=row["expected_inbound_at"],
+                available_quantity=_to_decimal(row["available_now_quantity"]) or Decimal("0"),
+                expected_inbound_quantity=_to_decimal(row["expected_inbound_quantity"]),
+                expected_inbound_at=row["expected_inbound_at"],
             )
             for row in rows
         ]
@@ -471,6 +520,7 @@ class PlanningDataRepository:
                 product_id,
                 material_id,
                 required_quantity_per_unit,
+                unit,
                 loss_rate
             FROM ai_planning.v_bom_items_for_planning
             ORDER BY product_id, material_id
@@ -489,10 +539,10 @@ class PlanningDataRepository:
             BomItemInput(
                 product_id=str(row["product_id"]),
                 material_id=str(row["material_id"]),
-                required_quantity_per_unit=_apply_loss_rate(
-                    row["required_quantity_per_unit"],
-                    row["loss_rate"],
-                ),
+                required_quantity_per_unit=_to_decimal(row["required_quantity_per_unit"])
+                or Decimal("0"),
+                unit=str(row["unit"]) if row["unit"] else None,
+                loss_rate=_to_decimal(row["loss_rate"]) or Decimal("0"),
             )
             for row in rows
         ]
@@ -592,7 +642,7 @@ class PlanningDataRepository:
 # ---------------------------------------------------------------------------
 
 def _to_process_time_minutes(standard_production_time_hr: Any) -> int | None:
-    """Convert standard_production_time_hr (float hours) to integer minutes using ceil."""
+    """Convert DB standard_production_time_hr into whole CP-SAT minutes."""
     if standard_production_time_hr is None:
         return None
     return ceil(float(standard_production_time_hr) * 60)
@@ -605,8 +655,14 @@ def _to_yield_rate_scaled(standard_yield_rate: Any) -> int | None:
     return round(float(standard_yield_rate) * 10_000)
 
 
-def _apply_loss_rate(required_quantity_per_unit: Any, loss_rate: Any) -> int:
-    """Apply BOM loss rate and return a rounded integer quantity."""
-    base = float(required_quantity_per_unit or 0)
-    rate = float(loss_rate or 0)
-    return max(1, round(base * (1 + rate)))
+def _to_decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value))
+
+
+def _apply_loss_rate(required_quantity_per_unit: Any, loss_rate: Any) -> Decimal:
+    """Return quantity_per_unit × (1 + loss_rate) as Decimal without rounding."""
+    base = Decimal(str(required_quantity_per_unit or 0))
+    rate = Decimal(str(loss_rate or 0))
+    return base * (1 + rate)
