@@ -9,3 +9,8 @@ engine: Engine = create_engine(
     settings.report_postgres_url,
     pool_pre_ping=True,
 )
+
+planning_engine: Engine = create_engine(
+    settings.planning_postgres_url,
+    pool_pre_ping=True,
+)
