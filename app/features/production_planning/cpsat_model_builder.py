@@ -211,15 +211,21 @@ def _add_material_constraints(
         inbound_quantity = get_inbound_material_quantity_scaled(material)
         inbound_time = get_inbound_material_time(material)
         if inbound_time is None:
+            if initial_available == 0:
+                continue
             bundle.model.Add(sum(required_terms) <= initial_available)
             continue
 
         inbound_offset = to_minute_offset(inbound_time, data.planning_start)
         if inbound_offset <= 0:
             total = initial_available + inbound_quantity
+            if total == 0:
+                continue
             bundle.model.Add(sum(required_terms) <= total)
             continue
         if inbound_offset > data.horizon_minutes:
+            if initial_available == 0:
+                continue
             bundle.model.Add(sum(required_terms) <= initial_available)
             continue
 

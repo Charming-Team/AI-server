@@ -12,7 +12,6 @@ from __future__ import annotations
 import datetime as _dt
 from dataclasses import dataclass
 from decimal import Decimal
-from math import ceil
 from typing import Any
 
 from sqlalchemy import text
@@ -641,11 +640,11 @@ class PlanningDataRepository:
 # Private helper functions
 # ---------------------------------------------------------------------------
 
-def _to_process_time_minutes(standard_production_time_hr: Any) -> int | None:
-    """Convert DB standard_production_time_hr into whole CP-SAT minutes."""
+def _to_process_time_minutes(standard_production_time_hr: Any) -> float | None:
+    """Convert DB standard_production_time_hr from hours per ton to minutes per kg."""
     if standard_production_time_hr is None:
         return None
-    return ceil(float(standard_production_time_hr) * 60)
+    return float(standard_production_time_hr) * 60 / 1000
 
 
 def _to_yield_rate_scaled(standard_yield_rate: Any) -> int | None:

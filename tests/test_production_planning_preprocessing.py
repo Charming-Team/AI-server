@@ -19,6 +19,10 @@ from app.features.production_planning.preprocessing import (
     normalize_order_amount,
     to_minute_offset,
 )
+from app.features.production_planning.repositories.planning_data_repository import (
+    _apply_loss_rate,
+    _to_process_time_minutes,
+)
 from app.features.production_planning.schemas import (
     ChangeoverRuleInput,
     NormalizedLine,
@@ -106,6 +110,14 @@ def test_duration_calculation_with_yield_and_setup() -> None:
     )
 
     assert calculate_processing_duration_minutes(order, "L-1", capability, product) == 45
+
+
+def test_repository_process_time_converts_hours_per_ton_to_minutes_per_kg() -> None:
+    assert _to_process_time_minutes(Decimal("1.5")) == 0.09
+
+
+def test_repository_bom_loss_rate_preserves_fractional_decimal() -> None:
+    assert _apply_loss_rate(Decimal("0.6"), Decimal("0.05")) == Decimal("0.630")
 
 
 def test_standard_yield_rate_and_changeover_hours_are_converted() -> None:
