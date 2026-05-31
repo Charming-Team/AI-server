@@ -101,7 +101,14 @@ def simulate_plan_candidates(
                     rng,
                 )
             )
-        results.append(_aggregate_plan_simulation(plan, scenarios, simulation_config))
+        results.append(
+            _aggregate_plan_simulation(
+                plan,
+                scenarios,
+                simulation_config,
+                distributions,
+            )
+        )
     return results
 
 
@@ -109,6 +116,7 @@ def _aggregate_plan_simulation(
     plan: PlanResult,
     scenarios: list[ScenarioResult],
     config: SimulationConfig,
+    distributions: SamplingDistributions,
 ) -> PlanSimulationResult:
     total_orders = max(1, plan.metrics.scheduled_count + plan.metrics.unscheduled_count)
     tardiness_values = [scenario.total_tardiness_minutes for scenario in scenarios]
@@ -152,6 +160,8 @@ def _aggregate_plan_simulation(
             {"cause": cause, "count": count}
             for cause, count in delay_causes.most_common(5)
         ],
+        sampling_summary=_build_sampling_summary(distributions),
+        event_summary=_build_event_summary(scenarios),
         scenario_summary={
             "scheduled_count": plan.metrics.scheduled_count,
             "unscheduled_count": plan.metrics.unscheduled_count,
@@ -180,7 +190,86 @@ def _disabled_result(plan: PlanResult) -> PlanSimulationResult:
         expected_yield_rate=None,
         expected_defect_quantity=None,
         top_delay_causes=[],
+        sampling_summary={},
+        event_summary=[],
         scenario_summary={"simulation_enabled": False},
+    )
+
+
+def _build_sampling_summary(distributions: SamplingDistributions) -> dict:
+    return {
+        "duration_variation_ratio": distributions.duration_variation_ratio,
+        "changeover_variation_ratio": distributions.changeover_variation_ratio,
+        "delay_probability": distributions.delay_probability,
+        "delay_minutes_range": [
+            distributions.min_delay_minutes,
+            distributions.max_delay_minutes,
+        ],
+        "yield_rate_mean": distributions.yield_rate_mean,
+        "yield_rate_stddev": distributions.yield_rate_stddev,
+        "defect_rate_mean": distributions.defect_rate_mean,
+        "defect_rate_stddev": distributions.defect_rate_stddev,
+        "duration_context_count": len(distributions.duration_params_by_context),
+        "yield_context_count": len(distributions.yield_params_by_context),
+        "defect_context_count": len(distributions.defect_params_by_context),
+        "delay_context_count": len(distributions.delay_params_by_context),
+        "changeover_context_count": len(distributions.changeover_params_by_context),
+        "cause_context_count": len(distributions.cause_weights_by_context),
+        "warning_count": len(distributions.warnings),
+        "warnings": distributions.warnings[:10],
+    }
+
+
+def _build_event_summary(scenarios: list[ScenarioResult]) -> list[dict]:
+    if not scenarios:
+        return []
+
+    event_names = sorted(
+        {
+            event_name
+            for scenario in scenarios
+            for event_name, count in scenario.event_counts.items()
+            if count > 0
+        }
+    )
+    rows = []
+    for event_name in event_names:
+        scenarios_with_event = [
+            scenario
+            for scenario in scenarios
+            if scenario.event_counts.get(event_name, 0) > 0
+        ]
+        occurrence_count = sum(
+            scenario.event_counts.get(event_name, 0)
+            for scenario in scenarios
+        )
+        rows.append(
+            {
+                "event": event_name,
+                "occurrence_count": occurrence_count,
+                "scenario_count": len(scenarios_with_event),
+                "scenario_probability": len(scenarios_with_event) / len(scenarios),
+                "expected_count_per_iteration": occurrence_count / len(scenarios),
+                "avg_tardiness_minutes_when_event_occurs": _mean(
+                    [
+                        scenario.total_tardiness_minutes
+                        for scenario in scenarios_with_event
+                    ]
+                ),
+                "avg_late_penalty_amount_when_event_occurs": _mean(
+                    [
+                        scenario.late_penalty_amount
+                        for scenario in scenarios_with_event
+                    ]
+                ),
+                "avg_risk_cost_when_event_occurs": _mean(
+                    [scenario.total_risk_cost for scenario in scenarios_with_event]
+                ),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (-row["occurrence_count"], row["event"]),
     )
 
 

@@ -63,11 +63,35 @@ def test_simulation_node_returns_one_result_per_plan_candidate() -> None:
     result = generate_production_plans(_request())
 
     assert len(result.simulation_results) == 6
+    assert result.simulation_results[0].sampling_summary
+    assert "delay_probability" in result.simulation_results[0].sampling_summary
     assert result.simulation_comparison_summary is not None
     assert result.recommended_due_date_plan is not None
     assert result.recommended_cost_plan is not None
     assert result.recommended_due_date_plan.plan_family == "DUE_DATE_OPTIMAL"
     assert result.recommended_cost_plan.plan_family == "COST_OPTIMAL"
+
+
+def test_simulation_result_reports_event_response_values() -> None:
+    request = _request()
+    request.simulation_config = SimulationConfig(
+        num_iterations=3,
+        random_seed=7,
+        delay_probability=1.0,
+        min_delay_minutes=10,
+        max_delay_minutes=10,
+    )
+
+    result = generate_production_plans(request)
+
+    first_result = result.simulation_results[0]
+    assert first_result.sampling_summary["delay_probability"] == 1.0
+    assert any(
+        event["event"] == "OPERATIONAL_DELAY"
+        and event["occurrence_count"] > 0
+        and "avg_risk_cost_when_event_occurs" in event
+        for event in first_result.event_summary
+    )
 
 
 def test_empirical_sampling_distributions_use_production_history() -> None:

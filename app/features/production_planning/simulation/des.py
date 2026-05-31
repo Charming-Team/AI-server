@@ -43,6 +43,7 @@ class ScenarioResult:
     yield_sample_count: int
     defect_quantity: float
     delay_causes: dict[str, int] = field(default_factory=dict)
+    event_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -85,14 +86,16 @@ def run_discrete_event_simulation(
 
     for item in sorted(plan.schedule_items, key=lambda value: (value.start_time, value.line_id)):
         _process_inbounds_until(state, item.start_time)
+        previous_product_id = state.line_last_product_id.get(item.line_id)
+        if previous_product_id is not None and previous_product_id != item.product_id:
+            _increment_counter(totals["event_counts"], "CHANGEOVER")
         actual_start = _calculate_actual_start(item, state, data, solver_config, distributions, rng)
         material_shortage = _consume_materials_or_delay(item, actual_start, state, data)
         if material_shortage:
             actual_start += timedelta(minutes=simulation_config.material_shortage_delay_minutes)
             totals["material_shortage_count"] += 1
-            totals["delay_causes"]["MATERIAL_SHORTAGE"] = (
-                totals["delay_causes"].get("MATERIAL_SHORTAGE", 0) + 1
-            )
+            _increment_counter(totals["delay_causes"], "MATERIAL_SHORTAGE")
+            _increment_counter(totals["event_counts"], "MATERIAL_SHORTAGE")
 
         planned_duration = max(1, round((item.end_time - item.start_time).total_seconds() / 60))
         duration = sample_duration_minutes(
@@ -115,7 +118,8 @@ def run_discrete_event_simulation(
                 product_id=item.product_id,
                 line_id=item.line_id,
             )
-            totals["delay_causes"][cause] = totals["delay_causes"].get(cause, 0) + 1
+            _increment_counter(totals["delay_causes"], cause)
+            _increment_counter(totals["event_counts"], cause)
         actual_end = actual_start + timedelta(minutes=duration + operational_delay)
         _finalize_item(item, actual_end, state, data, totals, distributions, rng)
 
@@ -131,6 +135,7 @@ def run_discrete_event_simulation(
         yield_sample_count=totals["yield_sample_count"],
         defect_quantity=totals["defect_quantity"],
         delay_causes=totals["delay_causes"],
+        event_counts=totals["event_counts"],
     )
 
 
@@ -181,6 +186,9 @@ def _initial_unscheduled_metrics(plan: PlanResult, data: NormalizedPlanningData)
         "yield_sample_count": 0,
         "defect_quantity": Decimal("0"),
         "delay_causes": {"UNSCHEDULED": len(plan.unscheduled_orders)}
+        if plan.unscheduled_orders
+        else {},
+        "event_counts": {"UNSCHEDULED": len(plan.unscheduled_orders)}
         if plan.unscheduled_orders
         else {},
     }
@@ -302,6 +310,7 @@ def _finalize_item(
     if tardiness:
         totals["delayed_order_count"] += 1
         totals["late_penalty_amount"] += normalized_order.order.late_penalty_amount
+        _increment_counter(totals["event_counts"], "LATE_COMPLETION")
     totals["total_tardiness_minutes"] += tardiness
     totals["yield_rate_sum"] += sample_yield_rate(
         distributions,
@@ -310,7 +319,7 @@ def _finalize_item(
         line_id=item.line_id,
     )
     totals["yield_sample_count"] += 1
-    totals["defect_quantity"] += Decimal(item.planned_production_quantity) * Decimal(
+    defect_quantity = Decimal(item.planned_production_quantity) * Decimal(
         str(
             sample_defect_rate(
                 distributions,
@@ -320,6 +329,9 @@ def _finalize_item(
             )
         )
     )
+    totals["defect_quantity"] += defect_quantity
+    if defect_quantity > 0:
+        _increment_counter(totals["event_counts"], "QUALITY_DEFECT")
     previous_product_id = state.line_last_product_id.get(item.line_id)
     if previous_product_id and previous_product_id != item.product_id:
         totals["changeover_cost"] += get_changeover_cost(
@@ -331,3 +343,7 @@ def _finalize_item(
         )
     state.line_available_at[item.line_id] = actual_end
     state.line_last_product_id[item.line_id] = item.product_id
+
+
+def _increment_counter(counter: dict[str, int], key: str) -> None:
+    counter[key] = counter.get(key, 0) + 1
