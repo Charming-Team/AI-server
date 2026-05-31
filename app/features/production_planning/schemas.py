@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.features.production_planning.config import SolverConfig
+from app.features.production_planning.config import SimulationConfig, SolverConfig
 
 PlanFamily = Literal["DUE_DATE_OPTIMAL", "COST_OPTIMAL"]
 
@@ -167,6 +167,7 @@ class ProductionPlanningRequest(BaseModel):
     bom_items: list[BomItemInput] = Field(default_factory=list)
     changeover_rules: list[ChangeoverRuleInput] = Field(default_factory=list)
     solver_config: SolverConfig = Field(default_factory=SolverConfig)
+    simulation_config: SimulationConfig = Field(default_factory=SimulationConfig)
 
 
 class ScheduleItem(BaseModel):
@@ -234,12 +235,65 @@ class PlanComparisonSummary(BaseModel):
     plan_rankings: list[PlanRankingItem]
 
 
+class PlanSimulationResult(BaseModel):
+    plan_variant_code: str
+    plan_family: str
+    iterations: int
+    delay_probability: float
+    expected_delayed_order_count: float
+    expected_tardiness_minutes: float
+    p50_tardiness_minutes: float
+    p90_tardiness_minutes: float
+    p95_tardiness_minutes: float
+    expected_late_penalty_amount: float
+    p95_late_penalty_amount: float
+    expected_changeover_cost: float
+    expected_total_risk_cost: float
+    material_shortage_probability: float
+    expected_material_shortage_count: float
+    expected_yield_rate: float | None
+    expected_defect_quantity: float | None
+    top_delay_causes: list[dict[str, Any]]
+    scenario_summary: dict[str, Any]
+
+
+class SimulationRankingItem(BaseModel):
+    rank: int
+    plan_variant_code: str
+    plan_family: str
+    delay_probability: float
+    expected_delayed_order_count: float
+    expected_total_risk_cost: float
+    material_shortage_probability: float
+    recommendation_note: str
+
+
+class SimulationComparisonSummary(BaseModel):
+    due_date_recommended_plan_variant_code: str
+    cost_recommended_plan_variant_code: str
+    due_date_rankings: list[SimulationRankingItem]
+    cost_rankings: list[SimulationRankingItem]
+
+
+class FinalPlanRecommendation(BaseModel):
+    plan_variant_code: str
+    plan_family: str
+    recommendation_reason: str
+    simulation_metrics: PlanSimulationResult
+    schedule_items: list[ScheduleItem]
+    risk_summary: dict[str, Any]
+
+
 class ProductionPlanningResult(BaseModel):
     request_id: str | None = None
     status: str = "COMPLETED"
     plan_results: list[PlanResult]
     recommended_plan_variant_code: str | None = None
     comparison_summary: PlanComparisonSummary
+    simulation_results: list[PlanSimulationResult] = Field(default_factory=list)
+    simulation_comparison_summary: SimulationComparisonSummary | None = None
+    recommended_due_date_plan: FinalPlanRecommendation | None = None
+    recommended_cost_plan: FinalPlanRecommendation | None = None
     warnings: list[str] = Field(default_factory=list)
     solver_metadata: dict[str, Any]
 

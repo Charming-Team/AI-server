@@ -33,6 +33,23 @@ class CostOptimizationConfig(BaseModel):
     custom_high_amount_threshold: int | None = None
 
 
+class SimulationConfig(BaseModel):
+    enabled: bool = True
+    num_iterations: int = Field(default=100, ge=1)
+    random_seed: int = 20260531
+    min_samples: int = Field(default=10, ge=1)
+    duration_variation_ratio: float = Field(default=0.10, ge=0.0, le=1.0)
+    changeover_variation_ratio: float = Field(default=0.15, ge=0.0, le=1.0)
+    delay_probability: float = Field(default=0.05, ge=0.0, le=1.0)
+    min_delay_minutes: int = Field(default=30, ge=0)
+    max_delay_minutes: int = Field(default=240, ge=0)
+    yield_rate_mean: float = Field(default=0.97, ge=0.0, le=1.0)
+    yield_rate_stddev: float = Field(default=0.02, ge=0.0, le=1.0)
+    defect_rate_mean: float = Field(default=0.01, ge=0.0, le=1.0)
+    defect_rate_stddev: float = Field(default=0.005, ge=0.0, le=1.0)
+    material_shortage_delay_minutes: int = Field(default=24 * 60, ge=0)
+
+
 class SolverConfig(BaseModel):
     time_limit_seconds: int = Field(default=30, ge=1)
     num_search_workers: int = Field(default=8, ge=1)

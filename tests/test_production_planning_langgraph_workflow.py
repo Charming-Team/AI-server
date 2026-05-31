@@ -63,12 +63,19 @@ def test_production_planning_graph_connects_required_nodes() -> None:
         "validate_request",
         "normalize_request",
         "generate_plan_variants",
+        "build_sampling_distributions",
+        "simulate_plan_candidates",
         "compare_plan_variants",
+        "compare_simulation_results",
+        "recommend_final_plans",
         "finalize_result",
     }.issubset(node_names)
     assert ("__start__", "validate_request") in edge_pairs
     assert ("validate_request", "normalize_request") in edge_pairs
-    assert ("generate_plan_variants", "compare_plan_variants") in edge_pairs
+    assert ("generate_plan_variants", "build_sampling_distributions") in edge_pairs
+    assert ("build_sampling_distributions", "simulate_plan_candidates") in edge_pairs
+    assert ("simulate_plan_candidates", "compare_plan_variants") in edge_pairs
+    assert ("compare_simulation_results", "recommend_final_plans") in edge_pairs
     assert ("finalize_result", "__end__") in edge_pairs
 
 
@@ -78,5 +85,8 @@ def test_generate_production_plans_runs_through_langgraph_workflow() -> None:
 
     assert len(direct_result.plan_results) == 6
     assert direct_result.recommended_plan_variant_code is not None
+    assert len(direct_result.simulation_results) == 6
+    assert direct_result.recommended_due_date_plan is not None
+    assert direct_result.recommended_cost_plan is not None
     assert len(node_result.plan_results) == 6
     assert all(plan.status in {"OPTIMAL", "FEASIBLE"} for plan in node_result.plan_results)

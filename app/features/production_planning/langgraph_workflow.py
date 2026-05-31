@@ -12,14 +12,26 @@ from app.features.production_planning.cpsat_model_builder import (
 from app.features.production_planning.objectives import apply_objective_by_variant
 from app.features.production_planning.plan_comparator import compare_plans
 from app.features.production_planning.preprocessing import normalize_request
+from app.features.production_planning.recommendation import (
+    compare_simulation_results,
+    recommend_final_plans,
+)
 from app.features.production_planning.schemas import (
     PLAN_VARIANTS,
+    FinalPlanRecommendation,
     NormalizedPlanningData,
     PlanComparisonSummary,
     PlanResult,
+    PlanSimulationResult,
     ProductionPlanningRequest,
     ProductionPlanningResult,
+    SimulationComparisonSummary,
 )
+from app.features.production_planning.simulation import (
+    build_sampling_distributions,
+    simulate_plan_candidates,
+)
+from app.features.production_planning.simulation.sampling import SamplingDistributions
 from app.features.production_planning.solution_extractor import extract_plan_result
 from app.features.production_planning.solver import solve_model
 from app.features.production_planning.validators import validate_request
@@ -32,7 +44,12 @@ class ProductionPlanningGraphState(TypedDict, total=False):
     validated_request: ProductionPlanningRequest
     normalized_data: NormalizedPlanningData
     plan_results: list[PlanResult]
+    sampling_distributions: SamplingDistributions
+    simulation_results: list[PlanSimulationResult]
     comparison_summary: PlanComparisonSummary
+    simulation_comparison_summary: SimulationComparisonSummary
+    recommended_due_date_plan: FinalPlanRecommendation
+    recommended_cost_plan: FinalPlanRecommendation
     result: ProductionPlanningResult
 
 
@@ -52,14 +69,22 @@ def build_production_planning_graph():
     graph.add_node("validate_request", validate_request_node)
     graph.add_node("normalize_request", normalize_request_node)
     graph.add_node("generate_plan_variants", generate_plan_variants_node)
+    graph.add_node("build_sampling_distributions", build_sampling_distributions_node)
+    graph.add_node("simulate_plan_candidates", simulate_plan_candidates_node)
     graph.add_node("compare_plan_variants", compare_plan_variants_node)
+    graph.add_node("compare_simulation_results", compare_simulation_results_node)
+    graph.add_node("recommend_final_plans", recommend_final_plans_node)
     graph.add_node("finalize_result", finalize_result_node)
 
     graph.add_edge(START, "validate_request")
     graph.add_edge("validate_request", "normalize_request")
     graph.add_edge("normalize_request", "generate_plan_variants")
-    graph.add_edge("generate_plan_variants", "compare_plan_variants")
-    graph.add_edge("compare_plan_variants", "finalize_result")
+    graph.add_edge("generate_plan_variants", "build_sampling_distributions")
+    graph.add_edge("build_sampling_distributions", "simulate_plan_candidates")
+    graph.add_edge("simulate_plan_candidates", "compare_plan_variants")
+    graph.add_edge("compare_plan_variants", "compare_simulation_results")
+    graph.add_edge("compare_simulation_results", "recommend_final_plans")
+    graph.add_edge("recommend_final_plans", "finalize_result")
     graph.add_edge("finalize_result", END)
     return graph.compile()
 
@@ -175,6 +200,117 @@ def compare_plan_variants_node(
     return {"comparison_summary": compare_plans(state["plan_results"])}
 
 
+def build_sampling_distributions_node(
+    state: ProductionPlanningGraphState,
+) -> dict[str, SamplingDistributions]:
+    """
+    Parameters:
+        - state: LangGraph state containing plan candidates and normalized planning data.
+
+    Methodology:
+        - Build simulation sampling distributions before DES execution.
+        - Use deterministic fallback distributions when historical sampling views are not loaded
+          through this in-memory request path.
+
+    Output:
+        - Partial graph state with sampling_distributions.
+    """
+    logger.info("production_planning.simulation.sampling.started")
+    distributions = build_sampling_distributions(
+        state["plan_results"],
+        state["normalized_data"],
+        state["validated_request"].simulation_config,
+    )
+    logger.info(
+        "production_planning.simulation.sampling.completed",
+        extra={"warnings": len(distributions.warnings)},
+    )
+    return {"sampling_distributions": distributions}
+
+
+def simulate_plan_candidates_node(
+    state: ProductionPlanningGraphState,
+) -> dict[str, list[PlanSimulationResult]]:
+    """
+    Parameters:
+        - state: LangGraph state containing plan candidates, normalized data, and sampling data.
+
+    Methodology:
+        - Run Monte Carlo + DES for every CP-SAT candidate plan.
+        - Preserve one simulation result per plan variant.
+
+    Output:
+        - Partial graph state with simulation_results.
+    """
+    validated = state["validated_request"]
+    logger.info(
+        "production_planning.simulation.started",
+        extra={
+            "plans": len(state["plan_results"]),
+            "iterations": validated.simulation_config.num_iterations,
+        },
+    )
+    results = simulate_plan_candidates(
+        state["plan_results"],
+        state["normalized_data"],
+        validated.solver_config,
+        validated.simulation_config,
+        state["sampling_distributions"],
+    )
+    logger.info(
+        "production_planning.simulation.completed",
+        extra={"simulation_results": len(results)},
+    )
+    return {"simulation_results": results}
+
+
+def compare_simulation_results_node(
+    state: ProductionPlanningGraphState,
+) -> dict[str, SimulationComparisonSummary]:
+    """
+    Parameters:
+        - state: LangGraph state containing simulation results for all plan variants.
+
+    Methodology:
+        - Rank simulated due-date and cost families separately.
+        - Produce the family-specific recommendation summary required by downstream response
+          assembly.
+
+    Output:
+        - Partial graph state with simulation_comparison_summary.
+    """
+    return {
+        "simulation_comparison_summary": compare_simulation_results(
+            state["simulation_results"]
+        )
+    }
+
+
+def recommend_final_plans_node(
+    state: ProductionPlanningGraphState,
+) -> dict[str, FinalPlanRecommendation]:
+    """
+    Parameters:
+        - state: LangGraph state containing plan candidates and simulation comparison summary.
+
+    Methodology:
+        - Select exactly one simulated due-date recommendation and one simulated cost
+          recommendation.
+
+    Output:
+        - Partial graph state with recommended_due_date_plan and recommended_cost_plan.
+    """
+    due_date_plan, cost_plan = recommend_final_plans(
+        state["plan_results"],
+        state["simulation_results"],
+        state["simulation_comparison_summary"],
+    )
+    return {
+        "recommended_due_date_plan": due_date_plan,
+        "recommended_cost_plan": cost_plan,
+    }
+
+
 def finalize_result_node(
     state: ProductionPlanningGraphState,
 ) -> dict[str, ProductionPlanningResult]:
@@ -193,6 +329,7 @@ def finalize_result_node(
     warnings = []
     for plan in plan_results:
         warnings.extend(plan.warnings)
+    warnings.extend(state["sampling_distributions"].warnings)
 
     return {
         "result": ProductionPlanningResult(
@@ -200,6 +337,10 @@ def finalize_result_node(
             plan_results=plan_results,
             recommended_plan_variant_code=comparison_summary.recommended_plan_variant_code,
             comparison_summary=comparison_summary,
+            simulation_results=state["simulation_results"],
+            simulation_comparison_summary=state["simulation_comparison_summary"],
+            recommended_due_date_plan=state["recommended_due_date_plan"],
+            recommended_cost_plan=state["recommended_cost_plan"],
             warnings=warnings,
             solver_metadata={
                 plan.plan_variant_code: plan.solver_metadata for plan in plan_results
