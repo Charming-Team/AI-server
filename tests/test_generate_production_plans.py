@@ -547,6 +547,53 @@ def test_expected_inbound_at_delays_material_usage_until_arrival() -> None:
     assert item.start_time >= inbound_at
 
 
+def test_zero_inventory_material_without_inbound_does_not_block_family() -> None:
+    start = datetime(2026, 5, 22, 9, tzinfo=UTC)
+    request = ProductionPlanningRequest(
+        planning_start=start,
+        planning_end=start + timedelta(hours=3),
+        orders=[
+            OrderInput(
+                order_id="O-1",
+                product_id="P-1",
+                quantity=1,
+                due_date=start + timedelta(hours=2),
+                order_amount=100,
+            )
+        ],
+        products=[
+            ProductInput(
+                product_id="P-1",
+                product_name="Product",
+                default_process_time_minutes=30,
+            )
+        ],
+        production_lines=[
+            ProductionLineInput(line_id="L-1", line_name="Line 1", is_active=True),
+        ],
+        product_line_capabilities=[
+            ProductLineCapabilityInput(product_id="P-1", line_id="L-1"),
+        ],
+        materials=[
+            MaterialInput(
+                material_id="M-1",
+                material_name="Material",
+                available_quantity=0,
+            )
+        ],
+        bom_items=[
+            BomItemInput(product_id="P-1", material_id="M-1", required_quantity_per_unit=1)
+        ],
+        solver_config=SolverConfig(time_limit_seconds=5, num_search_workers=1),
+    )
+
+    result = generate_production_plans(request)
+    plan = _plan_by_code(result, "DUE_DATE_MIN_DELAY_COUNT")
+
+    assert plan.metrics.scheduled_count == 1
+    assert plan.metrics.unscheduled_count == 0
+
+
 def _plan_result(
     variant_code: str,
     family: str,

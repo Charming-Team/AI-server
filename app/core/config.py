@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     report_rdb_dsn: str | None = None
     report_rdb_timeout_seconds: float = 5.0
 
+    planning_rdb_enabled: bool = True
+    planning_rdb_dsn: str | None = None
+    planning_rdb_timeout_seconds: float = 10.0
+
     qdrant_search_enabled: bool = False
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
@@ -85,6 +89,13 @@ class Settings(BaseSettings):
             return self._to_sqlalchemy_psycopg_url(self.rdb_evidence_dsn)
 
         return "postgresql+psycopg://postgres:postgres@localhost:5432/smap"
+
+    @property
+    def planning_postgres_url(self) -> str:
+        if self.planning_rdb_dsn and self.planning_rdb_dsn.strip():
+            return self._to_sqlalchemy_psycopg_url(self.planning_rdb_dsn)
+
+        return "postgresql+psycopg://smap_planning:changeme@127.0.0.1:15432/smap"
 
     @staticmethod
     def _to_sqlalchemy_psycopg_url(dsn: str) -> str:

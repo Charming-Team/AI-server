@@ -426,7 +426,7 @@ def calculate_processing_duration_minutes(
     quantity = calculate_planned_production_quantity(order, product)
     if capability.yield_rate_scaled is not None:
         quantity = ceil(quantity * YIELD_SCALE / capability.yield_rate_scaled)
-    return quantity * process_time + (capability.fixed_setup_minutes or 0)
+    return ceil(quantity * process_time) + (capability.fixed_setup_minutes or 0)
 
 
 def get_order_quantity(order: OrderInput) -> int:
@@ -462,7 +462,7 @@ def calculate_required_material_quantity_scaled(
 
 
 def get_initial_available_material_quantity_scaled(material) -> int:
-    available = max(material.available_quantity - material.safety_stock_quantity, Decimal("0"))
+    available = max(Decimal(str(material.available_quantity or 0)), Decimal("0"))
     return decimal_to_scaled_floor(available)
 
 

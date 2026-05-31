@@ -76,7 +76,7 @@ class ProductInput(BaseModel):
     product_id: str
     product_name: str
     grade: str | None = None
-    default_process_time_minutes: int | None = None
+    default_process_time_minutes: float | None = None
     unit: str | None = None
     average_yield_rate: Decimal | None = None
     min_production_quantity: int | None = None
@@ -86,7 +86,6 @@ class ProductionLineInput(BaseModel):
     line_id: str
     line_name: str
     is_active: bool
-    daily_capacity_minutes: int | None = None
     max_capacity_per_day: int | None = None
     capacity_unit: str | None = None
     supports_changeover: bool = True
@@ -97,7 +96,7 @@ class ProductionLineInput(BaseModel):
 class ProductLineCapabilityInput(BaseModel):
     product_id: str
     line_id: str
-    process_time_per_unit_minutes: int | None = None
+    process_time_per_unit_minutes: float | None = None
     fixed_setup_minutes: int | None = None
     yield_rate_scaled: int | None = None
     standard_yield_rate: Decimal | None = None
@@ -321,7 +320,7 @@ class NormalizedPlanningData:
 
 @dataclass
 class RawSolverResult:
-    plan_type: str
+    plan_variant_code: str
     status: str
     objective_value: float | None
     wall_time_seconds: float
