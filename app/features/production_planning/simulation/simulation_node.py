@@ -4,6 +4,9 @@ from collections import Counter
 from random import Random
 
 from app.features.production_planning.config import SimulationConfig, SolverConfig
+from app.features.production_planning.repositories.simulation_data_repository import (
+    SimulationInputBundle,
+)
 from app.features.production_planning.schemas import (
     NormalizedPlanningData,
     PlanResult,
@@ -15,6 +18,7 @@ from app.features.production_planning.simulation.des import (
 )
 from app.features.production_planning.simulation.sampling import (
     SamplingDistributions,
+    build_empirical_sampling_distributions,
 )
 from app.features.production_planning.simulation.sampling import (
     build_sampling_distributions as build_fallback_sampling_distributions,
@@ -25,22 +29,32 @@ def build_sampling_distributions(
     plan_results: list[PlanResult],
     data: NormalizedPlanningData,
     config: SimulationConfig,
+    simulation_input: SimulationInputBundle | None = None,
 ) -> SamplingDistributions:
     """
     Parameters:
         - plan_results: Six CP-SAT candidate plans.
         - data: Normalized planning data shared by planning and simulation.
         - config: Simulation configuration.
+        - simulation_input: Optional historical rows from ai_planning sampling views.
 
     Methodology:
-        - Delegate to the fallback distribution builder.
-        - Keep this as the Simulation Node boundary so DB-backed sampling can be introduced
-          without changing DES internals.
+        - Use empirical historical distributions when production result history is available.
+        - Use configured fallback distributions as the safe default when DB sampling data is
+          unavailable or sparse.
 
     Output:
         - SamplingDistributions for Monte Carlo simulation.
     """
-    return build_fallback_sampling_distributions(plan_results, data, config)
+    if simulation_input is not None and simulation_input.production_results:
+        return build_empirical_sampling_distributions(simulation_input, data, config)
+    fallback = build_fallback_sampling_distributions(plan_results, data, config)
+    if simulation_input is not None:
+        fallback.warnings.extend(simulation_input.warnings)
+        fallback.warnings.append(
+            "Production result sampling history is empty; using fallback distributions."
+        )
+    return fallback
 
 
 def simulate_plan_candidates(

@@ -21,6 +21,7 @@ from app.features.production_planning.schemas import (
 )
 from app.features.production_planning.simulation.sampling import (
     SamplingDistributions,
+    sample_cause,
     sample_changeover_minutes,
     sample_defect_rate,
     sample_duration_minutes,
@@ -94,12 +95,27 @@ def run_discrete_event_simulation(
             )
 
         planned_duration = max(1, round((item.end_time - item.start_time).total_seconds() / 60))
-        duration = sample_duration_minutes(planned_duration, distributions, rng)
-        operational_delay = sample_operational_delay_minutes(distributions, rng)
+        duration = sample_duration_minutes(
+            planned_duration,
+            distributions,
+            rng,
+            product_id=item.product_id,
+            line_id=item.line_id,
+        )
+        operational_delay = sample_operational_delay_minutes(
+            distributions,
+            rng,
+            product_id=item.product_id,
+            line_id=item.line_id,
+        )
         if operational_delay:
-            totals["delay_causes"]["OPERATIONAL_DELAY"] = (
-                totals["delay_causes"].get("OPERATIONAL_DELAY", 0) + 1
+            cause = sample_cause(
+                distributions,
+                rng,
+                product_id=item.product_id,
+                line_id=item.line_id,
             )
+            totals["delay_causes"][cause] = totals["delay_causes"].get(cause, 0) + 1
         actual_end = actual_start + timedelta(minutes=duration + operational_delay)
         _finalize_item(item, actual_end, state, data, totals, distributions, rng)
 
@@ -190,7 +206,14 @@ def _calculate_actual_start(
         data.changeover_rules,
         solver_config.default_changeover_minutes,
     )
-    sampled_changeover = sample_changeover_minutes(standard_changeover, distributions, rng)
+    sampled_changeover = sample_changeover_minutes(
+        standard_changeover,
+        distributions,
+        rng,
+        from_product_id=previous_product_id,
+        to_product_id=item.product_id,
+        line_id=item.line_id,
+    )
     return max(item.start_time, line_available + timedelta(minutes=sampled_changeover))
 
 
@@ -280,10 +303,22 @@ def _finalize_item(
         totals["delayed_order_count"] += 1
         totals["late_penalty_amount"] += normalized_order.order.late_penalty_amount
     totals["total_tardiness_minutes"] += tardiness
-    totals["yield_rate_sum"] += sample_yield_rate(distributions, rng)
+    totals["yield_rate_sum"] += sample_yield_rate(
+        distributions,
+        rng,
+        product_id=item.product_id,
+        line_id=item.line_id,
+    )
     totals["yield_sample_count"] += 1
     totals["defect_quantity"] += Decimal(item.planned_production_quantity) * Decimal(
-        str(sample_defect_rate(distributions, rng))
+        str(
+            sample_defect_rate(
+                distributions,
+                rng,
+                product_id=item.product_id,
+                line_id=item.line_id,
+            )
+        )
     )
     previous_product_id = state.line_last_product_id.get(item.line_id)
     if previous_product_id and previous_product_id != item.product_id:

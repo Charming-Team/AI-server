@@ -1,13 +1,20 @@
 from datetime import UTC, datetime, timedelta
 
 from app.features.production_planning.config import SimulationConfig, SolverConfig
+from app.features.production_planning.preprocessing import normalize_request
 from app.features.production_planning.production_planning_node import generate_production_plans
+from app.features.production_planning.repositories.simulation_data_repository import (
+    SimulationInputBundle,
+)
 from app.features.production_planning.schemas import (
     OrderInput,
     ProductInput,
     ProductionLineInput,
     ProductionPlanningRequest,
     ProductLineCapabilityInput,
+)
+from app.features.production_planning.simulation.sampling import (
+    build_empirical_sampling_distributions,
 )
 
 
@@ -61,3 +68,44 @@ def test_simulation_node_returns_one_result_per_plan_candidate() -> None:
     assert result.recommended_cost_plan is not None
     assert result.recommended_due_date_plan.plan_family == "DUE_DATE_OPTIMAL"
     assert result.recommended_cost_plan.plan_family == "COST_OPTIMAL"
+
+
+def test_empirical_sampling_distributions_use_production_history() -> None:
+    request = _request()
+    raw_data = SimulationInputBundle(
+        production_results=[
+            {
+                "product_id": "P-1",
+                "line_id": "L-1",
+                "product_category": None,
+                "actual_duration_hr": 1.0,
+                "actual_setup_time_hr": 0.1,
+                "actual_delay_hr": 0.5,
+                "is_delayed": True,
+                "yield_rate": 0.95,
+                "actual_quantity": 100,
+                "defect_quantity": 2,
+            }
+        ],
+        production_result_causes=[
+            {"product_id": "P-1", "line_id": "L-1", "cause_type": "MACHINE_DELAY"}
+        ],
+        changeover_sequences=[],
+        orders_history=[],
+        production_plans_history=[],
+        ai_prediction_results=[],
+        ai_prediction_causes=[],
+        simulation_results_history=[],
+        simulation_details_history=[],
+    )
+
+    distributions = build_empirical_sampling_distributions(
+        raw_data,
+        normalize_request(request),
+        SimulationConfig(min_samples=1),
+    )
+
+    assert ("P-1", "L-1") in distributions.duration_params_by_context
+    assert distributions.cause_weights_by_context[("P-1", "L-1")] == {
+        "MACHINE_DELAY": 1.0
+    }

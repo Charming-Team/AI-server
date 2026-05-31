@@ -9,12 +9,17 @@ from app.features.production_planning.cpsat_model_builder import (
     CpsatModelBundle,
     build_base_cpsat_model,
 )
+from app.features.production_planning.exceptions import PlanningDataAccessError
 from app.features.production_planning.objectives import apply_objective_by_variant
 from app.features.production_planning.plan_comparator import compare_plans
 from app.features.production_planning.preprocessing import normalize_request
 from app.features.production_planning.recommendation import (
     compare_simulation_results,
     recommend_final_plans,
+)
+from app.features.production_planning.repositories.simulation_data_repository import (
+    SimulationDataRepository,
+    SimulationInputBundle,
 )
 from app.features.production_planning.schemas import (
     PLAN_VARIANTS,
@@ -44,6 +49,7 @@ class ProductionPlanningGraphState(TypedDict, total=False):
     validated_request: ProductionPlanningRequest
     normalized_data: NormalizedPlanningData
     plan_results: list[PlanResult]
+    simulation_input: SimulationInputBundle | None
     sampling_distributions: SamplingDistributions
     simulation_results: list[PlanSimulationResult]
     comparison_summary: PlanComparisonSummary
@@ -69,6 +75,7 @@ def build_production_planning_graph():
     graph.add_node("validate_request", validate_request_node)
     graph.add_node("normalize_request", normalize_request_node)
     graph.add_node("generate_plan_variants", generate_plan_variants_node)
+    graph.add_node("load_simulation_input_from_db", load_simulation_input_from_db_node)
     graph.add_node("build_sampling_distributions", build_sampling_distributions_node)
     graph.add_node("simulate_plan_candidates", simulate_plan_candidates_node)
     graph.add_node("compare_plan_variants", compare_plan_variants_node)
@@ -79,7 +86,8 @@ def build_production_planning_graph():
     graph.add_edge(START, "validate_request")
     graph.add_edge("validate_request", "normalize_request")
     graph.add_edge("normalize_request", "generate_plan_variants")
-    graph.add_edge("generate_plan_variants", "build_sampling_distributions")
+    graph.add_edge("generate_plan_variants", "load_simulation_input_from_db")
+    graph.add_edge("load_simulation_input_from_db", "build_sampling_distributions")
     graph.add_edge("build_sampling_distributions", "simulate_plan_candidates")
     graph.add_edge("simulate_plan_candidates", "compare_plan_variants")
     graph.add_edge("compare_plan_variants", "compare_simulation_results")
@@ -200,6 +208,46 @@ def compare_plan_variants_node(
     return {"comparison_summary": compare_plans(state["plan_results"])}
 
 
+def load_simulation_input_from_db_node(
+    state: ProductionPlanningGraphState,
+) -> dict[str, SimulationInputBundle | None]:
+    """
+    Parameters:
+        - state: LangGraph state after CP-SAT plan candidate generation.
+
+    Methodology:
+        - Skip DB loading when simulation is disabled.
+        - Load all ai_planning sampling views through SimulationDataRepository.
+        - On sampling DB access failure, log a warning and allow downstream fallback
+          distributions to keep the workflow usable.
+
+    Output:
+        - Partial graph state with simulation_input.
+    """
+    validated = state["validated_request"]
+    if not validated.simulation_config.enabled:
+        return {"simulation_input": None}
+
+    logger.info("production_planning.simulation.db_load.started")
+    try:
+        bundle = SimulationDataRepository().load_simulation_input_bundle()
+        logger.info(
+            "production_planning.simulation.db_load.completed",
+            extra={
+                "production_results": len(bundle.production_results),
+                "production_result_causes": len(bundle.production_result_causes),
+                "changeover_sequences": len(bundle.changeover_sequences),
+            },
+        )
+        return {"simulation_input": bundle}
+    except PlanningDataAccessError as exc:
+        logger.warning(
+            "production_planning.simulation.db_load.failed",
+            extra={"error": str(exc)},
+        )
+        return {"simulation_input": None}
+
+
 def build_sampling_distributions_node(
     state: ProductionPlanningGraphState,
 ) -> dict[str, SamplingDistributions]:
@@ -220,6 +268,7 @@ def build_sampling_distributions_node(
         state["plan_results"],
         state["normalized_data"],
         state["validated_request"].simulation_config,
+        state.get("simulation_input"),
     )
     logger.info(
         "production_planning.simulation.sampling.completed",

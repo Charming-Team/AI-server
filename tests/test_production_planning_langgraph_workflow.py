@@ -63,6 +63,7 @@ def test_production_planning_graph_connects_required_nodes() -> None:
         "validate_request",
         "normalize_request",
         "generate_plan_variants",
+        "load_simulation_input_from_db",
         "build_sampling_distributions",
         "simulate_plan_candidates",
         "compare_plan_variants",
@@ -72,7 +73,8 @@ def test_production_planning_graph_connects_required_nodes() -> None:
     }.issubset(node_names)
     assert ("__start__", "validate_request") in edge_pairs
     assert ("validate_request", "normalize_request") in edge_pairs
-    assert ("generate_plan_variants", "build_sampling_distributions") in edge_pairs
+    assert ("generate_plan_variants", "load_simulation_input_from_db") in edge_pairs
+    assert ("load_simulation_input_from_db", "build_sampling_distributions") in edge_pairs
     assert ("build_sampling_distributions", "simulate_plan_candidates") in edge_pairs
     assert ("simulate_plan_candidates", "compare_plan_variants") in edge_pairs
     assert ("compare_simulation_results", "recommend_final_plans") in edge_pairs
