@@ -14,7 +14,11 @@ from app.features.delay_prediction.features import (
 
 
 def validate_training_dataframe(df: pd.DataFrame) -> None:
-    missing_columns = [column for column in FEATURE_COLUMNS + [TARGET_COLUMN] if column not in df.columns]
+    missing_columns = [
+        column
+        for column in FEATURE_COLUMNS + [TARGET_COLUMN]
+        if column not in df.columns
+    ]
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
 
