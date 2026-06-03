@@ -6,6 +6,14 @@ from ortools.sat.python import cp_model
 
 from app.features.production_planning.config import AmountOptimizationConfig, SolverConfig
 from app.features.production_planning.cpsat_model_builder import CpsatModelBundle
+from app.features.production_planning.preprocessing import (
+    MATERIAL_QUANTITY_SCALE,
+    calculate_required_material_quantity_scaled,
+    get_inbound_material_quantity_scaled,
+    get_inbound_material_time,
+    get_initial_available_material_quantity_scaled,
+    to_minute_offset,
+)
 from app.features.production_planning.schemas import (
     AmountObjectiveTerms,
     AmountReferenceData,
@@ -41,15 +49,20 @@ def apply_due_date_min_delay_count_objective(
     total_changeover_minutes = build_total_changeover_minutes_expr(bundle)
     unscheduled_penalty = build_unscheduled_penalty_expr(bundle, config)
     total_line_priority_penalty = build_total_line_priority_penalty_expr(bundle, data)
+    completion_priority = build_due_date_completion_priority_expr(bundle, data)
+    total_material_shortage = build_total_material_shortage_expr(model, bundle, data)
+    weights = config.due_date_optimization
 
     model.Minimize(
-        100_000_000_000_000 * unscheduled_penalty
-        + 100_000_000_000 * delayed_count
-        + 10_000 * total_tardiness
-        + 1_000 * max_tardiness
-        + 10 * total_changeover_minutes
-        + total_line_priority_penalty
-        + makespan
+        weights.unscheduled_order_weight * unscheduled_penalty
+        + weights.delayed_order_count_weight * delayed_count
+        + weights.total_tardiness_weight * total_tardiness
+        + weights.max_tardiness_weight * max_tardiness
+        + weights.material_shortage_weight * total_material_shortage
+        + weights.due_date_completion_priority_weight * completion_priority
+        + weights.total_changeover_minutes_weight * total_changeover_minutes
+        + weights.line_priority_weight * total_line_priority_penalty
+        + weights.makespan_weight * makespan
     )
 
 
@@ -276,12 +289,8 @@ def apply_objective_by_variant(
         - None. Delegates to the chosen objective function.
     """
     dispatch = {
-        "DUE_DATE_MIN_DELAY_COUNT": apply_due_date_min_delay_count_objective,
-        "DUE_DATE_MIN_TOTAL_TARDINESS": apply_due_date_min_total_tardiness_objective,
-        "DUE_DATE_BALANCED": apply_due_date_balanced_objective,
-        "COST_MIN_TOTAL_COST": apply_cost_min_total_cost_objective,
-        "COST_MIN_CHANGEOVER_COST": apply_cost_min_changeover_cost_objective,
-        "COST_BALANCED": apply_cost_balanced_objective,
+        "DUE_DATE_OPTIMAL": apply_due_date_objective,
+        "AMOUNT_OPTIMAL": apply_amount_objective,
     }
     dispatch[variant_code](model, bundle, data, config)
 
@@ -466,7 +475,6 @@ def build_amount_objective_terms(
     model: cp_model.CpModel,
     bundle: CpsatModelBundle,
     data: NormalizedPlanningData,
-    amount_reference_data: AmountReferenceData,
     amount_config: AmountOptimizationConfig,
 ) -> AmountObjectiveTerms:
     """
@@ -474,33 +482,19 @@ def build_amount_objective_terms(
         - model: CP-SAT model receiving aggregate metric variables.
         - bundle: Variable bundle from common model construction.
         - data: Normalized planning data.
-        - amount_reference_data: Prepared amount and high-value order lookups.
         - amount_config: Configurable amount objective weights and scale policy.
 
     Methodology:
-        - Build amount objective expressions from prepared reference data only.
-        - Keep scheduled reward, amount-weighted tardiness, unscheduled amount, high-amount
-          delay, changeover cost, makespan, and due-date safety as named terms.
+        - Build cost objective terms from actual penalty and operating-cost fields.
+        - Do not use order contract amount or revenue as an optimization signal.
 
     Output:
         - AmountObjectiveTerms containing linear expressions and aggregate variables.
     """
     return AmountObjectiveTerms(
-        total_scheduled_amount=build_total_scheduled_amount_expr(bundle, amount_reference_data),
-        amount_weighted_tardiness=build_amount_weighted_tardiness_expr(
-            bundle,
-            amount_reference_data,
-        ),
-        unscheduled_amount_penalty=build_unscheduled_amount_penalty_expr(
-            bundle,
-            amount_reference_data,
-        ),
-        high_amount_delay_penalty=build_delayed_high_amount_penalty_expr(
-            model,
-            bundle,
-            amount_reference_data,
-        ),
+        total_late_penalty_amount=build_total_late_penalty_amount_expr(model, bundle, data),
         total_changeover_cost=build_total_changeover_cost_expr(bundle),
+        total_material_shortage=build_total_material_shortage_expr(model, bundle, data),
         total_line_priority_penalty=build_total_line_priority_penalty_expr(bundle, data),
         makespan=build_makespan_var(model, bundle, data),
         total_tardiness=build_total_tardiness_var(model, bundle, data),
@@ -611,6 +605,129 @@ def build_total_changeover_cost_expr(bundle: CpsatModelBundle) -> Any:
     return sum(item["cost"] * item["before_var"] for item in bundle.changeover_vars["sequence"])
 
 
+def build_total_material_shortage_expr(
+    model: cp_model.CpModel,
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+) -> Any:
+    """
+    Parameters:
+        - model: CP-SAT model receiving material shortage variables.
+        - bundle: Variable bundle containing scheduled decision variables.
+        - data: Normalized planning data with materials and BOM consumption rules.
+
+    Methodology:
+        - Recompute material requirements from BOM by product_id for scheduled orders.
+        - Represent total shortage and pre-inbound shortage as non-negative slack variables.
+        - This keeps material feasibility soft while still penalizing plans that consume
+          unavailable stock or start before expected inbound can support production.
+
+    Output:
+        - Linear expression summing material shortage quantities in material units.
+    """
+    shortage_vars = []
+    for material_id, material in data.materials.items():
+        required_terms = []
+        required_bound = 0
+        for order_id, normalized_order in data.orders.items():
+            product = data.products[normalized_order.order.product_id]
+            quantity_required = _calculate_order_material_requirement_units(
+                normalized_order.order,
+                product,
+                data,
+                material_id,
+            )
+            if not quantity_required:
+                continue
+            required_terms.append(quantity_required * bundle.order_vars[order_id]["scheduled"])
+            required_bound += quantity_required
+        if not required_terms:
+            continue
+
+        available = (
+            _scaled_quantity_to_units(get_initial_available_material_quantity_scaled(material))
+            + _scaled_quantity_to_units(get_inbound_material_quantity_scaled(material))
+        )
+        shortage = model.NewIntVar(
+            0,
+            required_bound,
+            f"soft_material_shortage_{material_id}",
+        )
+        model.Add(shortage >= sum(required_terms) - available)
+        shortage_vars.append(shortage)
+
+        before_inbound_terms = _build_before_inbound_material_terms(
+            model,
+            bundle,
+            data,
+            material_id,
+        )
+        if before_inbound_terms:
+            initial_available = _scaled_quantity_to_units(
+                get_initial_available_material_quantity_scaled(material)
+            )
+            before_inbound_shortage = model.NewIntVar(
+                0,
+                required_bound,
+                f"soft_material_before_inbound_shortage_{material_id}",
+            )
+            model.Add(before_inbound_shortage >= sum(before_inbound_terms) - initial_available)
+            shortage_vars.append(before_inbound_shortage)
+    return sum(shortage_vars)
+
+
+def _build_before_inbound_material_terms(
+    model: cp_model.CpModel,
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+    material_id: str,
+) -> list[Any]:
+    material = data.materials[material_id]
+    inbound_time = get_inbound_material_time(material)
+    if inbound_time is None:
+        return []
+    inbound_offset = to_minute_offset(inbound_time, data.planning_start)
+    if inbound_offset <= 0 or inbound_offset > data.horizon_minutes:
+        return []
+
+    terms = []
+    for order_id, normalized_order in data.orders.items():
+        product = data.products[normalized_order.order.product_id]
+        quantity_required = _calculate_order_material_requirement_units(
+            normalized_order.order,
+            product,
+            data,
+            material_id,
+        )
+        if not quantity_required:
+            continue
+        for line_id, assigned in bundle.order_vars[order_id]["assigned"].items():
+            starts_before = model.NewBoolVar(
+                f"soft_material_{material_id}_{order_id}_{line_id}_before_inbound"
+            )
+            model.Add(starts_before <= assigned)
+            start = bundle.order_vars[order_id]["start"][line_id]
+            model.Add(start <= inbound_offset - 1).OnlyEnforceIf(starts_before)
+            model.Add(start >= inbound_offset).OnlyEnforceIf(
+                [assigned, starts_before.Not()]
+            )
+            terms.append(quantity_required * starts_before)
+    return terms
+
+
+def _calculate_order_material_requirement_units(order, product, data, material_id: str) -> int:
+    required_scaled = sum(
+        calculate_required_material_quantity_scaled(order, product, bom_item)
+        for bom_item in data.bom_items_by_product_id.get(order.product_id, [])
+        if bom_item.material_id == material_id
+    )
+    return _scaled_quantity_to_units(required_scaled)
+
+
+def _scaled_quantity_to_units(quantity_scaled: int) -> int:
+    return (quantity_scaled + MATERIAL_QUANTITY_SCALE - 1) // MATERIAL_QUANTITY_SCALE
+
+
 def build_total_late_penalty_amount_expr(
     model: cp_model.CpModel,
     bundle: CpsatModelBundle,
@@ -714,9 +831,28 @@ def apply_amount_objective(
         - config: Solver configuration.
 
     Methodology:
-        - Preserve the old entry point by delegating to the cost-balanced variant.
+        - Minimize actual penalty-related costs: late penalty, changeover cost, and material
+          shortage penalty.
+        - Use line priority, makespan, and tardiness only as secondary tie-breakers.
 
     Output:
         - None. Model objective updated in place.
     """
-    apply_cost_balanced_objective(model, bundle, data, config)
+    amount_config = load_amount_optimization_config(config)
+    terms = build_amount_objective_terms(
+        model,
+        bundle,
+        data,
+        amount_config,
+    )
+    unscheduled_order_penalty = build_unscheduled_penalty_expr(bundle, config)
+
+    model.Minimize(
+        config.due_date_optimization.unscheduled_order_weight * unscheduled_order_penalty
+        + amount_config.late_penalty_weight * terms.total_late_penalty_amount
+        + amount_config.material_shortage_weight * terms.total_material_shortage
+        + amount_config.changeover_cost_weight * terms.total_changeover_cost
+        + amount_config.line_priority_weight * terms.total_line_priority_penalty
+        + amount_config.makespan_weight * terms.makespan
+        + amount_config.due_date_safety_weight * terms.total_tardiness
+    )

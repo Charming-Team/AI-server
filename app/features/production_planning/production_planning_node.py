@@ -25,7 +25,7 @@ def generate_production_plans(
           comparison, and finalization nodes.
 
     Output:
-        - ProductionPlanningResult with 6 plan variants and comparison summary.
+        - ProductionPlanningResult with due-date and amount optimal plans plus comparison summary.
     """
     return run_production_planning_graph(request)
 
@@ -44,13 +44,22 @@ def generate_production_plans_from_db(
     Methodology:
         - Load all planning input data from ai_planning schema views via PlanningDataRepository.
         - Build a ProductionPlanningRequest from the loaded bundle and the supplied time window.
-        - Delegate to generate_production_plans() to run the full 6-variant optimization.
+        - Delegate to generate_production_plans() to run the two-plan optimization.
 
     Output:
-        - ProductionPlanningResult with 6 plan variants and comparison summary.
+        - ProductionPlanningResult with due-date and amount optimal plans plus comparison summary.
     """
     repository = PlanningDataRepository()
-    bundle = repository.load_planning_input_bundle()
+    effective_config = solver_config or SolverConfig()
+    bundle = repository.load_planning_input_bundle(
+        planning_start,
+        planning_end,
+        effective_config.excluded_order_statuses,
+        use_existing_plans_as_orders=True,
+        excluded_rescheduling_plan_statuses=(
+            effective_config.excluded_rescheduling_plan_statuses
+        ),
+    )
 
     request = ProductionPlanningRequest(
         planning_start=planning_start,
@@ -63,7 +72,7 @@ def generate_production_plans_from_db(
         changeover_rules=bundle.changeover_rules,
         materials=bundle.material_inventories,
         bom_items=bundle.bom_items,
-        solver_config=solver_config or SolverConfig(),
+        solver_config=effective_config,
     )
 
     return generate_production_plans(request)

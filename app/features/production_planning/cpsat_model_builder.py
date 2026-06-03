@@ -278,6 +278,13 @@ def _add_daily_capacity_constraints(
         for bucket_index in range(bucket_count):
             line_terms = []
             for candidate in candidates:
+                if not _fits_completion_bucket_capacity(
+                    bundle,
+                    "line",
+                    candidate,
+                    line.max_capacity_per_day,
+                ):
+                    continue
                 in_bucket = _build_completion_bucket_var(bundle, candidate, bucket_index)
                 line_terms.append(candidate.planned_production_quantity * in_bucket)
             if line.max_capacity_per_day is not None and line_terms:
@@ -291,12 +298,43 @@ def _add_daily_capacity_constraints(
                 capability = data.capabilities[(product_id, line_id)]
                 if capability.capacity_per_day is None:
                     continue
-                terms = [
-                    candidate.planned_production_quantity
-                    * _build_completion_bucket_var(bundle, candidate, bucket_index)
-                    for candidate in product_candidates
-                ]
+                terms = []
+                for candidate in product_candidates:
+                    if not _fits_completion_bucket_capacity(
+                        bundle,
+                        "product-line",
+                        candidate,
+                        capability.capacity_per_day,
+                    ):
+                        continue
+                    terms.append(
+                        candidate.planned_production_quantity
+                        * _build_completion_bucket_var(bundle, candidate, bucket_index)
+                    )
+                if not terms:
+                    continue
                 bundle.model.Add(sum(terms) <= capability.capacity_per_day)
+
+
+def _fits_completion_bucket_capacity(
+    bundle: CpsatModelBundle,
+    scope: str,
+    candidate: ProcessingCandidate,
+    capacity: int | None,
+) -> bool:
+    if capacity is None or candidate.planned_production_quantity <= capacity:
+        return True
+
+    skipped = bundle.metric_vars.setdefault("oversized_capacity_candidates", set())
+    key = (scope, candidate.order_id, candidate.line_id)
+    if key not in skipped:
+        skipped.add(key)
+        bundle.warnings.append(
+            f"Skipped {scope} completion-bucket capacity for order {candidate.order_id} "
+            f"on line {candidate.line_id}: planned quantity "
+            f"{candidate.planned_production_quantity} exceeds daily capacity {capacity}."
+        )
+    return False
 
 
 def _build_completion_bucket_var(

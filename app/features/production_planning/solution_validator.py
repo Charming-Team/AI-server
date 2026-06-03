@@ -96,7 +96,6 @@ def verify_hard_constraints(
         violations.extend(_verify_line_availability(plan.schedule_items, data, tag))
         violations.extend(_verify_daily_capacity(plan.schedule_items, data, tag))
         violations.extend(_verify_no_changeover_lines(plan.schedule_items, data, tag))
-        violations.extend(_verify_material_usage(plan.schedule_items, data, tag))
         violations.extend(_verify_unit_compatibility(data, tag))
     return violations
 
@@ -309,13 +308,25 @@ def _verify_daily_capacity(
         end_offset = to_minute_offset(item.end_time, data.planning_start)
         bucket_index = end_offset // (24 * 60)
         planned_quantity = item.planned_production_quantity
-        line_bucket_usage[(item.line_id, bucket_index)] = (
-            line_bucket_usage.get((item.line_id, bucket_index), 0) + planned_quantity
-        )
-        capability_bucket_usage[(item.product_id, item.line_id, bucket_index)] = (
-            capability_bucket_usage.get((item.product_id, item.line_id, bucket_index), 0)
-            + planned_quantity
-        )
+        line = data.lines.get(item.line_id)
+        if (
+            line is not None
+            and line.line.max_capacity_per_day is not None
+            and planned_quantity <= line.line.max_capacity_per_day
+        ):
+            line_bucket_usage[(item.line_id, bucket_index)] = (
+                line_bucket_usage.get((item.line_id, bucket_index), 0) + planned_quantity
+            )
+        capability = data.capabilities.get((item.product_id, item.line_id))
+        if (
+            capability is not None
+            and capability.capacity_per_day is not None
+            and planned_quantity <= capability.capacity_per_day
+        ):
+            capability_bucket_usage[(item.product_id, item.line_id, bucket_index)] = (
+                capability_bucket_usage.get((item.product_id, item.line_id, bucket_index), 0)
+                + planned_quantity
+            )
 
     for (line_id, bucket_index), used in line_bucket_usage.items():
         line = data.lines.get(line_id)

@@ -9,14 +9,10 @@ from app.features.production_planning.schemas import (
 )
 
 DUE_DATE_CODES = {
-    "DUE_DATE_MIN_DELAY_COUNT",
-    "DUE_DATE_MIN_TOTAL_TARDINESS",
-    "DUE_DATE_BALANCED",
+    "DUE_DATE_OPTIMAL",
 }
-COST_CODES = {
-    "COST_MIN_TOTAL_COST",
-    "COST_MIN_CHANGEOVER_COST",
-    "COST_BALANCED",
+AMOUNT_CODES = {
+    "AMOUNT_OPTIMAL",
 }
 
 
@@ -28,9 +24,9 @@ def compare_simulation_results(
         - simulation_results: Simulation metrics for all CP-SAT candidates.
 
     Methodology:
-        - Split results by due-date and cost families.
+        - Split results by due-date and amount families.
         - Rank due-date plans by simulated delivery reliability.
-        - Rank cost plans by simulated total risk cost and tail penalty.
+        - Rank amount plans by simulated total risk cost and tail penalty.
 
     Output:
         - SimulationComparisonSummary containing both family recommendations and rankings.
@@ -40,7 +36,7 @@ def compare_simulation_results(
         key=_due_date_rank_key,
     )
     cost_ranked = sorted(
-        _filter_results(simulation_results, COST_CODES),
+        _filter_results(simulation_results, AMOUNT_CODES),
         key=_cost_rank_key,
     )
     return SimulationComparisonSummary(
@@ -70,10 +66,10 @@ def recommend_final_plans(
 
     Methodology:
         - Join the selected simulation result back to its source schedule.
-        - Return exactly one due-date recommendation and one cost recommendation.
+        - Return exactly one due-date recommendation and one amount recommendation.
 
     Output:
-        - Tuple of due-date and cost FinalPlanRecommendation objects.
+        - Tuple of due-date and amount FinalPlanRecommendation objects.
     """
     plan_by_code = {plan.plan_variant_code: plan for plan in plan_results}
     simulation_by_code = {result.plan_variant_code: result for result in simulation_results}
@@ -88,7 +84,7 @@ def recommend_final_plans(
         _recommendation(
             plan_by_code[cost_code],
             simulation_by_code[cost_code],
-            "Lowest simulated cost risk among cost candidates.",
+            "Lowest simulated risk among amount candidates.",
         ),
     )
 
@@ -161,6 +157,13 @@ def _recommendation(
         schedule_items=plan.schedule_items,
         risk_summary={
             "delay_probability": simulation_result.delay_probability,
+            "expected_late_penalty_amount": (
+                simulation_result.expected_late_penalty_amount
+            ),
+            "expected_changeover_cost": simulation_result.expected_changeover_cost,
+            "expected_material_shortage_penalty_amount": (
+                simulation_result.expected_material_shortage_penalty_amount
+            ),
             "expected_total_risk_cost": simulation_result.expected_total_risk_cost,
             "material_shortage_probability": simulation_result.material_shortage_probability,
             "top_delay_causes": simulation_result.top_delay_causes,

@@ -5,6 +5,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from app.features.production_planning.config import SolverConfig
 from app.features.production_planning.cpsat_model_builder import (
     CpsatModelBundle,
     build_base_cpsat_model,
@@ -65,8 +66,8 @@ def build_production_planning_graph():
         - None.
 
     Methodology:
-        - Build a LangGraph StateGraph that validates, normalizes, generates all six plan
-          variants, compares them, and finalizes a single response.
+        - Build a LangGraph StateGraph that validates, normalizes, generates due-date and
+          amount optimal plans, compares them, and finalizes a single response.
 
     Output:
         - A compiled LangGraph workflow that accepts ProductionPlanningGraphState.
@@ -179,15 +180,20 @@ def generate_plan_variants_node(
     plan_results = []
 
     for variant_code in PLAN_VARIANTS:
-        bundle = _build_objective_bundle(normalized, validated, variant_code)
+        if variant_code == "DUE_DATE_OPTIMAL":
+            plan_results.append(_generate_due_date_plan(normalized, validated))
+            continue
+
+        variant_config = _solver_config_for_variant(validated.solver_config, variant_code)
+        bundle = _build_objective_bundle(normalized, variant_config, variant_code)
         apply_objective_by_variant(
             bundle.model,
             bundle,
             normalized,
-            validated.solver_config,
+            variant_config,
             variant_code,
         )
-        plan_results.append(_solve_extract_plan(bundle, normalized, validated, variant_code))
+        plan_results.append(_solve_extract_plan(bundle, normalized, variant_config, variant_code))
 
     return {"plan_results": plan_results}
 
@@ -230,7 +236,10 @@ def load_simulation_input_from_db_node(
 
     logger.info("production_planning.simulation.db_load.started")
     try:
-        bundle = SimulationDataRepository().load_simulation_input_bundle()
+        bundle = SimulationDataRepository().load_simulation_input_bundle(
+            validated.planning_start,
+            validated.planning_end,
+        )
         logger.info(
             "production_planning.simulation.db_load.completed",
             extra={
@@ -321,7 +330,7 @@ def compare_simulation_results_node(
         - state: LangGraph state containing simulation results for all plan variants.
 
     Methodology:
-        - Rank simulated due-date and cost families separately.
+        - Rank simulated due-date and amount families separately.
         - Produce the family-specific recommendation summary required by downstream response
           assembly.
 
@@ -343,7 +352,7 @@ def recommend_final_plans_node(
         - state: LangGraph state containing plan candidates and simulation comparison summary.
 
     Methodology:
-        - Select exactly one simulated due-date recommendation and one simulated cost
+        - Select exactly one simulated due-date recommendation and one simulated amount
           recommendation.
 
     Output:
@@ -400,11 +409,11 @@ def finalize_result_node(
 
 def _build_objective_bundle(
     normalized: NormalizedPlanningData,
-    validated: ProductionPlanningRequest,
+    solver_config: SolverConfig,
     variant_code: str,
 ) -> CpsatModelBundle:
     logger.info("production_planning.model_build.started", extra={"variant_code": variant_code})
-    bundle = build_base_cpsat_model(normalized, validated.solver_config)
+    bundle = build_base_cpsat_model(normalized, solver_config)
     logger.info(
         "production_planning.model_build.completed",
         extra={
@@ -421,11 +430,11 @@ def _build_objective_bundle(
 def _solve_extract_plan(
     bundle: CpsatModelBundle,
     normalized: NormalizedPlanningData,
-    validated: ProductionPlanningRequest,
+    solver_config: SolverConfig,
     variant_code: str,
 ) -> PlanResult:
     logger.info("production_planning.solver.started", extra={"variant_code": variant_code})
-    raw = solve_model(bundle, variant_code, validated.solver_config)
+    raw = solve_model(bundle, variant_code, solver_config)
     logger.info(
         "production_planning.solver.completed",
         extra={
@@ -435,7 +444,7 @@ def _solve_extract_plan(
             "wall_time_seconds": raw.wall_time_seconds,
         },
     )
-    plan = extract_plan_result(raw, bundle, variant_code, normalized)
+    plan = extract_plan_result(raw, bundle, variant_code, normalized, solver_config)
     logger.info(
         "production_planning.extraction.completed",
         extra={
@@ -446,3 +455,114 @@ def _solve_extract_plan(
         },
     )
     return plan
+
+
+def _generate_due_date_plan(
+    normalized: NormalizedPlanningData,
+    validated: ProductionPlanningRequest,
+) -> PlanResult:
+    """
+    Parameters:
+        - normalized: Shared normalized planning data.
+        - validated: Validated request containing the base solver configuration.
+
+    Methodology:
+        - Solve a SOFT due-date model first to find the maximum schedulable order count under
+          physical hard constraints.
+        - Try a HARD due-date model constrained to keep at least that scheduled count.
+        - Use HARD only when it does not reduce assignment; otherwise keep the SOFT result.
+
+    Output:
+        - Due-date optimal PlanResult that maximizes assignment before enforcing hard due dates.
+    """
+    variant_code = "DUE_DATE_OPTIMAL"
+    soft_config = validated.solver_config.model_copy(
+        update={"due_date_policy": "SOFT", "use_material_constraints": False}
+    )
+    soft_bundle = _build_objective_bundle(normalized, soft_config, variant_code)
+    apply_objective_by_variant(
+        soft_bundle.model,
+        soft_bundle,
+        normalized,
+        soft_config,
+        variant_code,
+    )
+    soft_plan = _solve_extract_plan(soft_bundle, normalized, soft_config, variant_code)
+    if soft_plan.status not in {"OPTIMAL", "FEASIBLE"}:
+        return soft_plan
+
+    hard_config = validated.solver_config.model_copy(
+        update={"due_date_policy": "HARD", "use_material_constraints": False}
+    )
+    hard_bundle = _build_objective_bundle(normalized, hard_config, variant_code)
+    _add_minimum_scheduled_count_constraint(
+        hard_bundle,
+        soft_plan.metrics.scheduled_count,
+    )
+    apply_objective_by_variant(
+        hard_bundle.model,
+        hard_bundle,
+        normalized,
+        hard_config,
+        variant_code,
+    )
+    hard_plan = _solve_extract_plan(hard_bundle, normalized, hard_config, variant_code)
+    if (
+        hard_plan.status in {"OPTIMAL", "FEASIBLE"}
+        and hard_plan.metrics.scheduled_count >= soft_plan.metrics.scheduled_count
+    ):
+        hard_plan.warnings.append(
+            "DUE_DATE_OPTIMAL used HARD due-date constraints without reducing scheduled count."
+        )
+        return hard_plan
+
+    soft_plan.warnings.append(
+        "DUE_DATE_OPTIMAL relaxed due-date constraints because HARD due dates would reduce "
+        "the maximum schedulable order count."
+    )
+    return soft_plan
+
+
+def _add_minimum_scheduled_count_constraint(
+    bundle: CpsatModelBundle,
+    minimum_scheduled_count: int,
+) -> None:
+    """
+    Parameters:
+        - bundle: CP-SAT model bundle containing scheduled decision variables.
+        - minimum_scheduled_count: Required lower bound for scheduled orders.
+
+    Methodology:
+        - Preserve the maximum assignment discovered by the SOFT due-date probe while testing
+          whether due dates can be enforced as hard constraints.
+
+    Output:
+        - None. Adds one aggregate linear constraint to the model.
+    """
+    bundle.model.Add(
+        sum(order_vars["scheduled"] for order_vars in bundle.order_vars.values())
+        >= minimum_scheduled_count
+    )
+
+
+def _solver_config_for_variant(
+    solver_config: SolverConfig,
+    variant_code: str,
+) -> SolverConfig:
+    """
+    Parameters:
+        - solver_config: Request-level solver configuration.
+        - variant_code: Production planning variant currently being built.
+
+    Methodology:
+        - Keep amount/cost optimization on SOFT due-date policy so late-penalty tradeoffs can
+          be optimized by the objective.
+
+    Output:
+        - SolverConfig used for this specific CP-SAT model build and solve.
+    """
+    if variant_code == "AMOUNT_OPTIMAL":
+        return solver_config.model_copy(
+            update={"due_date_policy": "SOFT", "use_material_constraints": False}
+        )
+    return solver_config

@@ -463,7 +463,8 @@ def calculate_required_material_quantity_scaled(
 
 def get_initial_available_material_quantity_scaled(material) -> int:
     available = max(Decimal(str(material.available_quantity or 0)), Decimal("0"))
-    return decimal_to_scaled_floor(available)
+    safety_stock = max(Decimal(str(material.safety_stock_quantity or 0)), Decimal("0"))
+    return decimal_to_scaled_floor(max(available - safety_stock, Decimal("0")))
 
 
 def get_inbound_material_quantity_scaled(material) -> int:

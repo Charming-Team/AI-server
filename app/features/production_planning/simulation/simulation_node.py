@@ -33,7 +33,7 @@ def build_sampling_distributions(
 ) -> SamplingDistributions:
     """
     Parameters:
-        - plan_results: Six CP-SAT candidate plans.
+        - plan_results: Due-date and amount CP-SAT candidate plans.
         - data: Normalized planning data shared by planning and simulation.
         - config: Simulation configuration.
         - simulation_input: Optional historical rows from ai_planning sampling views.
@@ -66,7 +66,7 @@ def simulate_plan_candidates(
 ) -> list[PlanSimulationResult]:
     """
     Parameters:
-        - plan_results: Six CP-SAT candidate plans.
+        - plan_results: Due-date and amount CP-SAT candidate plans.
         - data: Normalized planning data used by DES.
         - solver_config: Solver configuration containing changeover defaults.
         - simulation_config: Monte Carlo run configuration.
@@ -123,6 +123,10 @@ def _aggregate_plan_simulation(
     late_penalty_values = [scenario.late_penalty_amount for scenario in scenarios]
     delayed_counts = [scenario.delayed_order_count for scenario in scenarios]
     shortage_counts = [scenario.material_shortage_count for scenario in scenarios]
+    shortage_quantities = [scenario.material_shortage_quantity for scenario in scenarios]
+    shortage_penalties = [
+        scenario.material_shortage_penalty_amount for scenario in scenarios
+    ]
     delay_causes = Counter()
     for scenario in scenarios:
         delay_causes.update(scenario.delay_causes)
@@ -136,6 +140,10 @@ def _aggregate_plan_simulation(
     yield_rate = None
     if yield_sample_count:
         yield_rate = sum(scenario.yield_rate_sum for scenario in scenarios) / yield_sample_count
+    representative_index = _select_representative_scenario_index(
+        scenarios,
+        _mean(tardiness_values),
+    )
 
     return PlanSimulationResult(
         plan_variant_code=plan.plan_variant_code,
@@ -150,10 +158,12 @@ def _aggregate_plan_simulation(
         expected_late_penalty_amount=expected_late_penalty,
         p95_late_penalty_amount=_percentile(late_penalty_values, 0.95),
         expected_changeover_cost=expected_changeover_cost,
+        expected_material_shortage_penalty_amount=_mean(shortage_penalties),
         expected_total_risk_cost=expected_risk_cost,
         material_shortage_probability=sum(1 for value in shortage_counts if value > 0)
         / len(shortage_counts),
         expected_material_shortage_count=expected_shortages,
+        expected_material_shortage_quantity=_mean(shortage_quantities),
         expected_yield_rate=yield_rate,
         expected_defect_quantity=_mean([scenario.defect_quantity for scenario in scenarios]),
         top_delay_causes=[
@@ -162,10 +172,18 @@ def _aggregate_plan_simulation(
         ],
         sampling_summary=_build_sampling_summary(distributions),
         event_summary=_build_event_summary(scenarios),
+        event_timeline=_build_event_timeline(
+            scenarios[representative_index],
+            config.event_timeline_limit,
+            representative_index,
+        ),
         scenario_summary={
             "scheduled_count": plan.metrics.scheduled_count,
             "unscheduled_count": plan.metrics.unscheduled_count,
             "material_shortage_scenarios": sum(1 for value in shortage_counts if value > 0),
+            "event_timeline_iteration": representative_index,
+            "event_timeline_limit": config.event_timeline_limit,
+            "event_timeline_selection": "closest_to_expected_tardiness",
         },
     )
 
@@ -184,14 +202,19 @@ def _disabled_result(plan: PlanResult) -> PlanSimulationResult:
         expected_late_penalty_amount=float(plan.metrics.total_late_penalty_amount),
         p95_late_penalty_amount=float(plan.metrics.total_late_penalty_amount),
         expected_changeover_cost=float(plan.metrics.total_changeover_cost),
+        expected_material_shortage_penalty_amount=float(
+            plan.metrics.total_material_shortage_penalty_amount
+        ),
         expected_total_risk_cost=float(plan.metrics.estimated_total_cost),
         material_shortage_probability=0.0,
         expected_material_shortage_count=0.0,
+        expected_material_shortage_quantity=0.0,
         expected_yield_rate=None,
         expected_defect_quantity=None,
         top_delay_causes=[],
         sampling_summary={},
         event_summary=[],
+        event_timeline=[],
         scenario_summary={"simulation_enabled": False},
     )
 
@@ -209,10 +232,32 @@ def _build_sampling_summary(distributions: SamplingDistributions) -> dict:
         "yield_rate_stddev": distributions.yield_rate_stddev,
         "defect_rate_mean": distributions.defect_rate_mean,
         "defect_rate_stddev": distributions.defect_rate_stddev,
+        "setup_delay_probability": distributions.setup_delay_probability,
+        "setup_delay_minutes_range": [
+            distributions.min_setup_delay_minutes,
+            distributions.max_setup_delay_minutes,
+        ],
+        "machine_breakdown_probability": distributions.machine_breakdown_probability,
+        "machine_repair_minutes_range": [
+            distributions.min_machine_repair_minutes,
+            distributions.max_machine_repair_minutes,
+        ],
+        "line_change_delay_probability": distributions.line_change_delay_probability,
+        "line_change_delay_minutes_range": [
+            distributions.min_line_change_delay_minutes,
+            distributions.max_line_change_delay_minutes,
+        ],
+        "material_inbound_probability": distributions.material_inbound_probability,
+        "material_inbound_delay_minutes_range": [
+            distributions.min_material_inbound_delay_minutes,
+            distributions.max_material_inbound_delay_minutes,
+        ],
         "duration_context_count": len(distributions.duration_params_by_context),
         "yield_context_count": len(distributions.yield_params_by_context),
         "defect_context_count": len(distributions.defect_params_by_context),
         "delay_context_count": len(distributions.delay_params_by_context),
+        "setup_context_count": len(distributions.setup_delay_params_by_context),
+        "machine_breakdown_line_count": len(distributions.machine_breakdown_params_by_line),
         "changeover_context_count": len(distributions.changeover_params_by_context),
         "cause_context_count": len(distributions.cause_weights_by_context),
         "warning_count": len(distributions.warnings),
@@ -262,6 +307,12 @@ def _build_event_summary(scenarios: list[ScenarioResult]) -> list[dict]:
                         for scenario in scenarios_with_event
                     ]
                 ),
+                "avg_material_shortage_penalty_when_event_occurs": _mean(
+                    [
+                        scenario.material_shortage_penalty_amount
+                        for scenario in scenarios_with_event
+                    ]
+                ),
                 "avg_risk_cost_when_event_occurs": _mean(
                     [scenario.total_risk_cost for scenario in scenarios_with_event]
                 ),
@@ -271,6 +322,35 @@ def _build_event_summary(scenarios: list[ScenarioResult]) -> list[dict]:
         rows,
         key=lambda row: (-row["occurrence_count"], row["event"]),
     )
+
+
+def _select_representative_scenario_index(
+    scenarios: list[ScenarioResult],
+    expected_tardiness_minutes: float,
+) -> int:
+    if not scenarios:
+        return 0
+    indexed_scenarios = list(enumerate(scenarios))
+    return min(
+        indexed_scenarios,
+        key=lambda item: (
+            abs(item[1].total_tardiness_minutes - expected_tardiness_minutes),
+            item[0],
+        ),
+    )[0]
+
+
+def _build_event_timeline(
+    scenario: ScenarioResult,
+    limit: int,
+    iteration_index: int,
+) -> list[dict]:
+    if limit <= 0:
+        return []
+    timeline = []
+    for event in scenario.event_log[:limit]:
+        timeline.append({"iteration": iteration_index, **event})
+    return timeline
 
 
 def _mean(values) -> float:

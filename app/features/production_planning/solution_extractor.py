@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+from app.features.production_planning.config import SolverConfig
 from app.features.production_planning.cpsat_model_builder import CpsatModelBundle
 from app.features.production_planning.exceptions import SolutionExtractionError
 from app.features.production_planning.preprocessing import (
+    MATERIAL_QUANTITY_SCALE,
     calculate_planned_production_quantity,
+    calculate_required_material_quantity_scaled,
     from_minute_offset,
     get_changeover_cost,
     get_changeover_minutes,
+    get_inbound_material_quantity_scaled,
+    get_inbound_material_time,
+    get_initial_available_material_quantity_scaled,
     get_order_quantity,
+    to_minute_offset,
 )
 from app.features.production_planning.schemas import (
     PLAN_VARIANT_FAMILIES,
@@ -27,6 +34,7 @@ def extract_plan_result(
     bundle: CpsatModelBundle,
     variant_code: str,
     data: NormalizedPlanningData,
+    config: SolverConfig,
 ) -> PlanResult:
     """
     Parameters:
@@ -34,6 +42,7 @@ def extract_plan_result(
         - bundle: Model bundle containing variables to read.
         - variant_code: Plan variant code used for objective selection.
         - data: Normalized planning data for datetime conversion and business values.
+        - config: Solver configuration with shortage cost policy.
 
     Methodology:
         - Return a deterministic empty plan for infeasible or unresolved statuses.
@@ -64,7 +73,7 @@ def extract_plan_result(
 
         schedule_items = extract_schedule_items(raw_result, bundle, data)
         unscheduled_orders = extract_unscheduled_orders(raw_result, bundle, data)
-        metrics = calculate_plan_metrics(schedule_items, unscheduled_orders, data)
+        metrics = calculate_plan_metrics(schedule_items, unscheduled_orders, data, config)
         return PlanResult(
             plan_family=PLAN_VARIANT_FAMILIES[variant_code],
             plan_variant_code=variant_code,
@@ -171,12 +180,14 @@ def calculate_plan_metrics(
     schedule_items: list[ScheduleItem],
     unscheduled_orders: list[str],
     data: NormalizedPlanningData,
+    config: SolverConfig,
 ) -> PlanMetrics:
     """
     Parameters:
         - schedule_items: Extracted scheduled order items.
         - unscheduled_orders: Order IDs not scheduled.
         - data: Normalized planning data for original order amounts and changeover rules.
+        - config: Solver configuration with material shortage penalty weight.
 
     Methodology:
         - Aggregate count, tardiness, amount, makespan, and selected transition metrics from
@@ -195,6 +206,13 @@ def calculate_plan_metrics(
         data.orders[item.order_id].order.late_penalty_amount for item in delayed_items
     )
     total_changeover_cost = calculate_total_changeover_cost(schedule_items, data)
+    material_shortage_quantity = calculate_total_material_shortage_quantity(
+        schedule_items,
+        data,
+    )
+    material_shortage_penalty = (
+        material_shortage_quantity * config.amount_optimization.material_shortage_weight
+    )
     return PlanMetrics(
         scheduled_count=len(schedule_items),
         unscheduled_count=len(unscheduled_orders),
@@ -210,8 +228,86 @@ def calculate_plan_metrics(
         total_changeover_minutes=calculate_total_changeover_minutes(schedule_items, data),
         total_late_penalty_amount=total_late_penalty,
         total_changeover_cost=total_changeover_cost,
-        estimated_total_cost=total_late_penalty + total_changeover_cost,
+        total_material_shortage_quantity=material_shortage_quantity,
+        total_material_shortage_penalty_amount=material_shortage_penalty,
+        estimated_total_cost=(
+            total_late_penalty + total_changeover_cost + material_shortage_penalty
+        ),
     )
+
+
+def calculate_total_material_shortage_quantity(
+    schedule_items: list[ScheduleItem],
+    data: NormalizedPlanningData,
+) -> int:
+    """
+    Parameters:
+        - schedule_items: Extracted schedule items.
+        - data: Normalized planning data with materials and BOM rules.
+
+    Methodology:
+        - Recalculate scheduled material usage from BOM by product_id.
+        - Add total shortage plus shortage before expected inbound so early starts carry
+          a material-risk cost even when enough stock arrives later.
+
+    Output:
+        - Material shortage quantity rounded up to integer material units.
+    """
+    usage_by_material = _calculate_material_usage_units_by_item(schedule_items, data)
+    total_shortage = 0
+    for material_id, usage_items in usage_by_material.items():
+        material = data.materials.get(material_id)
+        if material is None:
+            continue
+        used = sum(quantity for _, quantity in usage_items)
+        initial_available = _scaled_quantity_to_units(
+            get_initial_available_material_quantity_scaled(material)
+        )
+        inbound_quantity = _scaled_quantity_to_units(
+            get_inbound_material_quantity_scaled(material)
+        )
+        total_shortage += max(0, used - initial_available - inbound_quantity)
+
+        inbound_time = get_inbound_material_time(material)
+        if inbound_time is None:
+            continue
+        inbound_offset = to_minute_offset(inbound_time, data.planning_start)
+        if inbound_offset <= 0 or inbound_offset > data.horizon_minutes:
+            continue
+        before_inbound_used = sum(
+            quantity for start, quantity in usage_items if start < inbound_offset
+        )
+        total_shortage += max(0, before_inbound_used - initial_available)
+    return total_shortage
+
+
+def _calculate_material_usage_units_by_item(
+    schedule_items: list[ScheduleItem],
+    data: NormalizedPlanningData,
+) -> dict[str, list[tuple[int, int]]]:
+    material_usage: dict[str, list[tuple[int, int]]] = {}
+    for item in schedule_items:
+        normalized_order = data.orders.get(item.order_id)
+        if normalized_order is None:
+            continue
+        start = to_minute_offset(item.start_time, data.planning_start)
+        product = data.products[normalized_order.order.product_id]
+        for bom_item in data.bom_items_by_product_id.get(
+            normalized_order.order.product_id,
+            [],
+        ):
+            required_scaled = calculate_required_material_quantity_scaled(
+                normalized_order.order,
+                product,
+                bom_item,
+            )
+            quantity = _scaled_quantity_to_units(required_scaled)
+            material_usage.setdefault(bom_item.material_id, []).append((start, quantity))
+    return material_usage
+
+
+def _scaled_quantity_to_units(quantity_scaled: int) -> int:
+    return (quantity_scaled + MATERIAL_QUANTITY_SCALE - 1) // MATERIAL_QUANTITY_SCALE
 
 
 def calculate_total_changeover_minutes(

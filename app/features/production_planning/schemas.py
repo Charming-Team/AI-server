@@ -9,42 +9,26 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.features.production_planning.config import SimulationConfig, SolverConfig
 
-PlanFamily = Literal["DUE_DATE_OPTIMAL", "COST_OPTIMAL"]
+PlanFamily = Literal["DUE_DATE_OPTIMAL", "AMOUNT_OPTIMAL"]
 
 PlanVariantCode = Literal[
-    "DUE_DATE_MIN_DELAY_COUNT",
-    "DUE_DATE_MIN_TOTAL_TARDINESS",
-    "DUE_DATE_BALANCED",
-    "COST_MIN_TOTAL_COST",
-    "COST_MIN_CHANGEOVER_COST",
-    "COST_BALANCED",
+    "DUE_DATE_OPTIMAL",
+    "AMOUNT_OPTIMAL",
 ]
 
 PLAN_VARIANTS: list[str] = [
-    "DUE_DATE_MIN_DELAY_COUNT",
-    "DUE_DATE_MIN_TOTAL_TARDINESS",
-    "DUE_DATE_BALANCED",
-    "COST_MIN_TOTAL_COST",
-    "COST_MIN_CHANGEOVER_COST",
-    "COST_BALANCED",
+    "DUE_DATE_OPTIMAL",
+    "AMOUNT_OPTIMAL",
 ]
 
 PLAN_VARIANT_FAMILIES: dict[str, str] = {
-    "DUE_DATE_MIN_DELAY_COUNT": "DUE_DATE_OPTIMAL",
-    "DUE_DATE_MIN_TOTAL_TARDINESS": "DUE_DATE_OPTIMAL",
-    "DUE_DATE_BALANCED": "DUE_DATE_OPTIMAL",
-    "COST_MIN_TOTAL_COST": "COST_OPTIMAL",
-    "COST_MIN_CHANGEOVER_COST": "COST_OPTIMAL",
-    "COST_BALANCED": "COST_OPTIMAL",
+    "DUE_DATE_OPTIMAL": "DUE_DATE_OPTIMAL",
+    "AMOUNT_OPTIMAL": "AMOUNT_OPTIMAL",
 }
 
 PLAN_VARIANT_NAMES: dict[str, str] = {
-    "DUE_DATE_MIN_DELAY_COUNT": "Due-Date: Minimize Delay Count",
-    "DUE_DATE_MIN_TOTAL_TARDINESS": "Due-Date: Minimize Total Tardiness",
-    "DUE_DATE_BALANCED": "Due-Date: Balanced Optimization",
-    "COST_MIN_TOTAL_COST": "Cost: Minimize Total Cost",
-    "COST_MIN_CHANGEOVER_COST": "Cost: Minimize Changeover Cost",
-    "COST_BALANCED": "Cost: Balanced Optimization",
+    "DUE_DATE_OPTIMAL": "Due-Date Optimal",
+    "AMOUNT_OPTIMAL": "Amount Optimal",
 }
 
 
@@ -199,6 +183,8 @@ class PlanMetrics(BaseModel):
     total_changeover_minutes: int
     total_late_penalty_amount: int = 0
     total_changeover_cost: int = 0
+    total_material_shortage_quantity: int = 0
+    total_material_shortage_penalty_amount: int = 0
     estimated_total_cost: int = 0
 
 
@@ -248,14 +234,17 @@ class PlanSimulationResult(BaseModel):
     expected_late_penalty_amount: float
     p95_late_penalty_amount: float
     expected_changeover_cost: float
+    expected_material_shortage_penalty_amount: float
     expected_total_risk_cost: float
     material_shortage_probability: float
     expected_material_shortage_count: float
+    expected_material_shortage_quantity: float
     expected_yield_rate: float | None
     expected_defect_quantity: float | None
     top_delay_causes: list[dict[str, Any]]
     sampling_summary: dict[str, Any] = Field(default_factory=dict)
     event_summary: list[dict[str, Any]] = Field(default_factory=list)
+    event_timeline: list[dict[str, Any]] = Field(default_factory=list)
     scenario_summary: dict[str, Any]
 
 
@@ -346,11 +335,9 @@ class AmountReferenceData:
 
 @dataclass(frozen=True)
 class AmountObjectiveTerms:
-    total_scheduled_amount: Any
-    amount_weighted_tardiness: Any
-    unscheduled_amount_penalty: Any
-    high_amount_delay_penalty: Any
+    total_late_penalty_amount: Any
     total_changeover_cost: Any
+    total_material_shortage: Any
     total_line_priority_penalty: Any
     makespan: Any
     total_tardiness: Any

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -18,6 +19,8 @@ from app.core.database import planning_engine
 from app.features.production_planning.exceptions import PlanningDataAccessError
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SAMPLING_LOOKBACK_DAYS = 365
 
 
 @dataclass
@@ -44,28 +47,46 @@ class SimulationDataRepository:
     distributions.
     """
 
-    def load_simulation_input_bundle(self) -> SimulationInputBundle:
+    def load_simulation_input_bundle(
+        self,
+        planning_start: datetime | None = None,
+        planning_end: datetime | None = None,
+    ) -> SimulationInputBundle:
         """
         Parameters:
-            - None.
+            - planning_start: Optional plan start; sampling history must end before this time.
+            - planning_end: Optional plan end retained for interface symmetry.
 
         Methodology:
             - Open a single connection and query all required sampling views sequentially.
+            - Use historical production rows before planning_start to avoid future data leakage.
             - Primary view failures raise PlanningDataAccessError.
             - Auxiliary view failures return empty lists with logged warnings.
-            - Machine status history is loaded only for diagnostics and is not used as a
-              Monte Carlo sampling source.
+            - Machine status history is loaded for diagnostics only, not breakdown probability.
 
         Output:
             - SimulationInputBundle with raw rows for empirical distribution building.
         """
         warnings: list[str] = []
+        sampling_start = _calculate_sampling_start(planning_start)
         try:
             with planning_engine.connect() as conn:
                 return SimulationInputBundle(
-                    production_results=self._get_production_results(conn),
-                    production_result_causes=self._get_production_result_causes(conn),
-                    changeover_sequences=self._get_changeover_sequences(conn),
+                    production_results=self._get_production_results(
+                        conn,
+                        sampling_start,
+                        planning_start,
+                    ),
+                    production_result_causes=self._get_production_result_causes(
+                        conn,
+                        sampling_start,
+                        planning_start,
+                    ),
+                    changeover_sequences=self._get_auxiliary_rows(
+                        conn,
+                        "ai_planning.v_observed_changeover_sequence_history_for_sampling",
+                        warnings,
+                    ),
                     orders_history=self._get_auxiliary_rows(
                         conn,
                         "ai_planning.v_orders_history_for_sampling",
@@ -110,21 +131,50 @@ class SimulationDataRepository:
                 f"Failed to load simulation input bundle: {exc}"
             ) from exc
 
-    def _get_production_results(self, conn: Connection) -> list[dict[str, Any]]:
+    def _get_production_results(
+        self,
+        conn: Connection,
+        sampling_start: datetime | None,
+        sampling_end: datetime | None,
+    ) -> list[dict[str, Any]]:
+        where_clauses = ["1 = 1"]
+        params: dict[str, Any] = {}
+        if sampling_start is not None:
+            where_clauses.append(
+                "COALESCE(actual_end_at, planned_end_at) >= :sampling_start"
+            )
+            params["sampling_start"] = sampling_start
+        if sampling_end is not None:
+            where_clauses.append(
+                "COALESCE(actual_end_at, planned_end_at) < :sampling_end"
+            )
+            params["sampling_end"] = sampling_end
+
         query = text(
-            """
+            f"""
             SELECT
+                result_id,
+                plan_id,
+                order_id,
                 product_id,
                 line_id,
                 NULL::text AS product_category,
+                planned_start_at,
+                actual_start_at,
+                planned_end_at,
+                actual_end_at,
+                planned_quantity,
                 actual_duration_hr,
                 actual_setup_time_hr,
                 actual_delay_hr,
                 is_delayed,
+                actual_delay_reason,
                 yield_rate,
                 actual_quantity,
-                defect_quantity
+                defect_quantity,
+                result_status
             FROM ai_planning.v_production_results_history_for_sampling
+            WHERE {" AND ".join(where_clauses)}
             ORDER BY product_id, line_id
             """
         )
@@ -132,38 +182,42 @@ class SimulationDataRepository:
             conn,
             query,
             "ai_planning.v_production_results_history_for_sampling",
+            params,
         )
 
-    def _get_production_result_causes(self, conn: Connection) -> list[dict[str, Any]]:
+    def _get_production_result_causes(
+        self,
+        conn: Connection,
+        sampling_start: datetime | None,
+        sampling_end: datetime | None,
+    ) -> list[dict[str, Any]]:
+        where_clauses = ["1 = 1"]
+        params: dict[str, Any] = {}
+        if sampling_start is not None:
+            where_clauses.append("created_at >= :sampling_start")
+            params["sampling_start"] = sampling_start
+        if sampling_end is not None:
+            where_clauses.append("created_at < :sampling_end")
+            params["sampling_end"] = sampling_end
+
         query = text(
-            """
-            SELECT product_id, line_id, cause_type
+            f"""
+            SELECT
+                NULL::text AS product_id,
+                NULL::text AS line_id,
+                NULL::text AS product_category,
+                cause_type,
+                created_at
             FROM ai_planning.v_production_result_causes_history_for_sampling
-            ORDER BY product_id, line_id
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY cause_type, created_at
             """
         )
         return self._execute_primary_query(
             conn,
             query,
             "ai_planning.v_production_result_causes_history_for_sampling",
-        )
-
-    def _get_changeover_sequences(self, conn: Connection) -> list[dict[str, Any]]:
-        query = text(
-            """
-            SELECT
-                line_id,
-                from_product_id,
-                to_product_id,
-                observed_gap_minutes
-            FROM ai_planning.v_observed_changeover_sequence_history_for_sampling
-            ORDER BY from_product_id, to_product_id, line_id
-            """
-        )
-        return self._execute_primary_query(
-            conn,
-            query,
-            "ai_planning.v_observed_changeover_sequence_history_for_sampling",
+            params,
         )
 
     def _execute_primary_query(
@@ -171,9 +225,10 @@ class SimulationDataRepository:
         conn: Connection,
         query,
         view: str,
+        params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         try:
-            return [dict(row) for row in conn.execute(query).mappings().all()]
+            return [dict(row) for row in conn.execute(query, params or {}).mappings().all()]
         except Exception as exc:
             raise PlanningDataAccessError(f"Failed to query {view}: {exc}", view=view) from exc
 
@@ -194,3 +249,9 @@ class SimulationDataRepository:
                 extra={"view": view},
             )
             return []
+
+
+def _calculate_sampling_start(planning_start: datetime | None) -> datetime | None:
+    if planning_start is None:
+        return None
+    return planning_start - timedelta(days=DEFAULT_SAMPLING_LOOKBACK_DAYS)
