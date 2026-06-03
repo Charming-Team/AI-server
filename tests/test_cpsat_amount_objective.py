@@ -22,7 +22,7 @@ def test_cost_objective_can_prioritize_penalty_reduction_over_due_date_order() -
                 product_id="P-1",
                 quantity=1,
                 due_date=start + timedelta(minutes=100),
-                order_amount=1_000,
+                order_amount=1_000_000,
                 late_penalty_amount=1,
             ),
             OrderInput(
@@ -30,7 +30,7 @@ def test_cost_objective_can_prioritize_penalty_reduction_over_due_date_order() -
                 product_id="P-1",
                 quantity=1,
                 due_date=start + timedelta(minutes=150),
-                order_amount=100_000,
+                order_amount=1_000,
                 late_penalty_amount=100_000,
             ),
             OrderInput(
@@ -62,16 +62,20 @@ def test_cost_objective_can_prioritize_penalty_reduction_over_due_date_order() -
     due_plan = next(
         plan
         for plan in result.plan_results
-        if plan.plan_variant_code == "DUE_DATE_MIN_DELAY_COUNT"
+        if plan.plan_variant_code == "DUE_DATE_OPTIMAL"
     )
     cost_plan = next(
-        plan for plan in result.plan_results if plan.plan_variant_code == "COST_MIN_TOTAL_COST"
+        plan for plan in result.plan_results if plan.plan_variant_code == "AMOUNT_OPTIMAL"
     )
 
     assert due_plan.status in {"OPTIMAL", "FEASIBLE"}
     assert cost_plan.status in {"OPTIMAL", "FEASIBLE"}
     due_starts = {item.order_id: item.start_time for item in due_plan.schedule_items}
     cost_starts = {item.order_id: item.start_time for item in cost_plan.schedule_items}
+    assert due_plan.metrics.unscheduled_count == 0
+    assert due_plan.metrics.total_tardiness_minutes < cost_plan.metrics.total_tardiness_minutes
     assert due_starts["O-LOW"] < due_starts["O-HIGH"]
+    assert cost_plan.metrics.unscheduled_count == 0
     assert cost_starts["O-HIGH"] < cost_starts["O-LOW"]
-    assert cost_plan.metrics.estimated_total_cost < due_plan.metrics.estimated_total_cost
+    assert cost_plan.metrics.total_late_penalty_amount == 1
+    assert cost_plan.metrics.total_late_penalty_amount < due_plan.metrics.total_late_penalty_amount

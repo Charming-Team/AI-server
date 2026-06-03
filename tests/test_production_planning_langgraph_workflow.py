@@ -85,10 +85,10 @@ def test_generate_production_plans_runs_through_langgraph_workflow() -> None:
     direct_result = run_production_planning_graph(_request())
     node_result = generate_production_plans(_request())
 
-    assert len(direct_result.plan_results) == 6
+    assert len(direct_result.plan_results) == 2
     assert direct_result.recommended_plan_variant_code is not None
-    assert len(direct_result.simulation_results) == 6
+    assert len(direct_result.simulation_results) == 2
     assert direct_result.recommended_due_date_plan is not None
     assert direct_result.recommended_cost_plan is not None
-    assert len(node_result.plan_results) == 6
+    assert len(node_result.plan_results) == 2
     assert all(plan.status in {"OPTIMAL", "FEASIBLE"} for plan in node_result.plan_results)

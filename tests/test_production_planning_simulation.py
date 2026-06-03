@@ -1,4 +1,6 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from random import Random
 
 from app.features.production_planning.config import SimulationConfig, SolverConfig
 from app.features.production_planning.preprocessing import normalize_request
@@ -7,14 +9,20 @@ from app.features.production_planning.repositories.simulation_data_repository im
     SimulationInputBundle,
 )
 from app.features.production_planning.schemas import (
+    BomItemInput,
+    MaterialInput,
     OrderInput,
     ProductInput,
     ProductionLineInput,
     ProductionPlanningRequest,
     ProductLineCapabilityInput,
 )
+from app.features.production_planning.simulation.des import initialize_simulation_state
 from app.features.production_planning.simulation.sampling import (
     build_empirical_sampling_distributions,
+)
+from app.features.production_planning.simulation.sampling import (
+    build_sampling_distributions as build_fallback_sampling_distributions,
 )
 
 
@@ -62,14 +70,14 @@ def _request() -> ProductionPlanningRequest:
 def test_simulation_node_returns_one_result_per_plan_candidate() -> None:
     result = generate_production_plans(_request())
 
-    assert len(result.simulation_results) == 6
+    assert len(result.simulation_results) == 2
     assert result.simulation_results[0].sampling_summary
     assert "delay_probability" in result.simulation_results[0].sampling_summary
     assert result.simulation_comparison_summary is not None
     assert result.recommended_due_date_plan is not None
     assert result.recommended_cost_plan is not None
     assert result.recommended_due_date_plan.plan_family == "DUE_DATE_OPTIMAL"
-    assert result.recommended_cost_plan.plan_family == "COST_OPTIMAL"
+    assert result.recommended_cost_plan.plan_family == "AMOUNT_OPTIMAL"
 
 
 def test_simulation_result_reports_event_response_values() -> None:
@@ -80,18 +88,35 @@ def test_simulation_result_reports_event_response_values() -> None:
         delay_probability=1.0,
         min_delay_minutes=10,
         max_delay_minutes=10,
+        setup_delay_probability=1.0,
+        min_setup_delay_minutes=5,
+        max_setup_delay_minutes=5,
+        machine_breakdown_probability=1.0,
+        min_machine_repair_minutes=15,
+        max_machine_repair_minutes=15,
     )
 
     result = generate_production_plans(request)
 
     first_result = result.simulation_results[0]
     assert first_result.sampling_summary["delay_probability"] == 1.0
+    assert first_result.event_timeline
+    assert {
+        "event_time",
+        "event",
+        "delivery_delay_days",
+        "loss_amount",
+    }.issubset(first_result.event_timeline[0])
     assert any(
-        event["event"] == "OPERATIONAL_DELAY"
+        event["event"] == "LINE_CHANGE_DELAY"
         and event["occurrence_count"] > 0
         and "avg_risk_cost_when_event_occurs" in event
         for event in first_result.event_summary
     )
+    assert {event["event"] for event in first_result.event_summary} >= {
+        "MACHINE_BREAKDOWN",
+        "SETUP_DELAY",
+    }
 
 
 def test_empirical_sampling_distributions_use_production_history() -> None:
@@ -131,5 +156,78 @@ def test_empirical_sampling_distributions_use_production_history() -> None:
 
     assert ("P-1", "L-1") in distributions.duration_params_by_context
     assert distributions.cause_weights_by_context[("P-1", "L-1")] == {
-        "MACHINE_DELAY": 1.0
+        "MACHINE_ABNORMAL": 1.0
     }
+
+
+def test_simulation_samples_material_inbound_time_instead_of_using_expected_date() -> None:
+    request = _request()
+    expected_inbound_at = request.planning_start + timedelta(days=3)
+    request.materials = [
+        MaterialInput(
+            material_id="M-1",
+            material_name="Material",
+            available_quantity=Decimal("0"),
+            expected_inbound_quantity=Decimal("10"),
+            expected_inbound_at=expected_inbound_at,
+        )
+    ]
+    request.bom_items = [
+        BomItemInput(
+            product_id="P-1",
+            material_id="M-1",
+            required_quantity_per_unit=Decimal("1"),
+        )
+    ]
+    data = normalize_request(request)
+    distributions = build_fallback_sampling_distributions(
+        [],
+        data,
+        SimulationConfig(
+            material_inbound_probability=1.0,
+            min_material_inbound_delay_minutes=0,
+            max_material_inbound_delay_minutes=0,
+        ),
+    )
+
+    state = initialize_simulation_state(data, distributions, Random(7))
+
+    assert state.inbound_events[0][0] == request.planning_start
+    assert state.inbound_events[0][0] != expected_inbound_at
+
+
+def test_simulation_total_cost_includes_material_shortage_penalty() -> None:
+    request = _request()
+    request.simulation_config = SimulationConfig(
+        num_iterations=1,
+        random_seed=7,
+        delay_probability=0.0,
+        setup_delay_probability=0.0,
+        machine_breakdown_probability=0.0,
+        line_change_delay_probability=0.0,
+        material_shortage_delay_minutes=10,
+    )
+    request.materials = [
+        MaterialInput(
+            material_id="M-1",
+            material_name="Material",
+            available_quantity=Decimal("0"),
+        )
+    ]
+    request.bom_items = [
+        BomItemInput(
+            product_id="P-1",
+            material_id="M-1",
+            required_quantity_per_unit=Decimal("1"),
+        )
+    ]
+
+    result = generate_production_plans(request)
+    simulation_result = result.simulation_results[0]
+
+    assert simulation_result.expected_material_shortage_penalty_amount > 0
+    assert simulation_result.expected_total_risk_cost == (
+        simulation_result.expected_late_penalty_amount
+        + simulation_result.expected_changeover_cost
+        + simulation_result.expected_material_shortage_penalty_amount
+    )
