@@ -104,6 +104,7 @@ def test_simulation_result_reports_event_response_values() -> None:
     assert {
         "event_time",
         "event",
+        "order_amount",
         "delivery_delay_days",
         "loss_amount",
     }.issubset(first_result.event_timeline[0])
@@ -196,7 +197,7 @@ def test_simulation_samples_material_inbound_time_instead_of_using_expected_date
     assert state.inbound_events[0][0] != expected_inbound_at
 
 
-def test_simulation_total_cost_includes_material_shortage_penalty() -> None:
+def test_simulation_tracks_material_shortage_without_penalty_cost() -> None:
     request = _request()
     request.simulation_config = SimulationConfig(
         num_iterations=1,
@@ -225,9 +226,55 @@ def test_simulation_total_cost_includes_material_shortage_penalty() -> None:
     result = generate_production_plans(request)
     simulation_result = result.simulation_results[0]
 
-    assert simulation_result.expected_material_shortage_penalty_amount > 0
+    assert simulation_result.expected_material_shortage_count > 0
+    assert simulation_result.expected_material_shortage_penalty_amount == 0
     assert simulation_result.expected_total_risk_cost == (
         simulation_result.expected_late_penalty_amount
         + simulation_result.expected_changeover_cost
-        + simulation_result.expected_material_shortage_penalty_amount
     )
+
+
+def test_order_estimated_duration_excludes_material_shortage_delay() -> None:
+    request = _request()
+    request.simulation_config = SimulationConfig(
+        num_iterations=1,
+        random_seed=7,
+        duration_variation_ratio=0.0,
+        delay_probability=0.0,
+        setup_delay_probability=0.0,
+        machine_breakdown_probability=0.0,
+        line_change_delay_probability=0.0,
+        material_shortage_delay_minutes=600,
+    )
+    request.materials = [
+        MaterialInput(
+            material_id="M-1",
+            material_name="Material",
+            available_quantity=Decimal("0"),
+        )
+    ]
+    request.bom_items = [
+        BomItemInput(
+            product_id="P-1",
+            material_id="M-1",
+            required_quantity_per_unit=Decimal("1"),
+        )
+    ]
+
+    result = generate_production_plans(request)
+    simulation_result = result.simulation_results[0]
+
+    assert simulation_result.expected_material_shortage_count > 0
+    assert simulation_result.order_duration_estimates
+    assert {
+        row["estimated_duration_minutes"]
+        for row in simulation_result.order_duration_estimates
+    } == {30.0}
+    assert {
+        row["estimated_duration_hr"]
+        for row in simulation_result.order_duration_estimates
+    } == {0.5}
+    assert {
+        row["order_amount"]
+        for row in simulation_result.order_duration_estimates
+    } == {100_000, 80_000}

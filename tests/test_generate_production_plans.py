@@ -88,7 +88,7 @@ def test_generate_production_plans_returns_two_variants_and_metadata() -> None:
     assert set(result.solver_metadata) == set(PLAN_VARIANTS)
 
 
-def test_material_shortage_is_soft_and_increases_cost_for_both_plans() -> None:
+def test_material_shortage_is_soft_and_tracked_without_penalty_cost() -> None:
     result = generate_production_plans(_material_request(allow_unscheduled=True))
     due_plan = _plan_by_code(result, "DUE_DATE_OPTIMAL")
     amount_plan = _plan_by_code(result, "AMOUNT_OPTIMAL")
@@ -97,14 +97,12 @@ def test_material_shortage_is_soft_and_increases_cost_for_both_plans() -> None:
     assert due_plan.metrics.scheduled_count == 2
     assert due_plan.metrics.unscheduled_count == 0
     assert due_plan.metrics.total_material_shortage_quantity > 0
-    assert due_plan.metrics.total_material_shortage_penalty_amount >= 10_000
-    assert due_plan.metrics.estimated_total_cost > 0
+    assert due_plan.metrics.total_material_shortage_penalty_amount == 0
     assert amount_plan.status in {"OPTIMAL", "FEASIBLE"}
     assert amount_plan.metrics.scheduled_count == 2
     assert amount_plan.metrics.unscheduled_count == 0
     assert amount_plan.metrics.total_material_shortage_quantity > 0
-    assert amount_plan.metrics.total_material_shortage_penalty_amount >= 10_000
-    assert amount_plan.metrics.estimated_total_cost > 0
+    assert amount_plan.metrics.total_material_shortage_penalty_amount == 0
 
 
 def test_soft_material_shortage_does_not_make_mandatory_orders_infeasible() -> None:
@@ -223,7 +221,10 @@ def test_due_date_variant_keeps_maximum_assignment_before_hard_due_date_policy()
     assert due_plan.metrics.unscheduled_count == 0
     assert due_plan.metrics.delayed_order_count == 1
     assert any("relaxed due-date constraints" in warning for warning in due_plan.warnings)
-    assert _plan_by_code(result, "AMOUNT_OPTIMAL").metrics.scheduled_count == 1
+    amount_plan = _plan_by_code(result, "AMOUNT_OPTIMAL")
+    assert amount_plan.metrics.scheduled_count == 0
+    assert amount_plan.metrics.unscheduled_count == 1
+    assert amount_plan.metrics.delayed_order_count == 0
 
 
 def test_line_priority_rank_prefers_lower_rank_line_when_business_terms_are_tied() -> None:
@@ -650,7 +651,7 @@ def test_safety_stock_and_loss_rate_limit_material_usage() -> None:
     assert plan.metrics.scheduled_count == 1
     assert plan.metrics.unscheduled_count == 0
     assert plan.metrics.total_material_shortage_quantity == 1
-    assert plan.metrics.total_material_shortage_penalty_amount == 1_000_000
+    assert plan.metrics.total_material_shortage_penalty_amount == 0
 
 
 def test_expected_inbound_at_delays_material_usage_until_arrival() -> None:
