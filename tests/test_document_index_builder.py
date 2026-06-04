@@ -57,6 +57,27 @@ def test_document_index_builder_splits_long_document_with_overlap() -> None:
     assert payloads[1].chunk_text.startswith("A" * 5)
 
 
+def test_document_index_builder_applies_overlap_across_paragraph_boundaries() -> None:
+    builder = DocumentIndexBuilder(
+        Settings(document_chunk_size=20, document_chunk_overlap=5)
+    )
+    document = InternalDocumentInput(
+        documentId="paragraph-guide",
+        documentType="PROCESS",
+        title="문단 경계 대응 가이드",
+        content=f"{'A' * 18}\n{'B' * 10}",
+        allowedRoles=["MANUFACTURING_MANAGER"],
+        intentTags=["LINE_BOTTLENECK"],
+    )
+
+    payloads = builder.build_payloads(document)
+
+    assert len(payloads) == 2
+    assert payloads[0].chunk_text == "A" * 18
+    assert payloads[1].chunk_text == f"{'A' * 5}\n\n{'B' * 10}"
+    assert len(payloads[1].chunk_text) <= 20
+
+
 def test_document_index_builder_builds_qdrant_upsert_point() -> None:
     builder = DocumentIndexBuilder(Settings(document_chunk_size=500))
     document = InternalDocumentInput(

@@ -66,14 +66,14 @@ class DocumentAccessPolicy:
             }
         )
 
-    def _includes_operator(self, allowed_roles: list[str]) -> bool:
-        return any(role.strip().upper() == self._operator_role for role in allowed_roles)
-
     def _contains_restricted_content(self, *values: Any) -> bool:
         return any(
             isinstance(value, str) and self._contains_restricted_term(value)
             for value in values
         )
+
+    def _includes_operator(self, allowed_roles: list[str]) -> bool:
+        return any(role.strip().upper() == self._operator_role for role in allowed_roles)
 
     def _contains_restricted_term(self, value: str) -> bool:
         normalized_value = self._normalize(value)

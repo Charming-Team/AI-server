@@ -1,7 +1,10 @@
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.features.chat.access_control import QDRANT_DOCUMENT_TYPES
+from app.features.chat.access_control import (
+    BUSINESS_ROLES,
+    QDRANT_DOCUMENT_TYPES,
+)
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_payload import QdrantSearchPoint
 from app.features.chat.embedding_service import EmbeddingService
@@ -133,13 +136,22 @@ class DocumentSearchService:
         intent: ChatIntent,
     ) -> dict:
         must_conditions: list[dict] = [
-            {"key": "allowedRoles", "match": {"any": [request.user.role]}},
+            {
+                "key": "allowedRoles",
+                "match": {"any": self._allowed_roles_for_search(request.user.role)},
+            },
         ]
         if intent != ChatIntent.UNKNOWN:
             must_conditions.append(
                 {"key": "intentTags", "match": {"any": [intent.value]}}
             )
         return {"must": must_conditions}
+
+    def _allowed_roles_for_search(self, role: str) -> list[str]:
+        normalized_role = role.strip().upper()
+        if normalized_role in BUSINESS_ROLES:
+            return sorted(BUSINESS_ROLES)
+        return [normalized_role]
 
     def _filter_points_by_role(self, points: list[dict], role: str) -> list[dict]:
         return [
@@ -153,11 +165,14 @@ class DocumentSearchService:
         if not isinstance(payload, dict):
             return False
 
+        normalized_role = role.strip().upper()
+        if normalized_role in BUSINESS_ROLES:
+            return True
+
         allowed_roles = payload.get("allowedRoles")
         if not isinstance(allowed_roles, list):
             return False
 
-        normalized_role = role.strip().upper()
         return any(
             isinstance(allowed_role, str)
             and allowed_role.strip().upper() == normalized_role

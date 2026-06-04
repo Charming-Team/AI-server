@@ -338,6 +338,35 @@ def test_chat_service_builds_detailed_model_result_counts() -> None:
     assert audit_logger.responses == [response]
 
 
+def test_chat_service_counts_displayed_sources_in_model_result() -> None:
+    service = ChatService(Settings())
+    service.evidence_service = FakeEvidenceService()
+    service.document_search_service = FakeDocumentSearchService(
+        was_searched=True,
+        sources=[
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title=f"회사 문서 {index}",
+                summary="회사 개요 문서입니다.",
+                sourceOrigin="QDRANT",
+            )
+            for index in range(1, 5)
+        ],
+    )
+    service.answer_generation_service = FakeGeneratedAnswerGenerationService()
+
+    response = anyio.run(service.create_answer, _build_request())
+
+    assert [source.title for source in response.sources] == [
+        "월간 생산 리스크",
+        "회사 문서 1",
+        "회사 문서 2",
+    ]
+    assert response.model_result.rdb_evidence_count == 1
+    assert response.model_result.document_source_count == 2
+    assert response.model_result.evidence_count == len(response.sources)
+
+
 def test_chat_service_marks_llm_cache_hit_in_model_result() -> None:
     service = ChatService(Settings())
     service.evidence_service = FakeEvidenceService()

@@ -56,3 +56,5 @@ wandb/
 # Local design drafts
 docs/
 *.md
+!pull_request_template.md
+prac.py

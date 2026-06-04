@@ -136,13 +136,6 @@ def test_check_qdrant_document_payloads_passes_valid_points() -> None:
             _valid_point(url=None, referenceType="REPORT", referenceId=-1),
             "url or reference metadata is required",
         ),
-        (
-            _valid_point(
-                allowedRoles=["OPERATOR"],
-                chunkText="계약 금액과 패널티가 포함된 보고서입니다.",
-            ),
-            "restricted business terms",
-        ),
     ],
 )
 def test_validate_points_returns_payload_contract_errors(
@@ -172,6 +165,21 @@ def test_validate_points_allows_restricted_terms_when_operator_is_not_allowed() 
     invalid_points = check_qdrant_document_payloads.validate_points([point])
 
     assert invalid_points == []
+
+
+def test_validate_points_rejects_restricted_terms_when_operator_is_allowed() -> None:
+    point = _valid_point(
+        allowedRoles=["OPERATOR"],
+        chunkText="계약 금액과 패널티가 포함된 보고서입니다.",
+    )
+
+    invalid_points = check_qdrant_document_payloads.validate_points([point])
+
+    assert len(invalid_points) == 1
+    assert any(
+        "restricted business terms" in error
+        for error in invalid_points[0]["errors"]
+    )
 
 
 def test_check_qdrant_document_payloads_fails_below_minimum_points() -> None:
