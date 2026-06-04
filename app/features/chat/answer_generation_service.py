@@ -1,3 +1,5 @@
+import re
+
 from app.core.config import Settings
 from app.features.chat.answer_output_policy import AnswerOutputPolicy
 from app.features.chat.exceptions import ChatExternalServiceError
@@ -34,8 +36,45 @@ class AnswerGenerationService:
         "관련 RDB 데이터와 Qdrant 문서 등록 상태를 확인해 주세요."
     )
     _answer_section_names = ("핵심 답변", "근거", "확인 필요")
-    _max_evidence_bullets = 2
-    _max_follow_up_bullets = 1
+    _internal_url_pattern = re.compile(
+        r"(?:\s*,\s*|\s+)?(?<![:/])/[A-Za-z0-9][A-Za-z0-9/_-]*"
+        r"(?:\?[A-Za-z0-9=&._%-]+)?"
+    )
+    _iso_datetime_pattern = re.compile(
+        r"(?<!\d)"
+        r"(?P<year>20\d{2})-(?P<month>\d{2})-(?P<day>\d{2})"
+        r"[T ]"
+        r"(?P<hour>\d{2}):(?P<minute>\d{2})"
+        r"(?::\d{2}(?:\.\d+)?)?"
+        r"(?:Z|[+-]\d{2}:?\d{2}| UTC)?"
+        r"(?!\d)"
+    )
+    _iso_date_pattern = re.compile(
+        r"(?<!\d)"
+        r"(?P<year>20\d{2})-(?P<month>\d{2})-(?P<day>\d{2})"
+        r"(?![\dT:])"
+    )
+    _boilerplate_sentence_terms = (
+        "RDB",
+        "QDRANT",
+        "Qdrant",
+        "문서 검색 근거",
+        "근거에 기반",
+        "변경 여부",
+        "필요 시 조회",
+        "조회해 주세요",
+        "권한 범위 내에서",
+        "말씀해 주세요",
+        "알려주시면",
+        "알려주시고",
+    )
+    _source_reference_prefixes = (
+        "[RDB]",
+        "[QDRANT]",
+        "RDB 출처",
+        "QDRANT 출처",
+        "Qdrant 출처",
+    )
 
     def __init__(
         self,
@@ -134,17 +173,7 @@ class AnswerGenerationService:
                 skipped_reason=LLM_EMPTY_ANSWER,
             )
 
-        answer = self._ensure_answer_sections(
-            answer,
-            evidence_result,
-            document_result,
-        )
-        answer = self._normalize_answer_sections(
-            answer,
-            evidence_result,
-            document_result,
-        )
-        answer = self._ensure_source_titles(answer, evidence_result, document_result)
+        answer = self._normalize_chat_answer(answer)
         return self._build_output_checked_result(
             answer,
             role=role,
@@ -213,181 +242,93 @@ class AnswerGenerationService:
     ) -> bool:
         return evidence_result.has_evidence or bool(document_result.sources)
 
-    def _ensure_source_titles(
-        self,
-        answer: str,
-        evidence_result: EvidenceResult,
-        document_result: DocumentSearchResult,
-    ) -> str:
-        titles = self._collect_source_titles(evidence_result, document_result)
-        if not titles:
-            return answer
-
-        normalized_answer = answer.casefold()
-        if any(title.casefold() in normalized_answer for title in titles):
-            return answer
-
-        source_references = self._collect_source_references(
-            evidence_result,
-            document_result,
-        )
-        return f"{answer}\n\n참조 근거: {', '.join(source_references[:3])}"
-
-    def _collect_source_titles(
-        self,
-        evidence_result: EvidenceResult,
-        document_result: DocumentSearchResult,
-    ) -> list[str]:
-        titles: list[str] = []
-        seen_titles: set[str] = set()
-        for title in [
-            *(item.title for item in evidence_result.items),
-            *(source.title for source in document_result.sources),
-        ]:
-            normalized_title = title.casefold()
-            if normalized_title in seen_titles:
-                continue
-            seen_titles.add(normalized_title)
-            titles.append(title)
-        return titles
-
-    def _collect_source_references(
-        self,
-        evidence_result: EvidenceResult,
-        document_result: DocumentSearchResult,
-    ) -> list[str]:
-        references: list[str] = []
-        seen_references: set[str] = set()
-        for item in evidence_result.items:
-            self._append_source_reference(
-                references,
-                seen_references,
-                f"[RDB] {item.title}",
-            )
-        for source in document_result.sources:
-            origin = source.source_origin or "QDRANT"
-            self._append_source_reference(
-                references,
-                seen_references,
-                f"[{origin}] {source.title}",
-            )
-        return references
-
-    def _append_source_reference(
-        self,
-        references: list[str],
-        seen_references: set[str],
-        reference: str,
-    ) -> None:
-        normalized_reference = reference.casefold()
-        if normalized_reference in seen_references:
-            return
-        seen_references.add(normalized_reference)
-        references.append(reference)
-
-    def _ensure_answer_sections(
-        self,
-        answer: str,
-        evidence_result: EvidenceResult,
-        document_result: DocumentSearchResult,
-    ) -> str:
-        if self._has_required_sections(answer):
-            return answer
-
-        source_references = self._collect_source_references(
-            evidence_result,
-            document_result,
-        )
-        if source_references:
-            evidence_lines = "\n".join(
-                f"- {reference}" for reference in source_references[:3]
-            )
-        else:
-            evidence_lines = "- 제공된 내부 근거"
-
-        return "\n\n".join(
-            [
-                f"핵심 답변:\n{answer.strip()}",
-                f"근거:\n{evidence_lines}",
-                (
-                    "확인 필요:\n"
-                    "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
-                ),
-            ]
-        )
-
-    def _normalize_answer_sections(
-        self,
-        answer: str,
-        evidence_result: EvidenceResult,
-        document_result: DocumentSearchResult,
-    ) -> str:
-        if not self._needs_answer_section_normalization(answer):
-            return answer
-
-        sections = self._split_answer_sections(answer)
-        core_answer = self._normalize_core_answer(sections["핵심 답변"])
-        evidence_lines = self._normalize_bullet_lines(
-            sections["근거"],
-            limit=self._max_evidence_bullets,
-        )
-        follow_up_lines = self._normalize_bullet_lines(
-            sections["확인 필요"],
-            limit=self._max_follow_up_bullets,
-        )
-
-        if not evidence_lines:
-            evidence_lines = self._build_default_evidence_lines(
-                evidence_result,
-                document_result,
-            )
-        if not follow_up_lines:
-            follow_up_lines = [
-                "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
-            ]
-
-        evidence_text = "\n".join(evidence_lines)
-        follow_up_text = "\n".join(follow_up_lines)
-        return "\n\n".join(
-            [
-                f"핵심 답변:\n{core_answer}",
-                f"근거:\n{evidence_text}",
-                f"확인 필요:\n{follow_up_text}",
-            ]
-        )
-
-    def _needs_answer_section_normalization(self, answer: str) -> bool:
-        section_counts = dict.fromkeys(self._answer_section_names, 0)
+    def _normalize_chat_answer(self, answer: str) -> str:
+        normalized_lines: list[str] = []
         for line in answer.splitlines():
-            section_name = self._extract_answer_section_name(line)
-            if section_name is not None:
-                section_counts[section_name] += 1
-
-        if any(count > 1 for count in section_counts.values()):
-            return True
-
-        sections = self._split_answer_sections(answer)
-        evidence_count = len(self._normalize_bullet_lines(sections["근거"], limit=100))
-        follow_up_count = len(
-            self._normalize_bullet_lines(sections["확인 필요"], limit=100)
-        )
-        return (
-            evidence_count > self._max_evidence_bullets
-            or follow_up_count > self._max_follow_up_bullets
-        )
-
-    def _split_answer_sections(self, answer: str) -> dict[str, list[str]]:
-        sections: dict[str, list[str]] = {
-            section_name: [] for section_name in self._answer_section_names
-        }
-        current_section = "핵심 답변"
-        for line in answer.splitlines():
-            section_name = self._extract_answer_section_name(line)
-            if section_name is not None:
-                current_section = section_name
+            stripped_line = line.strip()
+            if not stripped_line:
+                if normalized_lines and normalized_lines[-1] != "":
+                    normalized_lines.append("")
                 continue
-            sections[current_section].append(line)
-        return sections
+
+            normalized_line = self._strip_answer_section_prefix(stripped_line)
+            if not normalized_line:
+                continue
+
+            normalized_line = self._strip_leading_bullet(normalized_line)
+            if self._is_source_reference_line(normalized_line):
+                continue
+            normalized_lines.append(normalized_line)
+
+        normalized_answer = self._join_chat_answer_lines(normalized_lines)
+        normalized_answer = self._normalize_datetime_text(normalized_answer)
+        normalized_answer = self._remove_internal_urls(normalized_answer)
+        normalized_answer = self._remove_boilerplate_sentences(normalized_answer)
+        if normalized_answer:
+            return normalized_answer
+        return "확인된 내부 근거 기준으로 답변합니다."
+
+    def _strip_answer_section_prefix(self, line: str) -> str:
+        normalized_line = line.strip().strip("# ").strip()
+        normalized_line = normalized_line.strip("*").strip()
+
+        section_name = self._extract_answer_section_name(normalized_line)
+        if section_name is not None:
+            return ""
+
+        for section in self._answer_section_names:
+            for separator in (":", "："):
+                prefix = f"{section}{separator}"
+                if normalized_line.startswith(prefix):
+                    return normalized_line.removeprefix(prefix).strip()
+        return line.strip()
+
+    def _strip_leading_bullet(self, line: str) -> str:
+        stripped_line = line.strip()
+        while stripped_line.startswith(("- ", "* ", "• ")):
+            stripped_line = stripped_line[2:].strip()
+        return stripped_line
+
+    def _is_source_reference_line(self, line: str) -> bool:
+        stripped_line = line.strip()
+        return stripped_line.startswith(self._source_reference_prefixes)
+
+    def _join_chat_answer_lines(self, lines: list[str]) -> str:
+        return " ".join(line for line in lines if line).strip()
+
+    def _normalize_datetime_text(self, answer: str) -> str:
+        normalized_answer = self._iso_datetime_pattern.sub(
+            lambda match: (
+                f"{match.group('year')}.{match.group('month')}.{match.group('day')} "
+                f"{match.group('hour')}:{match.group('minute')}"
+            ),
+            answer,
+        )
+        return self._iso_date_pattern.sub(
+            lambda match: (
+                f"{match.group('year')}.{match.group('month')}.{match.group('day')}"
+            ),
+            normalized_answer,
+        )
+
+    def _remove_internal_urls(self, answer: str) -> str:
+        sanitized_answer = self._internal_url_pattern.sub("", answer)
+        sanitized_answer = re.sub(r"\s+([,.])", r"\1", sanitized_answer)
+        sanitized_answer = re.sub(r":\s*([,.])", r"\1", sanitized_answer)
+        sanitized_answer = re.sub(r"\s{2,}", " ", sanitized_answer)
+        sanitized_answer = sanitized_answer.replace(" ,", ",").replace(" .", ".")
+        sanitized_answer = sanitized_answer.replace(": .", ".").replace(":,", ",")
+        return sanitized_answer.strip()
+
+    def _remove_boilerplate_sentences(self, answer: str) -> str:
+        sentences = re.split(r"(?<=[.!?。])\s+", answer)
+        filtered_sentences = [
+            sentence.strip()
+            for sentence in sentences
+            if sentence.strip()
+            and not any(term in sentence for term in self._boilerplate_sentence_terms)
+        ]
+        return " ".join(filtered_sentences).strip()
 
     def _extract_answer_section_name(self, line: str) -> str | None:
         candidate = line.strip().strip("# ").strip()
@@ -397,67 +338,6 @@ class AnswerGenerationService:
         if candidate in self._answer_section_names:
             return candidate
         return None
-
-    def _normalize_core_answer(self, lines: list[str]) -> str:
-        normalized_lines: list[str] = []
-        for line in lines:
-            stripped_line = line.strip()
-            if not stripped_line:
-                continue
-            if self._extract_answer_section_name(stripped_line) is not None:
-                continue
-            if stripped_line.startswith(("- ", "* ", "• ")):
-                stripped_line = stripped_line[2:].strip()
-            normalized_lines.append(stripped_line)
-
-        if not normalized_lines:
-            return "확인된 내부 근거 기준으로 요약합니다."
-        return "\n".join(normalized_lines)
-
-    def _normalize_bullet_lines(self, lines: list[str], *, limit: int) -> list[str]:
-        normalized_lines: list[str] = []
-        seen_lines: set[str] = set()
-        for line in lines:
-            stripped_line = line.strip()
-            if not stripped_line:
-                continue
-            if self._extract_answer_section_name(stripped_line) is not None:
-                continue
-
-            if stripped_line.startswith(("- ", "* ", "• ")):
-                stripped_line = stripped_line[2:].strip()
-            bullet_line = f"- {stripped_line}"
-            normalized_key = " ".join(bullet_line.casefold().split())
-            if normalized_key in seen_lines:
-                continue
-            seen_lines.add(normalized_key)
-            normalized_lines.append(bullet_line)
-            if len(normalized_lines) >= limit:
-                break
-        return normalized_lines
-
-    def _build_default_evidence_lines(
-        self,
-        evidence_result: EvidenceResult,
-        document_result: DocumentSearchResult,
-    ) -> list[str]:
-        source_references = self._collect_source_references(
-            evidence_result,
-            document_result,
-        )
-        if not source_references:
-            return ["- 제공된 내부 근거"]
-        return [
-            f"- {reference}"
-            for reference in source_references[: self._max_evidence_bullets]
-        ]
-
-    def _has_required_sections(self, answer: str) -> bool:
-        normalized_answer = answer.casefold()
-        return all(
-            section in normalized_answer
-            for section in ("핵심 답변", "근거", "확인 필요")
-        )
 
     def _limit_answer_length(self, answer: str) -> str:
         max_chars = self.settings.answer_max_chars

@@ -40,11 +40,13 @@ def test_grounded_fallback_answer_builder_summarizes_internal_evidence() -> None
     answer = builder.build(evidence_result, document_result)
 
     assert "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다." in answer
-    assert "RDB 근거:" in answer
+    assert "RDB 근거:" not in answer
+    assert "RDB 근거로는" in answer
     assert "RM-AL-001 알루미늄 원자재 재고 부족" in answer
-    assert "문서 검색 근거:" in answer
+    assert "문서 검색 근거:" not in answer
+    assert "문서 근거로는" in answer
     assert "5월 생산 리스크 보고서" in answer
-    assert "확인 필요" in answer
+    assert "추가 확인이 필요" in answer
 
 
 def test_grounded_fallback_answer_builder_limits_items_and_long_summaries() -> None:
@@ -97,7 +99,8 @@ def test_grounded_fallback_answer_builder_explains_document_only_grounding() -> 
 
     assert "확인된 문서 검색 근거 기준으로 요약합니다." in answer
     assert "RDB 근거:" not in answer
-    assert "문서 검색 근거:" in answer
+    assert "문서 검색 근거:" not in answer
+    assert "문서 근거로는" in answer
     assert "S-Map 회사 개요" in answer
 
 
@@ -121,5 +124,6 @@ def test_grounded_fallback_answer_builder_explains_rdb_only_grounding() -> None:
     answer = builder.build(evidence_result, document_result)
 
     assert "확인된 RDB 근거 기준으로 요약합니다." in answer
-    assert "RDB 근거:" in answer
+    assert "RDB 근거:" not in answer
+    assert "RDB 근거로는" in answer
     assert "문서 검색 근거:" not in answer
