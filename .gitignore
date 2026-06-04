@@ -50,6 +50,7 @@ storage/
 models/
 checkpoints/
 artifacts/
+!app/features/delay_prediction/artifacts/
 mlruns/
 wandb/
 
