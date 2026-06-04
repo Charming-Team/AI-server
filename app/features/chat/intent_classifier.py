@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from app.features.chat.schemas import ChatIntent
@@ -13,6 +14,22 @@ class IntentRule:
 class IntentClassifier:
     _phrase_score = 3
     _keyword_score = 1
+    _material_code_pattern = re.compile(
+        r"(?<![a-z0-9])(?:mat|rm)-[a-z0-9-]+(?![a-z0-9-])"
+    )
+    _material_shortage_signal_terms = (
+        "부족",
+        "재고",
+        "가용",
+        "안전재고",
+        "입고",
+        "예약",
+        "shortage",
+        "inventory",
+        "stock",
+        "inbound",
+        "reserved",
+    )
 
     _intent_rules: tuple[IntentRule, ...] = (
         IntentRule(
@@ -163,6 +180,13 @@ class IntentClassifier:
     def classify(self, question: str) -> ChatIntent:
         normalized_question = self._normalize(question)
         compact_question = self._compact(normalized_question)
+        entity_intent = self._classify_by_entity_signal(
+            normalized_question,
+            compact_question,
+        )
+        if entity_intent != ChatIntent.UNKNOWN:
+            return entity_intent
+
         best_intent = ChatIntent.UNKNOWN
         best_score = 0
 
@@ -173,6 +197,27 @@ class IntentClassifier:
                 best_score = score
 
         return best_intent
+
+    def _classify_by_entity_signal(
+        self,
+        normalized_question: str,
+        compact_question: str,
+    ) -> ChatIntent:
+        if self._has_material_shortage_signal(normalized_question, compact_question):
+            return ChatIntent.MATERIAL_SHORTAGE
+        return ChatIntent.UNKNOWN
+
+    def _has_material_shortage_signal(
+        self,
+        normalized_question: str,
+        compact_question: str,
+    ) -> bool:
+        if self._material_code_pattern.search(normalized_question) is None:
+            return False
+        return any(
+            self._compact(term) in compact_question
+            for term in self._material_shortage_signal_terms
+        )
 
     def _score_rule(
         self,

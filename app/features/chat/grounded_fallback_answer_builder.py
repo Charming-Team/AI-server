@@ -10,25 +10,22 @@ class GroundedFallbackAnswerBuilder:
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
     ) -> str:
-        sections = [self._build_intro(evidence_result, document_result)]
+        sentences = [self._build_intro(evidence_result, document_result)]
 
         if evidence_result.items:
-            sections.append(
-                self._build_section(
-                    "RDB 근거",
+            sentences.append(
+                self._build_source_sentence(
+                    "RDB",
                     self._select_items(
-                        [
-                            (item.title, item.summary)
-                            for item in evidence_result.items
-                        ],
+                        [(item.title, item.summary) for item in evidence_result.items],
                     ),
                 )
             )
 
         if document_result.sources:
-            sections.append(
-                self._build_section(
-                    "문서 검색 근거",
+            sentences.append(
+                self._build_source_sentence(
+                    "문서",
                     self._select_items(
                         [
                             (source.title, source.summary)
@@ -38,8 +35,8 @@ class GroundedFallbackAnswerBuilder:
                 )
             )
 
-        sections.append("확인 필요: 위 근거에 없는 내용은 추가 확인이 필요합니다.")
-        return "\n\n".join(sections)
+        sentences.append("위 근거에 없는 세부 원인이나 조치는 추가 확인이 필요합니다.")
+        return " ".join(sentence for sentence in sentences if sentence)
 
     def _build_intro(
         self,
@@ -49,24 +46,26 @@ class GroundedFallbackAnswerBuilder:
         has_rdb_evidence = bool(evidence_result.items)
         has_document_sources = bool(document_result.sources)
         if has_rdb_evidence and has_document_sources:
-            return "핵심 답변: 확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다."
+            return "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다."
         if has_rdb_evidence:
-            return "핵심 답변: 확인된 RDB 근거 기준으로 요약합니다."
+            return "확인된 RDB 근거 기준으로 요약합니다."
         if has_document_sources:
-            return "핵심 답변: 확인된 문서 검색 근거 기준으로 요약합니다."
-        return "핵심 답변: 확인된 내부 근거 기준으로 요약합니다."
+            return "확인된 문서 검색 근거 기준으로 요약합니다."
+        return "확인된 내부 근거 기준으로 요약합니다."
 
-    def _build_section(
+    def _build_source_sentence(
         self,
-        title: str,
+        source_label: str,
         items: list[tuple[str, str]],
     ) -> str:
-        lines = [f"{title}:"]
-        lines.extend(
-            f"{index}. {item_title}: {self._truncate(item_summary)}"
-            for index, (item_title, item_summary) in enumerate(items, start=1)
+        if not items:
+            return ""
+
+        source_fragments = " ".join(
+            f"{item_title}에서는 {self._normalize_sentence(item_summary)}"
+            for item_title, item_summary in items
         )
-        return "\n".join(lines)
+        return f"{source_label} 근거로는 {source_fragments}"
 
     def _select_items(self, items: list[tuple[str, str]]) -> list[tuple[str, str]]:
         selected_items: list[tuple[str, str]] = []
@@ -85,3 +84,9 @@ class GroundedFallbackAnswerBuilder:
         if len(text) <= self._max_summary_chars:
             return text
         return f"{text[: self._max_summary_chars - 3]}..."
+
+    def _normalize_sentence(self, text: str) -> str:
+        truncated_text = self._truncate(text).strip()
+        if truncated_text.endswith((".", "?", "!", "다.", "요.")):
+            return truncated_text
+        return f"{truncated_text}."

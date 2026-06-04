@@ -131,10 +131,12 @@ def test_answer_generation_returns_grounded_fallback_when_llm_disabled() -> None
 
     assert result.was_generated is False
     assert "확인된 문서 검색 근거 기준으로 요약합니다." in result.answer
-    assert "문서 검색 근거:" in result.answer
+    assert "문서 검색 근거:" not in result.answer
+    assert "핵심 답변:" not in result.answer
+    assert "문서 근거로는" in result.answer
     assert "2026년 5월 생산 리스크 보고서" in result.answer
     assert "자재 부족과 LINE-A01 병목이 주요 리스크입니다." in result.answer
-    assert "확인 필요" in result.answer
+    assert "추가 확인이 필요합니다" in result.answer
     assert result.skipped_reason == "LLM 답변 생성 기능이 비활성화되어 있습니다."
     assert llm_client.prompt is None
 
@@ -298,12 +300,13 @@ def test_answer_generation_calls_llm_when_enabled_and_grounded() -> None:
     assert result.llm_usage.prompt_tokens == 120
     assert result.llm_usage.completion_tokens == 32
     assert result.llm_usage.total_tokens == 152
-    assert result.answer.startswith(
-        "핵심 답변:\n"
-        "2026년 5월 생산 리스크 보고서 근거에 따르면 자재 부족이 주요 리스크입니다."
+    assert result.answer == (
+        "2026년 5월 생산 리스크 보고서 근거에 따르면 "
+        "자재 부족이 주요 리스크입니다."
     )
-    assert "근거:\n- [QDRANT] 2026년 5월 생산 리스크 보고서" in result.answer
-    assert "확인 필요:" in result.answer
+    assert "핵심 답변:" not in result.answer
+    assert "근거:" not in result.answer
+    assert "확인 필요:" not in result.answer
     assert llm_client.prompt is not None
     assert "2026년 5월 생산 리스크 보고서" in llm_client.prompt.user_prompt
     assert llm_client.call_count == 1
@@ -450,7 +453,7 @@ def test_answer_generation_skips_llm_cache_when_disabled() -> None:
     assert llm_client.call_count == 2
 
 
-def test_answer_generation_keeps_structured_llm_answer() -> None:
+def test_answer_generation_strips_structured_llm_answer_sections() -> None:
     structured_answer = (
         "핵심 답변:\n"
         "2026년 5월 생산 리스크 보고서 기준으로 자재 부족이 주요 리스크입니다.\n\n"
@@ -488,7 +491,14 @@ def test_answer_generation_keeps_structured_llm_answer() -> None:
     )
 
     assert result.was_generated is True
-    assert result.answer == structured_answer
+    assert result.answer == (
+        "2026년 5월 생산 리스크 보고서 기준으로 자재 부족이 주요 리스크입니다. "
+        "2026년 5월 생산 리스크 보고서 "
+        "근거에 없는 원인은 추가 확인이 필요합니다."
+    )
+    assert "핵심 답변:" not in result.answer
+    assert "근거:" not in result.answer
+    assert "확인 필요:" not in result.answer
 
 
 def test_answer_generation_normalizes_duplicated_llm_sections() -> None:
@@ -550,17 +560,14 @@ def test_answer_generation_normalizes_duplicated_llm_sections() -> None:
     )
 
     assert result.was_generated is True
-    assert result.answer.count("핵심 답변:") == 1
-    assert result.answer.count("근거:") == 1
-    assert result.answer.count("확인 필요:") == 1
-    evidence_section = result.answer.split("근거:\n", 1)[1].split(
-        "\n\n확인 필요:",
-        1,
-    )[0]
-    follow_up_section = result.answer.split("확인 필요:\n", 1)[1]
-    assert len(evidence_section.splitlines()) == 2
-    assert len(follow_up_section.splitlines()) == 1
-    assert "S-Map 도메인 용어 사전" not in evidence_section
+    assert "핵심 답변:" not in result.answer
+    assert "근거:" not in result.answer
+    assert "확인 필요:" not in result.answer
+    assert "LINE-ABS-01은 대기 수량과 대기 시간이 높아 병목 가능성이 있습니다." in (
+        result.answer
+    )
+    assert "설비 구간별 상세 병목은 추가 확인이 필요합니다." in result.answer
+    assert "자재 대기 여부는 추가 확인이 필요합니다." in result.answer
 
 
 def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> None:
@@ -601,8 +608,10 @@ def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> No
 
     assert result.was_generated is False
     assert "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다." in result.answer
-    assert "RDB 근거:" in result.answer
-    assert "문서 검색 근거:" in result.answer
+    assert "RDB 근거:" not in result.answer
+    assert "문서 검색 근거:" not in result.answer
+    assert "RDB 근거로는" in result.answer
+    assert "문서 근거로는" in result.answer
     assert "월간 생산 리스크" in result.answer
     assert "2026년 5월 생산 리스크 보고서" in result.answer
     assert (
@@ -649,15 +658,67 @@ def test_answer_generation_wraps_unstructured_llm_answer_with_source_titles() ->
     )
 
     assert result.was_generated is True
-    assert result.answer == (
-        "핵심 답변:\n"
-        "근거에 따르면 자재 부족이 주요 리스크입니다.\n\n"
-        "근거:\n"
-        "- [RDB] 월간 생산 리스크\n"
-        "- [QDRANT] 2026년 5월 생산 리스크 보고서\n\n"
-        "확인 필요:\n"
-        "- 위 근거에 포함되지 않은 수치, 원인, 조치는 추가 확인이 필요합니다."
+    assert result.answer == "근거에 따르면 자재 부족이 주요 리스크입니다."
+    assert "핵심 답변:" not in result.answer
+    assert "근거:" not in result.answer
+    assert "확인 필요:" not in result.answer
+
+
+def test_answer_generation_normalizes_datetime_and_removes_internal_urls() -> None:
+    answer = (
+        "2026-06-04 배정된 생산계획 중 438번 계획은 "
+        "2026-06-04 21:46:53 UTC에 시작하고 "
+        "2026-06-05T23:32:29+00:00에 종료됩니다. "
+        "상세 페이지는 /production-plans/438?mode=read, "
+        "/production-plans/433?mode=read에서 확인 가능합니다. "
+        "QDRANT의 문서에서도 업무 흐름이 확인됩니다. "
+        "각 항목은 RDB에 등록된 생산계획으로 확인되며, "
+        "상세 화면은 상세 페이지에서 확인 가능하고 필요 시 조회해 주세요. "
+        "현재 상태나 수치 등은 RDB 근거에 기반해 변경 여부를 확인할 수 있습니다. "
+        "추가 조회가 필요하면 말씀해 주세요. "
+        "해당 사항은 권한 범위 내에서만 답변드리겠습니다."
     )
+    llm_client = FakeLlmClient(answer)
+    service = AnswerGenerationService(
+        Settings(llm_enabled=True),
+        llm_client=llm_client,
+    )
+    request = _build_request()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.PRODUCTION_PLAN,
+        basisTime=request.requested_at,
+        items=[
+            EvidenceItem(
+                type="PLAN",
+                title="438 LINE-PP-01 PP-HEAT SCHEDULED",
+                summary="계획 시작: 2026.06.04 21:46, 계획 종료: 2026.06.05 23:32",
+                url="/production-plans/438?mode=read",
+                source="chat_production_plan_evidence_view",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(sources=[])
+
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
+
+    assert result.was_generated is True
+    assert "2026.06.04 배정된 생산계획" in result.answer
+    assert "2026.06.04 21:46" in result.answer
+    assert "2026.06.05 23:32" in result.answer
+    assert "2026-06-04" not in result.answer
+    assert "UTC" not in result.answer
+    assert "/production-plans" not in result.answer
+    assert "RDB" not in result.answer
+    assert "QDRANT" not in result.answer
+    assert "필요 시 조회" not in result.answer
+    assert "변경 여부" not in result.answer
+    assert "말씀해 주세요" not in result.answer
+    assert "권한 범위 내에서" not in result.answer
 
 
 def test_answer_generation_limits_long_answer_length() -> None:
