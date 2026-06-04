@@ -1771,7 +1771,8 @@ def test_chat_answer_evaluation_uses_company_info_qdrant_source() -> None:
     assert body["intent"] == "LINE_BOTTLENECK"
     assert body["securityResult"]["status"] == "PASSED"
     assert "확인된 문서 검색 근거 기준으로 요약합니다." in body["answer"]
-    assert "문서 검색 근거:" in body["answer"]
+    assert "문서 검색 근거:" not in body["answer"]
+    assert "문서 근거로는" in body["answer"]
     assert "LINE-A01 병목 대응 기준" in body["answer"]
     assert (
         "LINE-A01 대기시간이 증가하면 작업 순서와 "

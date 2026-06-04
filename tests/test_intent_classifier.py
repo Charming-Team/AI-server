@@ -9,6 +9,10 @@ from app.features.chat.schemas import ChatIntent
     [
         ("납기 지연 가능성이 높은 주문 알려줘", ChatIntent.DELIVERY_RISK),
         ("자재 재고 부족한 항목 알려줘", ChatIntent.MATERIAL_SHORTAGE),
+        (
+            "MAT-FOAM-ADD 부족이 어떤 생산계획에 영향 주는지 알려줘",
+            ChatIntent.MATERIAL_SHORTAGE,
+        ),
         ("라인 병목이 발생한 공정 알려줘", ChatIntent.LINE_BOTTLENECK),
         ("우리 공정 라인은 몇개 있어?", ChatIntent.LINE_BOTTLENECK),
         ("긴급 주문이 현재 생산계획에 미치는 영향 알려줘", ChatIntent.URGENT_ORDER_IMPACT),

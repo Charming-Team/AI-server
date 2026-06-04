@@ -1,0 +1,24 @@
+{
+  "model_name": "random_forest_regressor",
+  "feature_columns": [
+    "order_quantity",
+    "due_gap_days",
+    "product_id",
+    "average_yield_rate",
+    "line_count",
+    "estimated_duration_hr_sum",
+    "plan_sequence_max",
+    "plan_overdue_days_max",
+    "waiting_time_hr_avg",
+    "utilization_rate_avg",
+    "shortage_ratio"
+  ],
+  "target_column": "actual_delay_hr_sum",
+  "metrics": {
+    "mae": 6.178413919413918,
+    "rmse": 9.572527477948771,
+    "r2": -0.12413071366276429
+  },
+  "random_state": 42,
+  "test_size": 0.2
+}

@@ -249,6 +249,10 @@ class CatalogRdbEvidenceProvider:
     def _format_summary_value(self, column: str, value: Any) -> str:
         if isinstance(value, bool):
             return "예" if value else "아니오"
+        if isinstance(value, datetime):
+            return value.strftime("%Y.%m.%d %H:%M")
+        if isinstance(value, date):
+            return value.strftime("%Y.%m.%d")
         if column in HOUR_COLUMNS:
             return f"{self._format_number(value)}시간"
         if column in DAY_COLUMNS:

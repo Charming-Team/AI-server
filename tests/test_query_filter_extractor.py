@@ -14,6 +14,11 @@ from app.features.chat.query_filter_extractor import QueryFilterExtractor
         ("line-abs-01 전환 기준 알려줘", "LINE", "LINE-ABS-01"),
         ("PROD-A001 생산 가능 라인을 알려줘", "PRODUCT", "PROD-A001"),
         ("mat-001 재고 현황을 알려줘", "MATERIAL", "MAT-001"),
+        (
+            "MAT-FOAM-ADD 부족이 어떤 생산계획에 영향 주는지 알려줘",
+            "MATERIAL",
+            "MAT-FOAM-ADD",
+        ),
         ("RM-AL-001 입고 예정일을 알려줘", "MATERIAL", "RM-AL-001"),
     ],
 )
@@ -48,6 +53,40 @@ def test_query_filter_extractor_expands_limit_for_count_questions() -> None:
     filters = extractor.extract_filters("우리 공정 라인은 몇개 있어?")
 
     assert filters["limit"] == 50
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "현재 가동 중인 라인은 뭐야?",
+        "생산 라인 구성 알려줘",
+        "전체 라인 상태 알려줘",
+    ],
+)
+def test_query_filter_extractor_expands_limit_for_line_overview_questions(
+    question: str,
+) -> None:
+    extractor = QueryFilterExtractor()
+
+    filters = extractor.extract_filters(question)
+
+    assert filters["limit"] == 50
+
+
+def test_query_filter_extractor_keeps_default_limit_for_line_bottleneck_question() -> None:
+    extractor = QueryFilterExtractor()
+
+    filters = extractor.extract_filters("라인 병목 현황 알려줘")
+
+    assert filters["limit"] == 5
+
+
+def test_query_filter_extractor_keeps_default_limit_for_all_line_bottleneck_question() -> None:
+    extractor = QueryFilterExtractor()
+
+    filters = extractor.extract_filters("전체 라인 병목 현황 알려줘")
+
+    assert filters["limit"] == 5
 
 
 @pytest.mark.parametrize(

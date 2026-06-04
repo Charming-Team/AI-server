@@ -43,34 +43,57 @@ def test_grounded_prompt_builder_includes_internal_grounding_rules() -> None:
     assert "제공된 내부 근거만 사용" in prompt.system_prompt
     assert "웹 검색" in prompt.system_prompt
     assert "일반 상식" in prompt.system_prompt
-    assert "핵심 답변, 근거, 확인 필요 순서" in prompt.system_prompt
-    assert "근거 원천(RDB 또는 QDRANT)" in prompt.system_prompt
-    assert "700~900자 안쪽" in prompt.system_prompt
+    assert "섹션 제목을 쓰지 않는다" in prompt.system_prompt
+    assert "자연스러운 문단" in prompt.system_prompt
+    assert "450~650자 안쪽" in prompt.system_prompt
     assert "원천 JSON, 전체 데이터 덤프" in prompt.system_prompt
-    assert "각 섹션명은 한 번만 출력" in prompt.system_prompt
-    assert "같은 제목과 같은 출처의 근거를 여러 bullet" in prompt.system_prompt
+    assert "같은 출처를 반복하지 않는다" in prompt.system_prompt
     assert "수치에는 가능한 경우 시간, 일, %, 수량" in prompt.system_prompt
-    assert "현재 상태, 수치, 진행률은 RDB 근거를 우선" in prompt.system_prompt
+    assert "날짜와 시간은 YYYY.MM.DD HH:mm 형식" in prompt.system_prompt
+    assert "내부 이동 경로와 URL은 답변 본문에 쓰지 않는다" in prompt.system_prompt
+    assert "현재 상태, 수치, 진행률은 업무 데이터 근거를 우선" in (
+        prompt.system_prompt
+    )
     assert "사용자 역할:\nEXECUTIVE" in prompt.user_prompt
     assert "역할별 응답 제한:" in prompt.user_prompt
     assert "RDB 근거:\n없음" in prompt.user_prompt
     assert "문서 검색 근거:\n없음" in prompt.user_prompt
-    assert "수치, 상태, 날짜는 RDB 근거 또는 문서 검색 근거" in prompt.user_prompt
-    assert "총 개수나 몇 개인지 묻는 질문은 RDB 집계 근거" in prompt.user_prompt
-    assert "현재 상태 판단은 RDB 근거를 우선" in prompt.user_prompt
+    assert "수치, 상태, 날짜는 업무 데이터 근거 또는 문서 근거" in (
+        prompt.user_prompt
+    )
+    assert "총 개수나 몇 개인지 묻는 질문은 업무 데이터 집계 근거" in (
+        prompt.user_prompt
+    )
+    assert "라인 구성, 전체 라인 상태, 가동 중 라인 질문은 업무 데이터 집계 근거" in (
+        prompt.user_prompt
+    )
+    assert "현재 상태 판단은 업무 데이터 근거를 우선" in prompt.user_prompt
     assert "사용자 역할에서 제한되는 내용은 근거에 있어도 답변하지 않는다" in (
         prompt.user_prompt
     )
-    assert "권한 제한 안내는 질문이 제한된 정보를 요구할 때만" in prompt.user_prompt
-    assert "전체 답변은 700~900자 안쪽" in prompt.user_prompt
+    assert "권한 제한 안내는 질문이 제한된 정보를 요구하거나 실제로 제한된 경우" in (
+        prompt.user_prompt
+    )
+    assert "전체 답변은 450~650자 안쪽" in prompt.user_prompt
+    assert "자연스러운 챗봇 문장" in prompt.user_prompt
+    assert "섹션 제목을 본문에 쓰지 않는다" in prompt.user_prompt
+    assert "주요 항목을 한 문단으로 이어서 설명" in prompt.user_prompt
     assert "원천 JSON, 전체 데이터 덤프" in prompt.user_prompt
-    assert "섹션명은 각각 한 번만 출력" in prompt.user_prompt
-    assert "RDB 근거가 1개뿐이면 해당 RDB 근거는 1개 bullet" in prompt.user_prompt
     assert "비율 값은 % 단위" in prompt.user_prompt
-    assert "근거 섹션에는 최소 1개 이상의 출처 제목" in prompt.user_prompt
-    assert "답변 형식은 핵심 답변, 근거, 확인 필요 순서" in prompt.user_prompt
-    assert "[RDB 또는 QDRANT] 출처 제목" in prompt.user_prompt
-    assert "최대 2개만 작성" in prompt.user_prompt
+    assert "날짜와 시간은 YYYY.MM.DD HH:mm 형식" in prompt.user_prompt
+    assert "내부 이동 경로와 URL은 답변 본문에 절대 쓰지 않는다" in (
+        prompt.user_prompt
+    )
+    assert "조회형 질문은 업무 데이터 결과만 중심으로 답하고" in (
+        prompt.user_prompt
+    )
+    assert "RDB, Qdrant, 문서 검색 같은 내부 근거 시스템 이름" in (
+        prompt.user_prompt
+    )
+    assert "추가 질문 유도 문장이나 일반 안내 문장은 쓰지 않는다" in (
+        prompt.user_prompt
+    )
+    assert "확인 필요하다고 자연스럽게 덧붙인다" in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_includes_operator_role_constraints() -> None:
@@ -187,8 +210,10 @@ def test_grounded_prompt_builder_sanitizes_source_urls_before_prompt() -> None:
 
     assert "https://evil.example" not in prompt.user_prompt
     assert "javascript:alert" not in prompt.user_prompt
-    assert "URL: /reports/20?mode=read" in prompt.user_prompt
-    assert "URL: /reports/21?mode=read" in prompt.user_prompt
+    assert "URL: /reports/20?mode=read" not in prompt.user_prompt
+    assert "URL: /reports/21?mode=read" not in prompt.user_prompt
+    assert "/reports/20?mode=read" not in prompt.user_prompt
+    assert "/reports/21?mode=read" not in prompt.user_prompt
 
 
 def test_grounded_prompt_builder_sanitizes_data_urls_before_prompt() -> None:

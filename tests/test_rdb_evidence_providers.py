@@ -100,6 +100,8 @@ def test_catalog_rdb_evidence_provider_converts_material_view_rows_to_evidence()
     assert item.title == "RM-AL-001 알루미늄 원자재 SHORTAGE"
     assert "생산계획 ID: 1001" in item.summary
     assert "부족 수량: 60" in item.summary
+    assert "입고 예정 시각: 2026.05.20 09:00" in item.summary
+    assert "2026-05-20T09:00:00+09:00" not in item.summary
     assert item.url == "/materials/inventory/11?mode=read"
     assert item.source == "chat_material_shortage_evidence_view"
     assert item.reference_id == 7001
@@ -150,6 +152,8 @@ def test_catalog_rdb_evidence_provider_formats_line_units_and_rates() -> None:
     assert "대기 시간: 2.5시간" in items[0].summary
     assert "가동률: 88%" in items[0].summary
     assert "진행률: 51.6%" in items[0].summary
+    assert "기록 시각: 2026.06.01 00:00" in items[0].summary
+    assert "2026-06-01T00:00:00+00:00" not in items[0].summary
 
 
 def test_catalog_rdb_evidence_provider_builds_read_only_url_for_non_material_source() -> None:
