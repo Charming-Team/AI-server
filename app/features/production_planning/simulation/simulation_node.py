@@ -170,6 +170,7 @@ def _aggregate_plan_simulation(
             {"cause": cause, "count": count}
             for cause, count in delay_causes.most_common(5)
         ],
+        order_duration_estimates=_build_order_duration_estimates(plan, scenarios),
         sampling_summary=_build_sampling_summary(distributions),
         event_summary=_build_event_summary(scenarios),
         event_timeline=_build_event_timeline(
@@ -212,6 +213,7 @@ def _disabled_result(plan: PlanResult) -> PlanSimulationResult:
         expected_yield_rate=None,
         expected_defect_quantity=None,
         top_delay_causes=[],
+        order_duration_estimates=[],
         sampling_summary={},
         event_summary=[],
         event_timeline=[],
@@ -263,6 +265,41 @@ def _build_sampling_summary(distributions: SamplingDistributions) -> dict:
         "warning_count": len(distributions.warnings),
         "warnings": distributions.warnings[:10],
     }
+
+
+def _build_order_duration_estimates(
+    plan: PlanResult,
+    scenarios: list[ScenarioResult],
+) -> list[dict]:
+    schedule_item_by_order_id = {item.order_id: item for item in plan.schedule_items}
+    rows = []
+    for order_id, item in sorted(
+        schedule_item_by_order_id.items(),
+        key=lambda pair: (pair[1].start_time, pair[1].line_id, pair[0]),
+    ):
+        samples = [
+            scenario.order_duration_minutes_by_order_id[order_id]
+            for scenario in scenarios
+            if order_id in scenario.order_duration_minutes_by_order_id
+        ]
+        planned_duration = max(
+            1,
+            round((item.end_time - item.start_time).total_seconds() / 60),
+        )
+        estimated_minutes = _mean(samples)
+        rows.append(
+            {
+                "order_id": order_id,
+                "product_id": item.product_id,
+                "line_id": item.line_id,
+                "order_amount": item.order_amount,
+                "planned_duration_minutes": planned_duration,
+                "estimated_duration_minutes": estimated_minutes,
+                "estimated_duration_hr": round(estimated_minutes / 60, 4),
+                "sample_count": len(samples),
+            }
+        )
+    return rows
 
 
 def _build_event_summary(scenarios: list[ScenarioResult]) -> list[dict]:

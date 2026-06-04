@@ -17,12 +17,18 @@ class DueDateOptimizationConfig(BaseModel):
 
 
 class CostOptimizationConfig(BaseModel):
+    unscheduled_contract_amount_weight: int = 1_000_000_000
+    late_penalty_amount_weight: int = 100_000_000
+    total_cleaning_cost_weight: int = 1_000_000
+    line_change_cost_weight: int = 1_000_000
+    different_product_sequence_count_weight: int = 1_000_000
+    total_tardiness_minutes_weight: int = 10_000
+    makespan_minutes_weight: int = 1
     scheduled_amount_reward_weight: int = 1_000_000
     amount_weighted_tardiness_weight: int = 10_000
     unscheduled_amount_penalty_weight: int = 100_000
     high_amount_delay_penalty_weight: int = 1_000
     late_penalty_weight: int = 1_000_000_000
-    material_shortage_weight: int = 1_000_000
     changeover_cost_weight: int = 1_000
     line_priority_weight: int = 1_000
     makespan_weight: int = 10

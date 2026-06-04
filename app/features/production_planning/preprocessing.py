@@ -597,11 +597,14 @@ def get_changeover_minutes(
         - default_changeover_minutes: Fallback setup time.
 
     Methodology:
+        - Return zero for same-product continuation.
         - Prefer exact line-specific rule, then global product-pair rule, then default.
 
     Output:
         - Integer changeover minutes.
     """
+    if from_product_id == to_product_id:
+        return 0
     line_rule = changeover_rules.get((from_product_id, to_product_id, line_id))
     if line_rule is not None:
         return calculate_changeover_minutes(line_rule)
@@ -642,11 +645,14 @@ def get_changeover_cost(
         - default_changeover_cost: Fallback setup cost.
 
     Methodology:
+        - Return zero for same-product continuation.
         - Prefer exact line-specific rule, then global product-pair rule, then default.
 
     Output:
         - Integer changeover cost.
     """
+    if from_product_id == to_product_id:
+        return 0
     line_rule = changeover_rules.get((from_product_id, to_product_id, line_id))
     if line_rule is not None:
         return line_rule.changeover_cost or 0

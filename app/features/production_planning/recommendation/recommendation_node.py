@@ -161,9 +161,6 @@ def _recommendation(
                 simulation_result.expected_late_penalty_amount
             ),
             "expected_changeover_cost": simulation_result.expected_changeover_cost,
-            "expected_material_shortage_penalty_amount": (
-                simulation_result.expected_material_shortage_penalty_amount
-            ),
             "expected_total_risk_cost": simulation_result.expected_total_risk_cost,
             "material_shortage_probability": simulation_result.material_shortage_probability,
             "top_delay_causes": simulation_result.top_delay_causes,

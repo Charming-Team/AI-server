@@ -210,9 +210,6 @@ def calculate_plan_metrics(
         schedule_items,
         data,
     )
-    material_shortage_penalty = (
-        material_shortage_quantity * config.amount_optimization.material_shortage_weight
-    )
     return PlanMetrics(
         scheduled_count=len(schedule_items),
         unscheduled_count=len(unscheduled_orders),
@@ -229,10 +226,8 @@ def calculate_plan_metrics(
         total_late_penalty_amount=total_late_penalty,
         total_changeover_cost=total_changeover_cost,
         total_material_shortage_quantity=material_shortage_quantity,
-        total_material_shortage_penalty_amount=material_shortage_penalty,
-        estimated_total_cost=(
-            total_late_penalty + total_changeover_cost + material_shortage_penalty
-        ),
+        total_material_shortage_penalty_amount=0,
+        estimated_total_cost=total_late_penalty + total_changeover_cost,
     )
 
 

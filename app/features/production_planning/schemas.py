@@ -242,6 +242,7 @@ class PlanSimulationResult(BaseModel):
     expected_yield_rate: float | None
     expected_defect_quantity: float | None
     top_delay_causes: list[dict[str, Any]]
+    order_duration_estimates: list[dict[str, Any]] = Field(default_factory=list)
     sampling_summary: dict[str, Any] = Field(default_factory=dict)
     event_summary: list[dict[str, Any]] = Field(default_factory=list)
     event_timeline: list[dict[str, Any]] = Field(default_factory=list)
@@ -335,12 +336,13 @@ class AmountReferenceData:
 
 @dataclass(frozen=True)
 class AmountObjectiveTerms:
-    total_late_penalty_amount: Any
-    total_changeover_cost: Any
-    total_material_shortage: Any
-    total_line_priority_penalty: Any
-    makespan: Any
-    total_tardiness: Any
+    unscheduled_contract_amount: Any
+    late_penalty_amount: Any
+    total_cleaning_cost: Any
+    line_change_cost: Any
+    different_product_sequence_count: Any
+    total_tardiness_minutes: Any
+    makespan_minutes: Any
 
 
 @dataclass

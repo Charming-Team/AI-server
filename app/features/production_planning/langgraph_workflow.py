@@ -13,7 +13,7 @@ from app.features.production_planning.cpsat_model_builder import (
 from app.features.production_planning.exceptions import PlanningDataAccessError
 from app.features.production_planning.objectives import apply_objective_by_variant
 from app.features.production_planning.plan_comparator import compare_plans
-from app.features.production_planning.preprocessing import normalize_request
+from app.features.production_planning.preprocessing import normalize_request, to_minute_offset
 from app.features.production_planning.recommendation import (
     compare_simulation_results,
     recommend_final_plans,
@@ -182,6 +182,9 @@ def generate_plan_variants_node(
     for variant_code in PLAN_VARIANTS:
         if variant_code == "DUE_DATE_OPTIMAL":
             plan_results.append(_generate_due_date_plan(normalized, validated))
+            continue
+        if variant_code == "AMOUNT_OPTIMAL":
+            plan_results.append(_generate_amount_plan(normalized, validated))
             continue
 
         variant_config = _solver_config_for_variant(validated.solver_config, variant_code)
@@ -523,6 +526,98 @@ def _generate_due_date_plan(
     return soft_plan
 
 
+def _generate_amount_plan(
+    normalized: NormalizedPlanningData,
+    validated: ProductionPlanningRequest,
+) -> PlanResult:
+    """
+    Parameters:
+        - normalized: Shared normalized planning data.
+        - validated: Validated request containing the base solver configuration.
+
+    Methodology:
+        - Solve AMOUNT_OPTIMAL once with SOFT due dates to discover a good product-clustering
+          candidate.
+        - Re-solve with HARD due dates, using the SOFT solution as a hint and preserving the
+          same scheduled count when possible.
+        - If HARD cannot keep the SOFT scheduled count, keep HARD due dates and let the
+          objective choose the highest-value feasible subset instead of returning a delayed plan.
+
+    Output:
+        - Amount optimal PlanResult whose scheduled orders satisfy HARD due dates.
+    """
+    variant_code = "AMOUNT_OPTIMAL"
+    soft_config = validated.solver_config.model_copy(
+        update={
+            "allow_unscheduled_orders": True,
+            "due_date_policy": "SOFT",
+            "use_material_constraints": False,
+        }
+    )
+    soft_bundle = _build_objective_bundle(normalized, soft_config, variant_code)
+    apply_objective_by_variant(
+        soft_bundle.model,
+        soft_bundle,
+        normalized,
+        soft_config,
+        variant_code,
+    )
+    soft_plan = _solve_extract_plan(soft_bundle, normalized, soft_config, variant_code)
+    if soft_plan.status not in {"OPTIMAL", "FEASIBLE"}:
+        return soft_plan
+
+    hard_config = validated.solver_config.model_copy(
+        update={
+            "allow_unscheduled_orders": True,
+            "due_date_policy": "HARD",
+            "use_material_constraints": False,
+        }
+    )
+    hard_bundle = _build_objective_bundle(normalized, hard_config, variant_code)
+    _add_plan_solution_hint(hard_bundle, normalized, soft_plan)
+    _add_minimum_scheduled_count_constraint(
+        hard_bundle,
+        soft_plan.metrics.scheduled_count,
+    )
+    apply_objective_by_variant(
+        hard_bundle.model,
+        hard_bundle,
+        normalized,
+        hard_config,
+        variant_code,
+    )
+    hard_plan = _solve_extract_plan(hard_bundle, normalized, hard_config, variant_code)
+    if (
+        hard_plan.status in {"OPTIMAL", "FEASIBLE"}
+        and hard_plan.metrics.scheduled_count >= soft_plan.metrics.scheduled_count
+    ):
+        hard_plan.warnings.append(
+            "AMOUNT_OPTIMAL used HARD due-date constraints without reducing scheduled count."
+        )
+        return hard_plan
+
+    fallback_bundle = _build_objective_bundle(normalized, hard_config, variant_code)
+    _add_plan_solution_hint(fallback_bundle, normalized, soft_plan)
+    apply_objective_by_variant(
+        fallback_bundle.model,
+        fallback_bundle,
+        normalized,
+        hard_config,
+        variant_code,
+    )
+    fallback_plan = _solve_extract_plan(
+        fallback_bundle,
+        normalized,
+        hard_config,
+        variant_code,
+    )
+    fallback_plan.warnings.append(
+        "AMOUNT_OPTIMAL enforced HARD due dates and reduced scheduled orders because "
+        "the SOFT scheduled count was infeasible without delay."
+    )
+    return fallback_plan
+
+
 def _add_minimum_scheduled_count_constraint(
     bundle: CpsatModelBundle,
     minimum_scheduled_count: int,
@@ -543,6 +638,50 @@ def _add_minimum_scheduled_count_constraint(
         sum(order_vars["scheduled"] for order_vars in bundle.order_vars.values())
         >= minimum_scheduled_count
     )
+
+
+def _add_plan_solution_hint(
+    bundle: CpsatModelBundle,
+    normalized: NormalizedPlanningData,
+    plan: PlanResult,
+) -> None:
+    """
+    Parameters:
+        - bundle: Fresh CP-SAT bundle receiving solution hints.
+        - normalized: Normalized planning data with planning_start.
+        - plan: Previously solved plan whose assignments guide the next solve.
+
+    Methodology:
+        - Hint scheduled, unscheduled, assignment, start, end, and completion variables.
+        - Hints guide CP-SAT toward product clustering from the SOFT solve without making those
+          assignments hard constraints.
+
+    Output:
+        - None. Adds CP-SAT solution hints in place.
+    """
+    item_by_order_id = {item.order_id: item for item in plan.schedule_items}
+    for order_id, order_vars in bundle.order_vars.items():
+        item = item_by_order_id.get(order_id)
+        if item is None:
+            bundle.model.AddHint(order_vars["scheduled"], 0)
+            if order_id in bundle.unscheduled_vars:
+                bundle.model.AddHint(bundle.unscheduled_vars[order_id], 1)
+            for assigned in order_vars["assigned"].values():
+                bundle.model.AddHint(assigned, 0)
+            continue
+
+        start_offset = to_minute_offset(item.start_time, normalized.planning_start)
+        end_offset = to_minute_offset(item.end_time, normalized.planning_start)
+        bundle.model.AddHint(order_vars["scheduled"], 1)
+        bundle.model.AddHint(order_vars["completion"], end_offset)
+        if order_id in bundle.unscheduled_vars:
+            bundle.model.AddHint(bundle.unscheduled_vars[order_id], 0)
+        for line_id, assigned in order_vars["assigned"].items():
+            is_selected_line = line_id == item.line_id
+            bundle.model.AddHint(assigned, int(is_selected_line))
+            if is_selected_line:
+                bundle.model.AddHint(order_vars["start"][line_id], start_offset)
+                bundle.model.AddHint(order_vars["end"][line_id], end_offset)
 
 
 def _solver_config_for_variant(

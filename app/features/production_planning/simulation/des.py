@@ -68,6 +68,7 @@ class ScenarioResult:
     delay_causes: dict[str, int] = field(default_factory=dict)
     event_counts: dict[str, int] = field(default_factory=dict)
     event_log: list[dict] = field(default_factory=list)
+    order_duration_minutes_by_order_id: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -119,6 +120,7 @@ def run_discrete_event_simulation(
             distributions,
             rng,
         )
+        line_change_delay = 0
         if previous_product_id is not None and previous_product_id != item.product_id:
             changeover_overrun = max(0, sampled_changeover - standard_changeover)
             if changeover_overrun:
@@ -159,14 +161,9 @@ def run_discrete_event_simulation(
             simulation_config.material_shortage_delay_minutes,
         )
         if material_shortage_delay:
-            material_shortage_penalty = _material_shortage_penalty_amount(
-                material_shortage_quantity,
-                solver_config,
-            )
             actual_start += timedelta(minutes=material_shortage_delay)
             totals["material_shortage_count"] += 1
             totals["material_shortage_quantity"] += material_shortage_quantity
-            totals["material_shortage_penalty_amount"] += material_shortage_penalty
             _increment_counter(totals["delay_causes"], EVENT_MATERIAL_SHORTAGE)
             _increment_counter(totals["event_counts"], EVENT_MATERIAL_SHORTAGE)
             _append_event_log(
@@ -177,8 +174,8 @@ def run_discrete_event_simulation(
                 data=data,
                 delay_minutes=material_shortage_delay,
                 delivery_delay_minutes=0,
-                loss_amount=material_shortage_penalty,
-                risk_cost=material_shortage_penalty,
+                loss_amount=0,
+                risk_cost=0,
                 material_shortage_quantity=material_shortage_quantity,
             )
 
@@ -257,6 +254,17 @@ def run_discrete_event_simulation(
                 delivery_delay_minutes=0,
                 loss_amount=0,
             )
+        estimated_duration_minutes = (
+            sampled_changeover
+            + line_change_delay
+            + setup_delay
+            + duration
+            + machine_breakdown_delay
+            + operational_delay
+        )
+        totals["order_duration_minutes_by_order_id"][item.order_id] = (
+            estimated_duration_minutes
+        )
         actual_end = actual_start + timedelta(
             minutes=duration + machine_breakdown_delay + operational_delay
         )
@@ -273,7 +281,6 @@ def run_discrete_event_simulation(
         total_risk_cost=(
             totals["late_penalty_amount"]
             + totals["changeover_cost"]
-            + totals["material_shortage_penalty_amount"]
         ),
         material_shortage_count=totals["material_shortage_count"],
         yield_rate_sum=totals["yield_rate_sum"],
@@ -282,6 +289,7 @@ def run_discrete_event_simulation(
         delay_causes=totals["delay_causes"],
         event_counts=totals["event_counts"],
         event_log=sorted(totals["event_log"], key=lambda event: event["event_time"]),
+        order_duration_minutes_by_order_id=totals["order_duration_minutes_by_order_id"],
     )
 
 
@@ -342,6 +350,7 @@ def _initial_unscheduled_metrics(plan: PlanResult, data: NormalizedPlanningData)
                 product_id=normalized_order.order.product_id,
                 line_id=None,
                 due_date=normalized_order.order.due_date,
+                order_amount=normalized_order.order.order_amount,
                 delivery_delay_minutes=None,
                 loss_amount=normalized_order.order.late_penalty_amount,
                 risk_cost=normalized_order.order.late_penalty_amount,
@@ -365,6 +374,7 @@ def _initial_unscheduled_metrics(plan: PlanResult, data: NormalizedPlanningData)
         if plan.unscheduled_orders
         else {},
         "event_log": event_log,
+        "order_duration_minutes_by_order_id": {},
     }
 
 
@@ -454,13 +464,6 @@ def _material_shortage_quantity_units(
         for material_id, required_quantity in requirements.items()
     )
     return _scaled_quantity_to_units(shortage_scaled)
-
-
-def _material_shortage_penalty_amount(
-    material_shortage_quantity: int,
-    solver_config: SolverConfig,
-) -> int:
-    return material_shortage_quantity * solver_config.amount_optimization.material_shortage_weight
 
 
 def _required_materials_by_id(
@@ -632,6 +635,7 @@ def _append_event_log(
             product_id=item.product_id,
             line_id=item.line_id,
             due_date=normalized_order.order.due_date,
+            order_amount=normalized_order.order.order_amount,
             delivery_delay_minutes=delivery_delay_minutes,
             loss_amount=loss_amount,
             risk_cost=loss_amount if risk_cost is None else risk_cost,
@@ -648,6 +652,7 @@ def _build_event_log_row(
     product_id: str | None,
     line_id: str | None,
     due_date: datetime | None,
+    order_amount: int | None,
     delivery_delay_minutes: int | None,
     loss_amount: int,
     risk_cost: int,
@@ -660,6 +665,7 @@ def _build_event_log_row(
         "product_id": product_id,
         "line_id": line_id,
         "due_date": due_date,
+        "order_amount": order_amount,
         "delivery_delay_minutes": delivery_delay_minutes,
         "delivery_delay_days": _minutes_to_days(delivery_delay_minutes),
         "loss_amount": loss_amount,

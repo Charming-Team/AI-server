@@ -12,6 +12,7 @@ from app.features.production_planning.preprocessing import (
     get_inbound_material_quantity_scaled,
     get_inbound_material_time,
     get_initial_available_material_quantity_scaled,
+    normalize_order_amount,
     to_minute_offset,
 )
 from app.features.production_planning.schemas import (
@@ -485,19 +486,128 @@ def build_amount_objective_terms(
         - amount_config: Configurable amount objective weights and scale policy.
 
     Methodology:
-        - Build cost objective terms from actual penalty and operating-cost fields.
-        - Do not use order contract amount or revenue as an optimization signal.
+        - Build terms using the same names as the AMOUNT_OPTIMAL business objective.
+        - Contract amount terms use amount_scale_unit so CP-SAT coefficients stay compact.
+        - Cleaning cost is represented by selected transition minutes because the current DB
+          input exposes cleaning/setup time, not a separate cleaning money amount.
 
     Output:
         - AmountObjectiveTerms containing linear expressions and aggregate variables.
     """
     return AmountObjectiveTerms(
-        total_late_penalty_amount=build_total_late_penalty_amount_expr(model, bundle, data),
-        total_changeover_cost=build_total_changeover_cost_expr(bundle),
-        total_material_shortage=build_total_material_shortage_expr(model, bundle, data),
-        total_line_priority_penalty=build_total_line_priority_penalty_expr(bundle, data),
-        makespan=build_makespan_var(model, bundle, data),
-        total_tardiness=build_total_tardiness_var(model, bundle, data),
+        unscheduled_contract_amount=build_unscheduled_contract_amount_expr(
+            bundle,
+            data,
+            amount_config,
+        ),
+        late_penalty_amount=build_total_late_penalty_amount_expr(model, bundle, data),
+        total_cleaning_cost=build_total_cleaning_cost_expr(model, bundle, data),
+        line_change_cost=build_line_change_cost_expr(model, bundle, data),
+        different_product_sequence_count=build_different_product_sequence_count_expr(
+            model,
+            bundle,
+            data,
+        ),
+        total_tardiness_minutes=build_total_tardiness_var(model, bundle, data),
+        makespan_minutes=build_makespan_var(model, bundle, data),
+    )
+
+
+def build_unscheduled_contract_amount_expr(
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+    amount_config: AmountOptimizationConfig,
+) -> Any:
+    """
+    Parameters:
+        - bundle: Variable bundle containing unscheduled order booleans.
+        - data: Normalized planning data containing order contract amounts.
+        - amount_config: Amount optimization config containing amount_scale_unit.
+
+    Methodology:
+        - Penalize the normalized contract amount of every unscheduled order.
+        - Minimizing this term maximizes protected contract amount when not all orders fit.
+
+    Output:
+        - Linear CP-SAT expression for unscheduled contract amount units.
+    """
+    return sum(
+        _normalized_contract_amount(data, amount_config, order_id) * unscheduled_var
+        for order_id, unscheduled_var in bundle.unscheduled_vars.items()
+    )
+
+
+def build_total_cleaning_cost_expr(
+    model: cp_model.CpModel,
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+) -> Any:
+    """
+    Parameters:
+        - model: CP-SAT model receiving adjacent transition variables.
+        - bundle: Variable bundle containing selected pairwise transition minutes.
+        - data: Normalized planning data containing order and product IDs.
+
+    Methodology:
+        - Use adjacent transition minutes as the current cleaning/setup cost surrogate.
+        - The DB view provides cleaning/setup hours and total changeover time, not a separate
+          cleaning money column, so the objective weight converts minutes into business cost.
+
+    Output:
+        - Linear CP-SAT expression for total selected cleaning/setup minutes.
+    """
+    return sum(
+        item["minutes"] * item["adjacent_var"]
+        for item in _get_or_build_adjacent_transition_vars(model, bundle, data)
+    )
+
+
+def build_line_change_cost_expr(
+    model: cp_model.CpModel,
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+) -> Any:
+    """
+    Parameters:
+        - model: CP-SAT model receiving adjacent transition variables.
+        - bundle: Variable bundle containing selected pairwise transition costs.
+        - data: Normalized planning data containing order and product IDs.
+
+    Methodology:
+        - Sum adjacent changeover_cost values from product transition rules.
+        - This represents the monetary cost of changing products on a line.
+
+    Output:
+        - Linear CP-SAT expression for total line change cost.
+    """
+    return sum(
+        item["cost"] * item["adjacent_var"]
+        for item in _get_or_build_adjacent_transition_vars(model, bundle, data)
+    )
+
+
+def build_different_product_sequence_count_expr(
+    model: cp_model.CpModel,
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+) -> Any:
+    """
+    Parameters:
+        - model: CP-SAT model receiving adjacent transition variables.
+        - bundle: Variable bundle containing pairwise sequence booleans.
+        - data: Normalized planning data containing product_id by order.
+
+    Methodology:
+        - Count adjacent order-to-order transitions where product_id changes on the same line.
+        - Same-product consecutive production has zero count, encouraging product clustering.
+
+    Output:
+        - Linear CP-SAT expression for the number of selected different-product transitions.
+    """
+    return sum(
+        item["adjacent_var"]
+        for item in _get_or_build_adjacent_transition_vars(model, bundle, data)
+        if _sequence_changes_product(item, data)
     )
 
 
@@ -728,6 +838,145 @@ def _scaled_quantity_to_units(quantity_scaled: int) -> int:
     return (quantity_scaled + MATERIAL_QUANTITY_SCALE - 1) // MATERIAL_QUANTITY_SCALE
 
 
+def _normalized_contract_amount(
+    data: NormalizedPlanningData,
+    amount_config: AmountOptimizationConfig,
+    order_id: str,
+) -> int:
+    return normalize_order_amount(
+        data.orders[order_id].order.order_amount,
+        amount_config.amount_scale_unit,
+    )
+
+
+def _sequence_changes_product(item: dict[str, Any], data: NormalizedPlanningData) -> bool:
+    from_order = data.orders.get(item["from_order_id"])
+    to_order = data.orders.get(item["to_order_id"])
+    if from_order is None or to_order is None:
+        return False
+    return from_order.order.product_id != to_order.order.product_id
+
+
+def _get_or_build_adjacent_transition_vars(
+    model: cp_model.CpModel,
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+) -> list[dict[str, Any]]:
+    if "adjacent_transitions" in bundle.metric_vars:
+        return bundle.metric_vars["adjacent_transitions"]
+
+    sequence_by_key = {
+        (item["line_id"], item["from_order_id"], item["to_order_id"]): item
+        for item in bundle.changeover_vars["sequence"]
+    }
+    adjacent_transitions = []
+    for line_id, candidates in data.candidates_by_line_id.items():
+        order_ids = sorted({candidate.order_id for candidate in candidates})
+        if len(order_ids) < 2:
+            continue
+        adjacent_transitions.extend(
+            _build_line_adjacent_transition_vars(
+                model,
+                bundle,
+                line_id,
+                order_ids,
+                sequence_by_key,
+            )
+        )
+
+    bundle.metric_vars["adjacent_transitions"] = adjacent_transitions
+    return adjacent_transitions
+
+
+def _build_line_adjacent_transition_vars(
+    model: cp_model.CpModel,
+    bundle: CpsatModelBundle,
+    line_id: str,
+    order_ids: list[str],
+    sequence_by_key: dict[tuple[str, str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    line_used = model.NewBoolVar(f"line_used_for_adjacency_{line_id}")
+    assigned_vars = [
+        bundle.order_vars[order_id]["assigned"][line_id]
+        for order_id in order_ids
+        if line_id in bundle.order_vars[order_id]["assigned"]
+    ]
+    model.Add(line_used <= sum(assigned_vars))
+    for assigned in assigned_vars:
+        model.Add(line_used >= assigned)
+
+    adjacent_transitions = []
+    successors_by_order_id = {order_id: [] for order_id in order_ids}
+    predecessors_by_order_id = {order_id: [] for order_id in order_ids}
+    for from_order_id in order_ids:
+        for to_order_id in order_ids:
+            if from_order_id == to_order_id:
+                continue
+            sequence = sequence_by_key.get((line_id, from_order_id, to_order_id))
+            if sequence is None:
+                continue
+            adjacent = model.NewBoolVar(
+                f"adjacent_{from_order_id}_{to_order_id}_{line_id}"
+            )
+            model.Add(adjacent <= sequence["before_var"])
+            _forbid_intermediate_orders_between_adjacent_pair(
+                model,
+                adjacent,
+                line_id,
+                from_order_id,
+                to_order_id,
+                order_ids,
+                sequence_by_key,
+            )
+            transition = {**sequence, "adjacent_var": adjacent}
+            adjacent_transitions.append(transition)
+            successors_by_order_id[from_order_id].append(adjacent)
+            predecessors_by_order_id[to_order_id].append(adjacent)
+
+    first_vars = []
+    last_vars = []
+    for order_id in order_ids:
+        assigned = bundle.order_vars[order_id]["assigned"][line_id]
+        first = model.NewBoolVar(f"first_on_line_{order_id}_{line_id}")
+        last = model.NewBoolVar(f"last_on_line_{order_id}_{line_id}")
+        model.Add(sum(predecessors_by_order_id[order_id]) + first == assigned)
+        model.Add(sum(successors_by_order_id[order_id]) + last == assigned)
+        first_vars.append(first)
+        last_vars.append(last)
+
+    model.Add(sum(first_vars) == line_used)
+    model.Add(sum(last_vars) == line_used)
+    return adjacent_transitions
+
+
+def _forbid_intermediate_orders_between_adjacent_pair(
+    model: cp_model.CpModel,
+    adjacent: cp_model.IntVar,
+    line_id: str,
+    from_order_id: str,
+    to_order_id: str,
+    order_ids: list[str],
+    sequence_by_key: dict[tuple[str, str, str], dict[str, Any]],
+) -> None:
+    for intermediate_order_id in order_ids:
+        if intermediate_order_id in {from_order_id, to_order_id}:
+            continue
+        before_intermediate = sequence_by_key.get(
+            (line_id, from_order_id, intermediate_order_id)
+        )
+        intermediate_before_to = sequence_by_key.get(
+            (line_id, intermediate_order_id, to_order_id)
+        )
+        if before_intermediate is None or intermediate_before_to is None:
+            continue
+        model.Add(
+            adjacent
+            + before_intermediate["before_var"]
+            + intermediate_before_to["before_var"]
+            <= 2
+        )
+
+
 def build_total_late_penalty_amount_expr(
     model: cp_model.CpModel,
     bundle: CpsatModelBundle,
@@ -831,9 +1080,9 @@ def apply_amount_objective(
         - config: Solver configuration.
 
     Methodology:
-        - Minimize actual penalty-related costs: late penalty, changeover cost, and material
-          shortage penalty.
-        - Use line priority, makespan, and tardiness only as secondary tie-breakers.
+        - Maximize protected contract amount by minimizing unscheduled contract amount.
+        - Minimize late penalties, cleaning/setup time, line change cost, and product changes.
+        - Keep due dates soft through total tardiness penalties.
 
     Output:
         - None. Model objective updated in place.
@@ -845,14 +1094,15 @@ def apply_amount_objective(
         data,
         amount_config,
     )
-    unscheduled_order_penalty = build_unscheduled_penalty_expr(bundle, config)
 
     model.Minimize(
-        config.due_date_optimization.unscheduled_order_weight * unscheduled_order_penalty
-        + amount_config.late_penalty_weight * terms.total_late_penalty_amount
-        + amount_config.material_shortage_weight * terms.total_material_shortage
-        + amount_config.changeover_cost_weight * terms.total_changeover_cost
-        + amount_config.line_priority_weight * terms.total_line_priority_penalty
-        + amount_config.makespan_weight * terms.makespan
-        + amount_config.due_date_safety_weight * terms.total_tardiness
+        amount_config.unscheduled_contract_amount_weight
+        * terms.unscheduled_contract_amount
+        + amount_config.late_penalty_amount_weight * terms.late_penalty_amount
+        + amount_config.total_cleaning_cost_weight * terms.total_cleaning_cost
+        + amount_config.line_change_cost_weight * terms.line_change_cost
+        + amount_config.different_product_sequence_count_weight
+        * terms.different_product_sequence_count
+        + amount_config.total_tardiness_minutes_weight * terms.total_tardiness_minutes
+        + amount_config.makespan_minutes_weight * terms.makespan_minutes
     )
