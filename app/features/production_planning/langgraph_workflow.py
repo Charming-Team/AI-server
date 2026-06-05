@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
+from secrets import choice
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -24,6 +26,8 @@ from app.features.production_planning.repositories.simulation_data_repository im
 )
 from app.features.production_planning.schemas import (
     PLAN_VARIANTS,
+    AdjustedPlanCandidate,
+    AdjustedPlanRow,
     FinalPlanRecommendation,
     NormalizedPlanningData,
     PlanComparisonSummary,
@@ -43,6 +47,8 @@ from app.features.production_planning.solver import solve_model
 from app.features.production_planning.validators import validate_request
 
 logger = logging.getLogger(__name__)
+
+OPERATOR_ID_POOL = (6, 7, 8, 9, 10, 11, 13, 14, 15)
 
 
 class ProductionPlanningGraphState(TypedDict, total=False):
@@ -395,6 +401,10 @@ def finalize_result_node(
     return {
         "result": ProductionPlanningResult(
             status="COMPLETED",
+            adjusted_plan_candidates=_build_adjusted_plan_candidates(
+                plan_results,
+                state["simulation_results"],
+            ),
             plan_results=plan_results,
             recommended_plan_variant_code=comparison_summary.recommended_plan_variant_code,
             comparison_summary=comparison_summary,
@@ -408,6 +418,106 @@ def finalize_result_node(
             },
         )
     }
+
+
+def _build_adjusted_plan_candidates(
+    plan_results: list[PlanResult],
+    simulation_results: list[PlanSimulationResult],
+) -> list[AdjustedPlanCandidate]:
+    """
+    Parameters:
+        - plan_results: Solved CP-SAT plan variants.
+        - simulation_results: Simulation metrics containing order-level duration estimates.
+
+    Methodology:
+        - Convert internal ScheduleItem rows into production_plans-compatible response rows.
+        - Assign plan_sequence independently inside each line by planned start order.
+        - Use simulation estimated_duration_hr when available and fall back to planned duration.
+
+    Output:
+        - Adjusted plan candidates ready to serialize as API/DB-save payloads.
+    """
+    updated_at = datetime.now(UTC)
+    estimates_by_variant = _duration_estimates_by_variant(simulation_results)
+    candidates = []
+    for plan in plan_results:
+        candidates.append(
+            AdjustedPlanCandidate(
+                plan_variant_code=plan.plan_variant_code,
+                plan_variant_name=plan.plan_variant_name,
+                status=plan.status,
+                plans=_build_adjusted_plan_rows(
+                    plan,
+                    estimates_by_variant.get(plan.plan_variant_code, {}),
+                    updated_at,
+                ),
+            )
+        )
+    return candidates
+
+
+def _duration_estimates_by_variant(
+    simulation_results: list[PlanSimulationResult],
+) -> dict[str, dict[str, float]]:
+    estimates = {}
+    for result in simulation_results:
+        estimates[result.plan_variant_code] = {
+            row["order_id"]: float(row["estimated_duration_hr"])
+            for row in result.order_duration_estimates
+            if "order_id" in row and "estimated_duration_hr" in row
+        }
+    return estimates
+
+
+def _build_adjusted_plan_rows(
+    plan: PlanResult,
+    duration_estimates_by_order_id: dict[str, float],
+    updated_at: datetime,
+) -> list[AdjustedPlanRow]:
+    line_sequence_by_order_id = _line_sequence_by_order_id(plan)
+    rows = []
+    for item in sorted(plan.schedule_items, key=lambda value: (value.line_id, value.start_time)):
+        rows.append(
+            AdjustedPlanRow(
+                order_id=item.order_id,
+                product_id=item.product_id,
+                line_id=item.line_id,
+                operator_id=choice(OPERATOR_ID_POOL),
+                planned_start_at=item.start_time,
+                planned_end_at=item.end_time,
+                estimated_duration_hr=duration_estimates_by_order_id.get(
+                    item.order_id,
+                    _planned_duration_hr(item),
+                ),
+                planned_quantity=item.planned_production_quantity,
+                plan_sequence=line_sequence_by_order_id[item.order_id],
+                plan_status="SCHEDULED",
+                updated_at=updated_at,
+            )
+        )
+    return rows
+
+
+def _line_sequence_by_order_id(plan: PlanResult) -> dict[str, int]:
+    sequence_by_order_id = {}
+    items_by_line: dict[str, list] = {}
+    for item in plan.schedule_items:
+        items_by_line.setdefault(item.line_id, []).append(item)
+    for line_items in items_by_line.values():
+        for index, item in enumerate(
+            sorted(
+                line_items,
+                key=lambda value: (value.start_time, value.end_time, value.order_id),
+            ),
+            start=1,
+        ):
+            sequence_by_order_id[item.order_id] = index
+    return sequence_by_order_id
+
+
+def _planned_duration_hr(item) -> float:
+    duration_minutes = max(1, round((item.end_time - item.start_time).total_seconds() / 60))
+    return round(duration_minutes / 60, 4)
 
 
 def _build_objective_bundle(

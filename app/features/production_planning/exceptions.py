@@ -7,6 +7,7 @@ class ProductionPlanningErrorMixin:
     """Base behavior for production planning exceptions that become API errors."""
 
     default_error_code = "PRODUCTION_PLANNING_ERROR"
+    response_status = "500 INTERNAL_SERVER_ERROR"
 
     def __init__(
         self,
@@ -28,21 +29,17 @@ class ProductionPlanningErrorMixin:
             - None.
 
         Methodology:
-            - Convert the exception into a stable response payload.
-            - Include optional context only when the caller supplied it.
+            - Convert the exception into the compact API error format used by clients.
+            - Keep diagnostic details on the exception object for logs instead of exposing
+              them through the response body.
 
         Output:
-            - Dictionary with error_code, message, and optional view/details fields.
+            - Dictionary with status and message fields.
         """
-        payload: dict[str, Any] = {
-            "error_code": self.error_code,
+        return {
+            "status": self.response_status,
             "message": self.message,
         }
-        if self.view:
-            payload["view"] = self.view
-        if self.details:
-            payload["details"] = self.details
-        return payload
 
     def __str__(self) -> str:
         if self.view:
@@ -52,18 +49,22 @@ class ProductionPlanningErrorMixin:
 
 class PlanningValidationError(ProductionPlanningErrorMixin, ValueError):
     default_error_code = "PLANNING_VALIDATION_ERROR"
+    response_status = "400 BAD_REQUEST"
 
 
 class PlanningInfeasibleError(ProductionPlanningErrorMixin, RuntimeError):
     default_error_code = "PLANNING_INFEASIBLE"
+    response_status = "409 CONFLICT"
 
 
 class SolverExecutionError(ProductionPlanningErrorMixin, RuntimeError):
     default_error_code = "SOLVER_EXECUTION_ERROR"
+    response_status = "408 REQUEST_TIMEOUT"
 
 
 class SolutionExtractionError(ProductionPlanningErrorMixin, RuntimeError):
     default_error_code = "SOLUTION_EXTRACTION_ERROR"
+    response_status = "500 INTERNAL_SERVER_ERROR"
 
 
 class PlanningDataAccessError(ProductionPlanningErrorMixin, RuntimeError):
@@ -77,6 +78,7 @@ class PlanningDataAccessError(ProductionPlanningErrorMixin, RuntimeError):
         view: Name of the ai_planning view that caused the error, if applicable.
     """
     default_error_code = "PLANNING_DATA_ACCESS_ERROR"
+    response_status = "503 SERVICE_UNAVAILABLE"
 
     def __init__(
         self,

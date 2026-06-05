@@ -276,9 +276,31 @@ class FinalPlanRecommendation(BaseModel):
     risk_summary: dict[str, Any]
 
 
+class AdjustedPlanRow(BaseModel):
+    order_id: str
+    product_id: str
+    line_id: str
+    operator_id: int | None
+    planned_start_at: datetime
+    planned_end_at: datetime
+    estimated_duration_hr: float
+    planned_quantity: int
+    plan_sequence: int
+    plan_status: str
+    updated_at: datetime
+
+
+class AdjustedPlanCandidate(BaseModel):
+    plan_variant_code: str
+    plan_variant_name: str
+    status: str
+    plans: list[AdjustedPlanRow]
+
+
 class ProductionPlanningResult(BaseModel):
     request_id: str | None = None
     status: str = "COMPLETED"
+    adjusted_plan_candidates: list[AdjustedPlanCandidate] = Field(default_factory=list)
     plan_results: list[PlanResult]
     recommended_plan_variant_code: str | None = None
     comparison_summary: PlanComparisonSummary
@@ -288,6 +310,25 @@ class ProductionPlanningResult(BaseModel):
     recommended_cost_plan: FinalPlanRecommendation | None = None
     warnings: list[str] = Field(default_factory=list)
     solver_metadata: dict[str, Any]
+
+    def to_adjusted_plan_response(self) -> dict[str, Any]:
+        """
+        Parameters:
+            - None.
+
+        Methodology:
+            - Serialize only the production_plans-compatible adjusted plan candidates.
+            - Leave internal solver, comparison, and simulation fields out of the API payload.
+
+        Output:
+            - Dictionary shaped as {"adjusted_plan_candidates": [...]}.
+        """
+        return {
+            "adjusted_plan_candidates": [
+                candidate.model_dump(mode="json")
+                for candidate in self.adjusted_plan_candidates
+            ]
+        }
 
 
 @dataclass(frozen=True)
