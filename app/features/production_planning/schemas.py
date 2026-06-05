@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -30,6 +30,17 @@ PLAN_VARIANT_NAMES: dict[str, str] = {
     "DUE_DATE_OPTIMAL": "Due-Date Optimal",
     "AMOUNT_OPTIMAL": "Amount Optimal",
 }
+
+DB_BIGINT_MIN = -(2**63)
+DB_BIGINT_MAX = 2**63 - 1
+DbBigInt = Annotated[
+    int,
+    Field(ge=DB_BIGINT_MIN, le=DB_BIGINT_MAX, strict=True),
+]
+MoneyNumeric = Annotated[
+    Decimal,
+    Field(ge=Decimal("0"), max_digits=15, decimal_places=2),
+]
 
 
 def parse_db_datetime(value):
@@ -70,6 +81,17 @@ class LockedPlanInput(BaseModel):
     @classmethod
     def normalize_line_id(cls, value) -> str:
         return str(value)
+
+
+class LockedPlanPatchInput(BaseModel):
+    line_id: DbBigInt
+    planned_start_at: datetime
+    planned_end_at: datetime
+
+    @field_validator("planned_start_at", "planned_end_at", mode="before")
+    @classmethod
+    def parse_locked_datetimes(cls, value):
+        return parse_db_datetime(value)
 
 
 class OrderInput(BaseModel):
@@ -116,25 +138,20 @@ class OrderInput(BaseModel):
 
 
 class PlanningOrderPatchInput(BaseModel):
-    order_id: str
+    order_id: DbBigInt
     order_no: str | None = None
-    product_id: str
+    product_id: DbBigInt
     order_quantity: int
     due_date: datetime
-    contract_amount: int
-    late_penalty_amount: int = 0
+    contract_amount: MoneyNumeric
+    late_penalty_amount: MoneyNumeric = Decimal("0.00")
     order_status: str | None = None
-    locked_plan: LockedPlanInput | None = None
+    locked_plan: LockedPlanPatchInput | None = None
 
     @field_validator("due_date", mode="before")
     @classmethod
     def parse_due_date(cls, value):
         return parse_db_datetime(value)
-
-    @field_validator("order_id", "product_id", mode="before")
-    @classmethod
-    def normalize_ids(cls, value) -> str:
-        return str(value)
 
 
 class ProductionPlanningAdjustmentRequest(BaseModel):

@@ -8,6 +8,7 @@ from app.features.production_planning.repositories.planning_data_repository impo
     PlanningInputBundle,
 )
 from app.features.production_planning.schemas import (
+    LockedPlanInput,
     OrderInput,
     PlanningOrderPatchInput,
     ProductionPlanningAdjustmentRequest,
@@ -250,14 +251,14 @@ def _patch_to_order_input(
     return OrderInput(
         order_id=order_id,
         order_no=patch.order_no,
-        product_id=patch.product_id,
+        product_id=str(patch.product_id),
         order_quantity=patch.order_quantity,
         due_date=patch.due_date,
-        contract_amount=patch.contract_amount,
-        late_penalty_amount=patch.late_penalty_amount,
+        contract_amount=_money_numeric_to_int(patch.contract_amount),
+        late_penalty_amount=_money_numeric_to_int(patch.late_penalty_amount),
         order_status=patch.order_status,
         is_locked=is_locked,
-        locked_plan=patch.locked_plan if is_locked else None,
+        locked_plan=_to_internal_locked_plan(patch) if is_locked else None,
     )
 
 
@@ -290,6 +291,25 @@ def _resolve_existing_order_id(order_id: str, identity_lookup: dict[str, str]) -
 
 def _resolve_add_order_id(order_id: str, identity_lookup: dict[str, str]) -> str:
     return identity_lookup.get(str(order_id), str(order_id))
+
+
+def _to_internal_locked_plan(patch: PlanningOrderPatchInput) -> LockedPlanInput | None:
+    if patch.locked_plan is None:
+        return None
+    return LockedPlanInput(
+        line_id=str(patch.locked_plan.line_id),
+        planned_start_at=patch.locked_plan.planned_start_at,
+        planned_end_at=patch.locked_plan.planned_end_at,
+    )
+
+
+def _money_numeric_to_int(value) -> int:
+    if value != value.to_integral_value():
+        raise PlanningValidationError(
+            "contract_amount and late_penalty_amount must be whole-number KRW "
+            "before CP-SAT conversion."
+        )
+    return int(value)
 
 
 def _default_adjustment_solver_config() -> SolverConfig:
