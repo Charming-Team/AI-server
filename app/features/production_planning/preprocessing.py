@@ -104,11 +104,12 @@ def normalize_request(request: ProductionPlanningRequest) -> NormalizedPlanningD
             locked_product_id = locked_no_changeover_product_by_line.get(line_id)
             if locked_product_id is not None and locked_product_id != order.product_id:
                 continue
-            duration = calculate_processing_duration_minutes(
+            duration = calculate_candidate_duration_minutes(
                 order,
                 line_id,
                 capability,
                 products[order.product_id],
+                request.planning_start,
             )
             planned_quantity = calculate_planned_production_quantity(
                 order,
@@ -125,6 +126,8 @@ def normalize_request(request: ProductionPlanningRequest) -> NormalizedPlanningD
             )
             candidates_by_order_id.setdefault(order.order_id, []).append(candidate)
             candidates_by_line_id.setdefault(line_id, []).append(candidate)
+
+    validate_locked_order_candidates(plannable_orders, candidates_by_order_id)
 
     bom_items_by_product_id: dict[str, list[BomItemInput]] = {}
     for bom_item in request.bom_items:
@@ -149,6 +152,23 @@ def normalize_request(request: ProductionPlanningRequest) -> NormalizedPlanningD
         },
         warnings=warnings,
     )
+
+
+def validate_locked_order_candidates(
+    orders: list[OrderInput],
+    candidates_by_order_id: dict[str, list[ProcessingCandidate]],
+) -> None:
+    for order in orders:
+        if not order.is_locked or order.locked_plan is None:
+            continue
+        if not any(
+            candidate.line_id == order.locked_plan.line_id
+            for candidate in candidates_by_order_id.get(order.order_id, [])
+        ):
+            raise PlanningValidationError(
+                f"Locked order {order.order_id} has no candidate on locked line "
+                f"{order.locked_plan.line_id}."
+            )
 
 
 def normalize_status(status: str | None) -> str | None:
@@ -305,6 +325,38 @@ def calculate_horizon_minutes(planning_start: datetime, planning_end: datetime) 
         - Positive integer planning horizon in minutes.
     """
     return to_minute_offset(planning_end, planning_start)
+
+
+def calculate_candidate_duration_minutes(
+    order: OrderInput,
+    line_id: str,
+    capability: ProductLineCapabilityInput,
+    product: ProductInput,
+    planning_start: datetime,
+) -> int:
+    """
+    Parameters:
+        - order: Order requiring production.
+        - line_id: Candidate production line ID.
+        - capability: Product-line capability data.
+        - product: Product master data with optional default process time.
+        - planning_start: Planning window start used for locked offset conversion.
+
+    Methodology:
+        - Use the locked plan's fixed interval length when the order is fixed to this line.
+        - Otherwise calculate the standard process duration from quantity, yield, and setup.
+
+    Output:
+        - Positive integer candidate duration in minutes.
+    """
+    if order.is_locked and order.locked_plan is not None and order.locked_plan.line_id == line_id:
+        start = to_minute_offset(order.locked_plan.planned_start_at, planning_start)
+        end = to_minute_offset(order.locked_plan.planned_end_at, planning_start)
+        duration = end - start
+        if duration <= 0:
+            raise PlanningValidationError(f"Locked order {order.order_id} duration is invalid.")
+        return duration
+    return calculate_processing_duration_minutes(order, line_id, capability, product)
 
 
 def get_capable_lines(

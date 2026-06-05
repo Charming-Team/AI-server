@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.features.production_planning.config import SimulationConfig, SolverConfig
 
@@ -32,28 +32,121 @@ PLAN_VARIANT_NAMES: dict[str, str] = {
 }
 
 
+def parse_db_datetime(value):
+    """
+    Parameters:
+        - value: Datetime value from Python, ISO JSON, or DB-style text.
+
+    Methodology:
+        - Accept PostgreSQL-style strings such as "2026-04-14 09:00:00.000 +0900".
+        - Leave non-string values unchanged so Pydantic can handle native datetimes.
+
+    Output:
+        - Datetime-compatible value for Pydantic validation.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        pass
+    normalized = value.replace("Z", "+00:00")
+    if len(normalized) >= 6 and normalized[-6] == " " and normalized[-5] in {"+", "-"}:
+        normalized = f"{normalized[:-6]}{normalized[-5:]}"
+    return datetime.fromisoformat(normalized)
+
+
+class LockedPlanInput(BaseModel):
+    line_id: str
+    planned_start_at: datetime
+    planned_end_at: datetime
+
+    @field_validator("planned_start_at", "planned_end_at", mode="before")
+    @classmethod
+    def parse_locked_datetimes(cls, value):
+        return parse_db_datetime(value)
+
+    @field_validator("line_id", mode="before")
+    @classmethod
+    def normalize_line_id(cls, value) -> str:
+        return str(value)
+
+
 class OrderInput(BaseModel):
     order_id: str
+    order_no: str | None = None
     product_id: str
     customer_id: str | None = None
     order_quantity: int | None = None
     quantity: int | None = None
     due_date: datetime
-    order_amount: int
+    contract_amount: int | None = None
+    order_amount: int | None = None
     late_penalty_amount: int = 0
     priority: int | None = None
+    order_status: str | None = None
     status: str | None = None
     is_locked: bool = False
+    locked_plan: LockedPlanInput | None = None
+
+    @field_validator("order_id", "product_id", mode="before")
+    @classmethod
+    def normalize_ids(cls, value) -> str:
+        return str(value)
 
     @model_validator(mode="after")
-    def sync_order_quantity_fields(self) -> OrderInput:
+    def sync_compatible_fields(self) -> OrderInput:
         if self.order_quantity is None and self.quantity is None:
             raise ValueError("order_quantity or quantity is required.")
         if self.order_quantity is None:
             self.order_quantity = self.quantity
         if self.quantity is None:
             self.quantity = self.order_quantity
+        if self.order_amount is None and self.contract_amount is None:
+            raise ValueError("order_amount or contract_amount is required.")
+        if self.order_amount is None:
+            self.order_amount = self.contract_amount
+        if self.contract_amount is None:
+            self.contract_amount = self.order_amount
+        if self.status is None:
+            self.status = self.order_status
+        if self.order_status is None:
+            self.order_status = self.status
         return self
+
+
+class PlanningOrderPatchInput(BaseModel):
+    order_id: str
+    order_no: str | None = None
+    product_id: str
+    order_quantity: int
+    due_date: datetime
+    contract_amount: int
+    late_penalty_amount: int = 0
+    order_status: str | None = None
+    locked_plan: LockedPlanInput | None = None
+
+    @field_validator("due_date", mode="before")
+    @classmethod
+    def parse_due_date(cls, value):
+        return parse_db_datetime(value)
+
+    @field_validator("order_id", "product_id", mode="before")
+    @classmethod
+    def normalize_ids(cls, value) -> str:
+        return str(value)
+
+
+class ProductionPlanningAdjustmentRequest(BaseModel):
+    planning_start: datetime
+    planning_end: datetime
+    edit_orders: list[PlanningOrderPatchInput] = Field(default_factory=list)
+    add_orders: list[PlanningOrderPatchInput] = Field(default_factory=list)
+
+    @field_validator("planning_start", "planning_end", mode="before")
+    @classmethod
+    def parse_planning_window(cls, value):
+        return parse_db_datetime(value)
 
 
 class ProductInput(BaseModel):

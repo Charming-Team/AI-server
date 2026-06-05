@@ -133,13 +133,20 @@ def extract_schedule_items(
             order,
             data.products[order.product_id],
         )
+        start_time, end_time = _extract_schedule_times(
+            order,
+            selected_line_id,
+            start_offset,
+            end_offset,
+            data,
+        )
         items.append(
             ScheduleItem(
                 order_id=order.order_id,
                 product_id=order.product_id,
                 line_id=selected_line_id,
-                start_time=from_minute_offset(start_offset, data.planning_start),
-                end_time=from_minute_offset(end_offset, data.planning_start),
+                start_time=start_time,
+                end_time=end_time,
                 quantity=planned_quantity,
                 order_quantity=order_quantity,
                 planned_production_quantity=planned_quantity,
@@ -149,6 +156,38 @@ def extract_schedule_items(
             )
         )
     return sorted(items, key=lambda item: (item.start_time, item.line_id, item.order_id))
+
+
+def _extract_schedule_times(
+    order,
+    selected_line_id: str,
+    start_offset: int,
+    end_offset: int,
+    data: NormalizedPlanningData,
+):
+    """
+    Parameters:
+        - order: Source order input for the extracted schedule item.
+        - selected_line_id: Line selected by CP-SAT.
+        - start_offset: Solver start offset in minutes.
+        - end_offset: Solver end offset in minutes.
+        - data: Normalized planning data with the planning start timestamp.
+
+    Methodology:
+        - CP-SAT uses integer-minute offsets, while locked edits can originate from DB
+          timestamps that include seconds.
+        - For locked orders fixed to their requested line, preserve the original DB/request
+          timestamps in the response while keeping solver constraints minute-based.
+
+    Output:
+        - Tuple of start and end datetimes for the schedule item.
+    """
+    if order.is_locked and order.locked_plan and order.locked_plan.line_id == selected_line_id:
+        return order.locked_plan.planned_start_at, order.locked_plan.planned_end_at
+    return (
+        from_minute_offset(start_offset, data.planning_start),
+        from_minute_offset(end_offset, data.planning_start),
+    )
 
 
 def extract_unscheduled_orders(

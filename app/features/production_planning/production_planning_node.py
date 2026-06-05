@@ -1,11 +1,16 @@
 from datetime import datetime
 
-from app.features.production_planning.config import SolverConfig
+from app.features.production_planning.config import SimulationConfig, SolverConfig
+from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.langgraph_workflow import run_production_planning_graph
 from app.features.production_planning.repositories.planning_data_repository import (
     PlanningDataRepository,
+    PlanningInputBundle,
 )
 from app.features.production_planning.schemas import (
+    OrderInput,
+    PlanningOrderPatchInput,
+    ProductionPlanningAdjustmentRequest,
     ProductionPlanningRequest,
     ProductionPlanningResult,
 )
@@ -76,3 +81,231 @@ def generate_production_plans_from_db(
     )
 
     return generate_production_plans(request)
+
+
+def generate_adjusted_production_plans(
+    request: ProductionPlanningAdjustmentRequest,
+) -> dict:
+    """
+    Parameters:
+        - request: Thin adjustment request containing planning window, edit_orders, and
+          add_orders.
+
+    Methodology:
+        - Load master and current planning data from DB views.
+        - Merge DB rescheduling targets with front-end state: edit_orders become locked,
+          add_orders become movable new orders, and untouched DB orders remain movable.
+        - Run the existing LangGraph workflow and serialize only production_plans-compatible
+          adjusted plan candidates.
+
+    Output:
+        - Dictionary shaped as {"adjusted_plan_candidates": [...]}.
+    """
+    result = generate_adjusted_production_planning_result(request)
+    return result.to_adjusted_plan_response()
+
+
+def generate_adjusted_production_planning_result(
+    request: ProductionPlanningAdjustmentRequest,
+) -> ProductionPlanningResult:
+    """
+    Parameters:
+        - request: Thin adjustment request containing front-end edit/add order state.
+
+    Methodology:
+        - Build the full internal ProductionPlanningRequest from DB views and request deltas.
+        - Delegate all optimization, simulation, and response construction to LangGraph.
+
+    Output:
+        - Full ProductionPlanningResult for diagnostics or internal callers.
+    """
+    solver_config = _default_adjustment_solver_config()
+    simulation_config = _default_adjustment_simulation_config()
+    bundle = PlanningDataRepository().load_planning_input_bundle(
+        request.planning_start,
+        request.planning_end,
+        solver_config.excluded_order_statuses,
+        use_existing_plans_as_orders=True,
+        excluded_rescheduling_plan_statuses=(
+            solver_config.excluded_rescheduling_plan_statuses
+        ),
+    )
+    planning_request = build_adjusted_planning_request_from_bundle(
+        request,
+        bundle,
+        solver_config,
+        simulation_config,
+    )
+    return generate_production_plans(planning_request)
+
+
+def build_adjusted_planning_request_from_bundle(
+    request: ProductionPlanningAdjustmentRequest,
+    bundle: PlanningInputBundle,
+    solver_config: SolverConfig | None = None,
+    simulation_config: SimulationConfig | None = None,
+) -> ProductionPlanningRequest:
+    """
+    Parameters:
+        - request: Thin adjustment request containing edit_orders and add_orders.
+        - bundle: DB-loaded planning input bundle.
+        - solver_config: Optional internal solver config override for tests.
+        - simulation_config: Optional internal simulation config override for tests.
+
+    Methodology:
+        - Start from DB rescheduling target orders.
+        - Override matching DB orders with edit_orders and mark them locked.
+        - Append add_orders as movable new work.
+        - Keep all master data from DB views.
+
+    Output:
+        - Full ProductionPlanningRequest accepted by the existing LangGraph workflow.
+    """
+    effective_solver_config = solver_config or _default_adjustment_solver_config()
+    effective_simulation_config = simulation_config or _default_adjustment_simulation_config()
+    orders = merge_adjustment_orders(bundle.orders, request.edit_orders, request.add_orders)
+    return ProductionPlanningRequest(
+        planning_start=request.planning_start,
+        planning_end=request.planning_end,
+        orders=orders,
+        products=bundle.products,
+        production_lines=bundle.production_lines,
+        product_line_capabilities=bundle.product_line_capabilities,
+        existing_schedules=bundle.existing_schedules,
+        changeover_rules=bundle.changeover_rules,
+        materials=bundle.material_inventories,
+        bom_items=bundle.bom_items,
+        solver_config=effective_solver_config,
+        simulation_config=effective_simulation_config,
+    )
+
+
+def merge_adjustment_orders(
+    db_orders: list[OrderInput],
+    edit_orders: list[PlanningOrderPatchInput],
+    add_orders: list[PlanningOrderPatchInput],
+) -> list[OrderInput]:
+    """
+    Parameters:
+        - db_orders: DB view orders currently eligible for rescheduling.
+        - edit_orders: Front-end locked order state.
+        - add_orders: Front-end newly added movable orders.
+
+    Methodology:
+        - Resolve edit order IDs against DB orders.
+        - Replace matching DB orders with locked request values.
+        - Replace matching DB orders with add_orders too, but keep them movable.
+        - Reject duplicates inside the same request section to keep the merge deterministic.
+
+    Output:
+        - Ordered list of internal OrderInput values.
+    """
+    db_order_by_id = {order.order_id: order for order in db_orders}
+    identity_lookup = _build_order_identity_lookup(db_order_by_id)
+    merged_orders = dict(db_order_by_id)
+    resolved_edit_ids: set[str] = set()
+
+    for patch in edit_orders:
+        if patch.locked_plan is None:
+            raise PlanningValidationError(f"edit_order {patch.order_id} requires locked_plan.")
+        resolved_order_id = _resolve_existing_order_id(patch.order_id, identity_lookup)
+        if resolved_order_id in resolved_edit_ids:
+            raise PlanningValidationError(f"Duplicate edit_order {patch.order_id}.")
+        resolved_edit_ids.add(resolved_order_id)
+        merged_orders[resolved_order_id] = _patch_to_order_input(
+            patch,
+            order_id=resolved_order_id,
+            is_locked=True,
+        )
+
+    resolved_add_ids: set[str] = set()
+    for patch in add_orders:
+        if patch.locked_plan is not None:
+            raise PlanningValidationError(
+                f"add_order {patch.order_id} must not include locked_plan."
+            )
+        order_id = _resolve_add_order_id(patch.order_id, identity_lookup)
+        if order_id in resolved_add_ids:
+            raise PlanningValidationError(f"Duplicate add_order {patch.order_id}.")
+        if order_id in resolved_edit_ids:
+            raise PlanningValidationError(
+                f"add_order {patch.order_id} duplicates an edit_order."
+            )
+        resolved_add_ids.add(order_id)
+        merged_orders[order_id] = _patch_to_order_input(
+            patch,
+            order_id=order_id,
+            is_locked=False,
+        )
+
+    return [merged_orders[order_id] for order_id in sorted(merged_orders)]
+
+
+def _patch_to_order_input(
+    patch: PlanningOrderPatchInput,
+    *,
+    order_id: str,
+    is_locked: bool,
+) -> OrderInput:
+    return OrderInput(
+        order_id=order_id,
+        order_no=patch.order_no,
+        product_id=patch.product_id,
+        order_quantity=patch.order_quantity,
+        due_date=patch.due_date,
+        contract_amount=patch.contract_amount,
+        late_penalty_amount=patch.late_penalty_amount,
+        order_status=patch.order_status,
+        is_locked=is_locked,
+        locked_plan=patch.locked_plan if is_locked else None,
+    )
+
+
+def _build_order_identity_lookup(db_order_by_id: dict[str, OrderInput]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for order_id in db_order_by_id:
+        for key in _order_identity_keys(order_id):
+            existing = lookup.get(key)
+            if existing is not None and existing != order_id:
+                raise PlanningValidationError(f"Ambiguous order identity {key}.")
+            lookup[key] = order_id
+    return lookup
+
+
+def _order_identity_keys(order_id: str) -> set[str]:
+    keys = {str(order_id)}
+    if str(order_id).startswith("PLAN-"):
+        keys.add(str(order_id).removeprefix("PLAN-"))
+    elif str(order_id).isdigit():
+        keys.add(f"PLAN-{order_id}")
+    return keys
+
+
+def _resolve_existing_order_id(order_id: str, identity_lookup: dict[str, str]) -> str:
+    resolved_order_id = identity_lookup.get(str(order_id))
+    if resolved_order_id is None:
+        raise PlanningValidationError(f"edit_order {order_id} does not exist in DB planning data.")
+    return resolved_order_id
+
+
+def _resolve_add_order_id(order_id: str, identity_lookup: dict[str, str]) -> str:
+    return identity_lookup.get(str(order_id), str(order_id))
+
+
+def _default_adjustment_solver_config() -> SolverConfig:
+    return SolverConfig(
+        time_limit_seconds=60,
+        num_search_workers=8,
+        allow_unscheduled_orders=True,
+        due_date_policy="SOFT",
+        use_existing_schedule_locks=True,
+        use_material_constraints=True,
+    )
+
+
+def _default_adjustment_simulation_config() -> SimulationConfig:
+    return SimulationConfig(
+        enabled=True,
+        num_iterations=1000,
+        random_seed=20260531,
+    )

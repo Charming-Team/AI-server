@@ -7,6 +7,7 @@ from typing import Any
 from ortools.sat.python import cp_model
 
 from app.features.production_planning.config import SolverConfig
+from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.preprocessing import (
     calculate_required_material_quantity_scaled,
     get_changeover_cost,
@@ -65,6 +66,7 @@ def build_base_cpsat_model(
     )
 
     _build_order_assignment_variables(bundle, data, config)
+    _add_locked_order_constraints(bundle, data)
     _add_line_no_overlap_constraints(bundle, data, config)
     _add_line_availability_constraints(bundle, data)
     _add_daily_capacity_constraints(bundle, data)
@@ -135,7 +137,8 @@ def _build_order_assignment_variables(
         bundle.model.Add(completion >= due_offset + 1).OnlyEnforceIf(
             [scheduled, due_date_met.Not()]
         )
-        if config.due_date_policy == "HARD":
+        if config.due_date_policy == "HARD" and not normalized_order.order.is_locked:
+            # Locked edits are fixed user decisions; their lateness is measured, not repaired.
             bundle.model.Add(completion <= normalized_order.due_date_offset).OnlyEnforceIf(
                 scheduled
             )
@@ -151,6 +154,37 @@ def _build_order_assignment_variables(
         }
         bundle.tardiness_vars[order_id] = tardiness
         bundle.unscheduled_vars[order_id] = unscheduled
+
+
+def _add_locked_order_constraints(
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+) -> None:
+    for order_id, normalized_order in data.orders.items():
+        order = normalized_order.order
+        if not order.is_locked:
+            continue
+        if order.locked_plan is None:
+            raise PlanningValidationError(f"Locked order {order_id} requires locked_plan.")
+        locked_line_id = order.locked_plan.line_id
+        order_vars = bundle.order_vars[order_id]
+        if locked_line_id not in order_vars["assigned"]:
+            raise PlanningValidationError(
+                f"Locked order {order_id} has no assignment variable on line {locked_line_id}."
+            )
+        locked_start = to_minute_offset(order.locked_plan.planned_start_at, data.planning_start)
+        locked_end = to_minute_offset(order.locked_plan.planned_end_at, data.planning_start)
+
+        bundle.model.Add(order_vars["scheduled"] == 1)
+        bundle.model.Add(order_vars["unscheduled"] == 0)
+        bundle.model.Add(order_vars["completion"] == locked_end)
+        for line_id, assigned in order_vars["assigned"].items():
+            if line_id == locked_line_id:
+                bundle.model.Add(assigned == 1)
+                bundle.model.Add(order_vars["start"][line_id] == locked_start)
+                bundle.model.Add(order_vars["end"][line_id] == locked_end)
+            else:
+                bundle.model.Add(assigned == 0)
 
 
 def _add_line_no_overlap_constraints(
