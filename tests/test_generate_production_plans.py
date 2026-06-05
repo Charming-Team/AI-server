@@ -23,6 +23,7 @@ from app.features.production_planning.schemas import (
     BomItemInput,
     ExistingScheduleInput,
     LockedPlanInput,
+    LockedPlanPatchInput,
     MaterialInput,
     OrderInput,
     PlanMetrics,
@@ -88,6 +89,15 @@ def _material_request(allow_unscheduled: bool) -> ProductionPlanningRequest:
 
 def _planning_bundle_for_adjustment() -> PlanningInputBundle:
     request = _material_request(allow_unscheduled=True)
+    request.orders[0].order_id = "PLAN-1"
+    request.orders[0].product_id = "1"
+    request.orders[1].order_id = "PLAN-2"
+    request.orders[1].product_id = "1"
+    request.products[0].product_id = "1"
+    request.production_lines[0].line_id = "1"
+    request.product_line_capabilities[0].product_id = "1"
+    request.product_line_capabilities[0].line_id = "1"
+    request.bom_items[0].product_id = "1"
     return PlanningInputBundle(
         orders=request.orders,
         products=request.products,
@@ -180,15 +190,15 @@ def test_adjustment_request_merges_edit_and_add_orders() -> None:
         planning_end=start + timedelta(hours=8),
         edit_orders=[
             PlanningOrderPatchInput(
-                order_id="O-1",
-                product_id="P-1",
+                order_id=1,
+                product_id=1,
                 order_quantity=1,
                 due_date=start + timedelta(hours=3),
-                contract_amount=200,
-                late_penalty_amount=30,
+                contract_amount=Decimal("200.00"),
+                late_penalty_amount=Decimal("30.00"),
                 order_status="SCHEDULED",
-                locked_plan=LockedPlanInput(
-                    line_id="L-1",
+                locked_plan=LockedPlanPatchInput(
+                    line_id=1,
                     planned_start_at=start + timedelta(hours=1),
                     planned_end_at=start + timedelta(hours=2),
                 ),
@@ -196,12 +206,12 @@ def test_adjustment_request_merges_edit_and_add_orders() -> None:
         ],
         add_orders=[
             PlanningOrderPatchInput(
-                order_id="O-NEW",
-                product_id="P-1",
+                order_id=900000001,
+                product_id=1,
                 order_quantity=1,
                 due_date=start + timedelta(hours=4),
-                contract_amount=150,
-                late_penalty_amount=10,
+                contract_amount=Decimal("150.00"),
+                late_penalty_amount=Decimal("10.00"),
                 order_status="SCHEDULED",
             )
         ],
@@ -215,11 +225,56 @@ def test_adjustment_request_merges_edit_and_add_orders() -> None:
     )
     order_by_id = {order.order_id: order for order in request.orders}
 
-    assert order_by_id["O-1"].is_locked is True
-    assert order_by_id["O-1"].locked_plan is not None
-    assert order_by_id["O-1"].order_amount == 200
-    assert order_by_id["O-NEW"].is_locked is False
-    assert order_by_id["O-2"].is_locked is False
+    assert order_by_id["PLAN-1"].is_locked is True
+    assert order_by_id["PLAN-1"].locked_plan is not None
+    assert order_by_id["PLAN-1"].order_amount == 200
+    assert order_by_id["900000001"].is_locked is False
+    assert order_by_id["PLAN-2"].is_locked is False
+
+
+def test_adjustment_request_requires_db_numeric_field_types() -> None:
+    start = "2026-05-22 09:00:00.000 +0900"
+    valid_payload = {
+        "planning_start": start,
+        "planning_end": "2026-05-22 17:00:00.000 +0900",
+        "edit_orders": [
+            {
+                "order_id": 1,
+                "product_id": 1,
+                "order_quantity": 1,
+                "due_date": "2026-05-22 12:00:00.000 +0900",
+                "contract_amount": Decimal("200.00"),
+                "late_penalty_amount": Decimal("30.00"),
+                "order_status": "SCHEDULED",
+                "locked_plan": {
+                    "line_id": 1,
+                    "planned_start_at": "2026-05-22 10:00:00.000 +0900",
+                    "planned_end_at": "2026-05-22 11:00:00.000 +0900",
+                },
+            }
+        ],
+        "add_orders": [],
+    }
+
+    parsed = ProductionPlanningAdjustmentRequest.model_validate(valid_payload)
+
+    assert parsed.edit_orders[0].order_id == 1
+    assert parsed.edit_orders[0].product_id == 1
+    assert parsed.edit_orders[0].contract_amount == Decimal("200.00")
+    assert parsed.edit_orders[0].late_penalty_amount == Decimal("30.00")
+    assert parsed.edit_orders[0].locked_plan.line_id == 1
+
+    invalid_payload = {
+        **valid_payload,
+        "edit_orders": [
+            {
+                **valid_payload["edit_orders"][0],
+                "order_id": "1",
+            }
+        ],
+    }
+    with pytest.raises(ValueError):
+        ProductionPlanningAdjustmentRequest.model_validate(invalid_payload)
 
 
 def test_adjustment_empty_edit_and_add_orders_runs_full_db_replan() -> None:
@@ -236,7 +291,7 @@ def test_adjustment_empty_edit_and_add_orders_runs_full_db_replan() -> None:
         simulation_config=None,
     )
 
-    assert {order.order_id for order in request.orders} == {"O-1", "O-2"}
+    assert {order.order_id for order in request.orders} == {"PLAN-1", "PLAN-2"}
     assert all(not order.is_locked for order in request.orders)
 
 
@@ -247,12 +302,12 @@ def test_adjustment_add_order_overrides_db_order_when_ids_overlap() -> None:
         planning_end=start + timedelta(hours=4),
         add_orders=[
             PlanningOrderPatchInput(
-                order_id="O-1",
-                product_id="P-1",
+                order_id=1,
+                product_id=1,
                 order_quantity=1,
                 due_date=start + timedelta(hours=3),
-                contract_amount=999,
-                late_penalty_amount=77,
+                contract_amount=Decimal("999.00"),
+                late_penalty_amount=Decimal("77.00"),
             )
         ],
     )
@@ -265,9 +320,9 @@ def test_adjustment_add_order_overrides_db_order_when_ids_overlap() -> None:
     )
     order_by_id = {order.order_id: order for order in request.orders}
 
-    assert order_by_id["O-1"].is_locked is False
-    assert order_by_id["O-1"].order_amount == 999
-    assert order_by_id["O-1"].late_penalty_amount == 77
+    assert order_by_id["PLAN-1"].is_locked is False
+    assert order_by_id["PLAN-1"].order_amount == 999
+    assert order_by_id["PLAN-1"].late_penalty_amount == 77
 
 
 def test_adjustment_duplicate_add_orders_fail_validation() -> None:
@@ -277,18 +332,18 @@ def test_adjustment_duplicate_add_orders_fail_validation() -> None:
         planning_end=start + timedelta(hours=4),
         add_orders=[
             PlanningOrderPatchInput(
-                order_id="O-NEW",
-                product_id="P-1",
+                order_id=900000001,
+                product_id=1,
                 order_quantity=1,
                 due_date=start + timedelta(hours=3),
-                contract_amount=100,
+                contract_amount=Decimal("100.00"),
             ),
             PlanningOrderPatchInput(
-                order_id="O-NEW",
-                product_id="P-1",
+                order_id=900000001,
+                product_id=1,
                 order_quantity=1,
                 due_date=start + timedelta(hours=3),
-                contract_amount=100,
+                contract_amount=Decimal("100.00"),
             ),
         ],
     )
