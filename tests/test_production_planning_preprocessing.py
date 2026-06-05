@@ -176,6 +176,8 @@ def test_changeover_rule_priority() -> None:
     assert get_changeover_cost("P-1", "P-2", "L-1", rules, 99) == 100
     assert get_changeover_minutes("P-1", "P-2", "L-2", rules, 99) == 30
     assert get_changeover_minutes("P-2", "P-1", "L-1", rules, 99) == 99
+    assert get_changeover_minutes("P-1", "P-1", "L-1", rules, 99) == 0
+    assert get_changeover_cost("P-1", "P-1", "L-1", rules, 99) == 0
 
 
 def test_amount_normalization_and_high_amount_policy() -> None:

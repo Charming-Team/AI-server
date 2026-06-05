@@ -16,7 +16,8 @@ def compare_plans(plan_results: list[PlanResult]) -> PlanComparisonSummary:
         - Exclude infeasible or unresolved plans from solved ranking.
         - Rank solved plans by unscheduled count, estimated total cost, delayed order count,
           and total tardiness.
-        - Prefer DUE_DATE_BALANCED unless COST_BALANCED is materially better.
+        - Prefer DUE_DATE_OPTIMAL unless AMOUNT_OPTIMAL is materially better with similar
+          delivery reliability.
 
     Output:
         - PlanComparisonSummary with recommendation and ranking items.
@@ -65,29 +66,29 @@ def compare_plans(plan_results: list[PlanResult]) -> PlanComparisonSummary:
 
 def _select_recommendation(plan_results: list[PlanResult]) -> tuple[str, str]:
     by_code = {plan.plan_variant_code: plan for plan in plan_results}
-    due_balanced = by_code.get("DUE_DATE_BALANCED")
-    cost_balanced = by_code.get("COST_BALANCED")
+    due_plan = by_code.get("DUE_DATE_OPTIMAL")
+    amount_plan = by_code.get("AMOUNT_OPTIMAL")
 
-    if due_balanced and due_balanced.status in SOLVED_STATUSES:
-        if cost_balanced and cost_balanced.status in SOLVED_STATUSES:
-            due_delayed = due_balanced.metrics.delayed_order_count
-            cost_delayed = cost_balanced.metrics.delayed_order_count
-            due_cost = due_balanced.metrics.estimated_total_cost
-            cost_cost = cost_balanced.metrics.estimated_total_cost
-            if due_delayed <= cost_delayed + 1 and (
-                cost_cost == 0 or due_cost <= cost_cost * 1.15
+    if due_plan and due_plan.status in SOLVED_STATUSES:
+        if amount_plan and amount_plan.status in SOLVED_STATUSES:
+            due_delayed = due_plan.metrics.delayed_order_count
+            amount_delayed = amount_plan.metrics.delayed_order_count
+            due_cost = due_plan.metrics.estimated_total_cost
+            amount_cost = amount_plan.metrics.estimated_total_cost
+            if due_delayed <= amount_delayed + 1 and (
+                amount_cost == 0 or due_cost <= amount_cost * 1.15
             ):
                 return (
-                    "DUE_DATE_BALANCED",
-                    "Due-date balanced plan has similar delay count and cost within 15%.",
+                    "DUE_DATE_OPTIMAL",
+                    "Due-date plan has similar delay count and cost within 15%.",
                 )
             return (
-                "COST_BALANCED",
-                "Cost-balanced plan has lower estimated cost or significantly fewer delays.",
+                "AMOUNT_OPTIMAL",
+                "Amount plan has lower estimated cost or significantly fewer delays.",
             )
         return (
-            "DUE_DATE_BALANCED",
-            "DUE_DATE_BALANCED is the default recommendation when cost-balanced is unavailable.",
+            "DUE_DATE_OPTIMAL",
+            "DUE_DATE_OPTIMAL is the default recommendation when amount plan is unavailable.",
         )
 
     solved_plans = [plan for plan in plan_results if plan.status in SOLVED_STATUSES]

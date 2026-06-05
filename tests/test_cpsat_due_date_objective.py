@@ -59,7 +59,7 @@ def test_due_date_objective_schedules_earlier_due_order_earlier_when_feasible() 
     plan = next(
         plan
         for plan in result.plan_results
-        if plan.plan_variant_code == "DUE_DATE_MIN_DELAY_COUNT"
+        if plan.plan_variant_code == "DUE_DATE_OPTIMAL"
     )
 
     assert plan.status in {"OPTIMAL", "FEASIBLE"}

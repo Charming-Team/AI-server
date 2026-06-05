@@ -86,7 +86,7 @@ def test_solution_validator_detects_line_overlap_after_schedule_corruption() -> 
     request = _request()
     result = generate_production_plans(request)
     data = _normalized_request(request)
-    plan_index = _plan_index(result, "DUE_DATE_MIN_DELAY_COUNT")
+    plan_index = _plan_index(result, "DUE_DATE_OPTIMAL")
     plan = result.plan_results[plan_index]
     first_item = plan.schedule_items[0]
     second_item = plan.schedule_items[1]
@@ -108,7 +108,7 @@ def test_solution_validator_detects_metric_mismatch() -> None:
     request = _request()
     result = generate_production_plans(request)
     data = _normalized_request(request)
-    plan_index = _plan_index(result, "DUE_DATE_MIN_DELAY_COUNT")
+    plan_index = _plan_index(result, "DUE_DATE_OPTIMAL")
     plan = result.plan_results[plan_index]
     corrupted_metrics = plan.metrics.model_copy(update={"total_tardiness_minutes": 999})
     corrupted_plan = plan.model_copy(update={"metrics": corrupted_metrics})
@@ -125,7 +125,7 @@ def test_solution_validator_detects_hard_due_date_business_rule_violation() -> N
     request = _request()
     result = generate_production_plans(request)
     data = _normalized_request(request)
-    plan_index = _plan_index(result, "DUE_DATE_MIN_DELAY_COUNT")
+    plan_index = _plan_index(result, "DUE_DATE_OPTIMAL")
     plan = result.plan_results[plan_index]
     item = plan.schedule_items[0]
     corrupted_item = item.model_copy(update={"end_time": request.planning_end})
