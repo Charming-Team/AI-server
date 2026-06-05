@@ -4,7 +4,12 @@ from decimal import Decimal
 import pytest
 
 from app.features.production_planning.config import DueDateOptimizationConfig, SolverConfig
-from app.features.production_planning.exceptions import PlanningValidationError
+from app.features.production_planning.exceptions import (
+    PlanningDataAccessError,
+    PlanningInfeasibleError,
+    PlanningValidationError,
+    SolverExecutionError,
+)
 from app.features.production_planning.plan_comparator import compare_plans
 from app.features.production_planning.production_planning_node import generate_production_plans
 from app.features.production_planning.schemas import (
@@ -80,12 +85,67 @@ def test_generate_production_plans_returns_two_variants_and_metadata() -> None:
     result = generate_production_plans(_material_request(allow_unscheduled=True))
 
     assert len(result.plan_results) == 2
+    assert len(result.adjusted_plan_candidates) == 2
     assert {plan.plan_variant_code for plan in result.plan_results} == set(PLAN_VARIANTS)
+    assert {
+        candidate.plan_variant_code for candidate in result.adjusted_plan_candidates
+    } == set(PLAN_VARIANTS)
     assert sum(plan.plan_family == "DUE_DATE_OPTIMAL" for plan in result.plan_results) == 1
     assert sum(plan.plan_family == "AMOUNT_OPTIMAL" for plan in result.plan_results) == 1
     assert result.recommended_plan_variant_code in PLAN_VARIANTS
     assert len(result.comparison_summary.plan_rankings) == 2
     assert set(result.solver_metadata) == set(PLAN_VARIANTS)
+
+
+def test_adjusted_plan_candidates_use_production_plan_response_columns() -> None:
+    result = generate_production_plans(_material_request(allow_unscheduled=True))
+    candidate = next(
+        item
+        for item in result.adjusted_plan_candidates
+        if item.plan_variant_code == "DUE_DATE_OPTIMAL"
+    )
+
+    assert candidate.plans
+    first_row = candidate.plans[0]
+    row = first_row.model_dump()
+
+    assert "plan_id" not in row
+    assert row["plan_status"] == "SCHEDULED"
+    assert row["operator_id"] in {6, 7, 8, 9, 10, 11, 13, 14, 15}
+    assert row["plan_sequence"] >= 1
+    assert row["estimated_duration_hr"] > 0
+    assert row["updated_at"] is not None
+
+    response = result.to_adjusted_plan_response()
+    response_row = response["adjusted_plan_candidates"][0]["plans"][0]
+
+    assert set(response) == {"adjusted_plan_candidates"}
+    assert "plan_id" not in response_row
+    assert response_row["plan_status"] == "SCHEDULED"
+    assert response_row["operator_id"] in {6, 7, 8, 9, 10, 11, 13, 14, 15}
+
+
+def test_planning_exceptions_return_compact_error_response() -> None:
+    assert PlanningValidationError("계획 대상 주문이 없습니다.").to_response_error() == {
+        "status": "400 BAD_REQUEST",
+        "message": "계획 대상 주문이 없습니다.",
+    }
+    infeasible_error = PlanningInfeasibleError(
+        "현재 제약 조건에서는 생산 계획을 생성할 수 없습니다."
+    )
+    assert infeasible_error.to_response_error() == {
+        "status": "409 CONFLICT",
+        "message": "현재 제약 조건에서는 생산 계획을 생성할 수 없습니다.",
+    }
+    solver_error = SolverExecutionError("제한 시간 내에 생산 계획을 찾지 못했습니다.")
+    assert solver_error.to_response_error() == {
+        "status": "408 REQUEST_TIMEOUT",
+        "message": "제한 시간 내에 생산 계획을 찾지 못했습니다.",
+    }
+    assert PlanningDataAccessError("DB view 조회에 실패했습니다.").to_response_error() == {
+        "status": "503 SERVICE_UNAVAILABLE",
+        "message": "DB view 조회에 실패했습니다.",
+    }
 
 
 def test_material_shortage_is_soft_and_tracked_without_penalty_cost() -> None:
