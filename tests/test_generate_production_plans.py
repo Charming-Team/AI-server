@@ -13,10 +13,16 @@ from app.features.production_planning.exceptions import (
 from app.features.production_planning.plan_comparator import compare_plans
 from app.features.production_planning.production_planning_node import (
     build_adjusted_planning_request_from_bundle,
+    generate_adjusted_production_plan_dashboard_response,
     generate_production_plans,
 )
 from app.features.production_planning.repositories.planning_data_repository import (
+    PlanningDataRepository,
     PlanningInputBundle,
+)
+from app.features.production_planning.repositories.simulation_data_repository import (
+    BaselineSimulationSnapshot,
+    SimulationDataRepository,
 )
 from app.features.production_planning.schemas import (
     PLAN_VARIANTS,
@@ -323,6 +329,80 @@ def test_adjustment_add_order_overrides_db_order_when_ids_overlap() -> None:
     assert order_by_id["PLAN-1"].is_locked is False
     assert order_by_id["PLAN-1"].order_amount == 999
     assert order_by_id["PLAN-1"].late_penalty_amount == 77
+
+
+def test_adjusted_dashboard_response_runs_db_langgraph_formatter_pipeline(
+    monkeypatch,
+) -> None:
+    start = datetime(2026, 5, 22, 9, tzinfo=UTC)
+    adjustment = ProductionPlanningAdjustmentRequest(
+        planning_start=start,
+        planning_end=start + timedelta(hours=4),
+    )
+
+    def fake_load_planning_bundle(self, *args, **kwargs):
+        return _planning_bundle_for_adjustment()
+
+    def fake_load_baseline_snapshot(self, planning_start, planning_end):
+        return BaselineSimulationSnapshot(
+            current_plan_rows=[
+                {
+                    "schedule_id": 1,
+                    "order_id": 1,
+                    "product_id": 1,
+                    "line_id": 1,
+                    "start_time": planning_start,
+                    "end_time": planning_start + timedelta(hours=1),
+                    "plan_status": "SCHEDULED",
+                }
+            ],
+            simulation_result_rows=[
+                {
+                    "created_at": planning_start - timedelta(days=1),
+                    "delay_probability": 0.20,
+                    "expected_delayed_order_count": 2.0,
+                    "p95_tardiness_minutes": 1000.0,
+                    "expected_total_risk_cost": 1_000_000.0,
+                    "material_shortage_probability": 0.50,
+                }
+            ],
+            simulation_detail_rows=[],
+        )
+
+    monkeypatch.setattr(
+        PlanningDataRepository,
+        "load_planning_input_bundle",
+        fake_load_planning_bundle,
+    )
+    monkeypatch.setattr(
+        SimulationDataRepository,
+        "load_baseline_simulation_snapshot",
+        fake_load_baseline_snapshot,
+    )
+
+    response = generate_adjusted_production_plan_dashboard_response(adjustment)
+
+    assert response["data_sources"] == {
+        "baseline": "DB_CURRENT_PLAN_AND_SIMULATION",
+        "alternative": "CP_SAT_AND_SIMULATION",
+    }
+    assert response["planning_window"] == {
+        "planning_start": start.isoformat(),
+        "planning_end": (start + timedelta(hours=4)).isoformat(),
+    }
+    assert response["baseline"]["plans"][0]["plan_id"] == 1
+    assert len(response["alternatives"]) == 2
+    assert {
+        "plans",
+        "simulation_metrics",
+        "simulation_comparison_table",
+        "application_conditions",
+        "selected_plan_change_schedule",
+        "important_events",
+        "ai_evaluation",
+    }.issubset(response["alternatives"][0])
+    assert "llm_evidence" not in response["alternatives"][0]
+    assert "llm_prompts" not in response["alternatives"][0]
 
 
 def test_adjustment_duplicate_add_orders_fail_validation() -> None:
