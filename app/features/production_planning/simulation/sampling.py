@@ -610,7 +610,6 @@ def _collect_with_fallback(
         lambda row: _matches(row, "line_id", line_id),
         lambda row: product_category is not None
         and _matches(row, "product_category", product_category),
-        lambda row: True,
     ]
     for row_filter in filters:
         subset = [row for row in rows if row_filter(row)]
@@ -710,7 +709,6 @@ def _collect_changeover_with_fallback(
         lambda row: _matches(row, "from_product_id", from_product_id)
         and _matches(row, "to_product_id", to_product_id),
         lambda row: _matches(row, "line_id", line_id),
-        lambda row: True,
     ]
     for row_filter in filters:
         subset = [row for row in rows if row_filter(row)]

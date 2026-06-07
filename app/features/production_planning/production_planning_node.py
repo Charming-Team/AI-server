@@ -1,11 +1,16 @@
 from datetime import datetime
 
+from app.core.config import get_settings
 from app.features.production_planning.config import SimulationConfig, SolverConfig
 from app.features.production_planning.exceptions import PlanningValidationError
+from app.features.production_planning.json_formatter import build_dashboard_response
 from app.features.production_planning.langgraph_workflow import run_production_planning_graph
 from app.features.production_planning.repositories.planning_data_repository import (
     PlanningDataRepository,
     PlanningInputBundle,
+)
+from app.features.production_planning.repositories.simulation_data_repository import (
+    SimulationDataRepository,
 )
 from app.features.production_planning.schemas import (
     LockedPlanInput,
@@ -106,6 +111,52 @@ def generate_adjusted_production_plans(
     return result.to_adjusted_plan_response()
 
 
+def generate_adjusted_production_plan_dashboard_response(
+    request: ProductionPlanningAdjustmentRequest,
+    *,
+    include_full_event_timeline: bool = False,
+) -> dict:
+    """
+    Parameters:
+        - request: Thin adjustment request containing planning window, edit_orders, and
+          add_orders.
+        - include_full_event_timeline: Whether to include representative full DES timelines.
+
+    Methodology:
+        - Generate adjusted CP-SAT and simulation alternatives through the existing workflow.
+        - Load the DB current plan and DB simulation history as the baseline comparison source.
+        - Delegate final dashboard JSON assembly and delta calculations to the formatter.
+
+    Output:
+        - Dashboard JSON comparing DB baseline and adjusted production plan candidates.
+    """
+    result, planning_request = _generate_adjusted_production_planning_result_with_request(
+        request
+    )
+    baseline = SimulationDataRepository().load_baseline_simulation_snapshot(
+        request.planning_start,
+        request.planning_end,
+    )
+    settings = get_settings()
+    dashboard_response = build_dashboard_response(
+        result,
+        baseline_plans=baseline.current_plan_rows,
+        baseline_simulation_rows=baseline.simulation_result_rows,
+        baseline_simulation_detail_rows=baseline.simulation_detail_rows,
+        baseline_prediction_rows=baseline.ai_prediction_result_rows,
+        products=planning_request.products,
+        production_lines=planning_request.production_lines,
+        product_line_capabilities=planning_request.product_line_capabilities,
+        planning_start=request.planning_start,
+        planning_end=request.planning_end,
+        include_full_event_timeline=include_full_event_timeline,
+        enable_llm_evaluation=True,
+        settings=settings,
+    )
+    dashboard_response["warnings"].extend(baseline.warnings)
+    return dashboard_response
+
+
 def generate_adjusted_production_planning_result(
     request: ProductionPlanningAdjustmentRequest,
 ) -> ProductionPlanningResult:
@@ -119,6 +170,25 @@ def generate_adjusted_production_planning_result(
 
     Output:
         - Full ProductionPlanningResult for diagnostics or internal callers.
+    """
+    result, _ = _generate_adjusted_production_planning_result_with_request(request)
+    return result
+
+
+def _generate_adjusted_production_planning_result_with_request(
+    request: ProductionPlanningAdjustmentRequest,
+) -> tuple[ProductionPlanningResult, ProductionPlanningRequest]:
+    """
+    Parameters:
+        - request: Thin adjustment request containing front-end edit/add order state.
+
+    Methodology:
+        - Load DB planning data once and keep the expanded internal request available for
+          dashboard formatting metadata.
+        - Delegate optimization and simulation to the existing LangGraph workflow.
+
+    Output:
+        - Tuple of ProductionPlanningResult and the full internal planning request.
     """
     solver_config = _default_adjustment_solver_config()
     simulation_config = _default_adjustment_simulation_config()
@@ -137,7 +207,7 @@ def generate_adjusted_production_planning_result(
         solver_config,
         simulation_config,
     )
-    return generate_production_plans(planning_request)
+    return generate_production_plans(planning_request), planning_request
 
 
 def build_adjusted_planning_request_from_bundle(

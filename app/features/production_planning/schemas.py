@@ -411,6 +411,7 @@ class ProductionPlanningResult(BaseModel):
     request_id: str | None = None
     status: str = "COMPLETED"
     adjusted_plan_candidates: list[AdjustedPlanCandidate] = Field(default_factory=list)
+    dashboard_response: dict[str, Any] | None = None
     plan_results: list[PlanResult]
     recommended_plan_variant_code: str | None = None
     comparison_summary: PlanComparisonSummary
