@@ -462,8 +462,8 @@ def format_dashboard_response_node(
 
     Methodology:
         - Build the dashboard-facing JSON from the same graph state used for planning.
-        - Use existing schedules as the in-graph DB baseline plan rows.
-        - Use loaded simulation history rows as the in-graph DB baseline simulation source.
+        - Use existing schedules as the in-graph current-plan baseline rows.
+        - Use loaded simulation history rows only as historical context.
 
     Output:
         - Partial graph state with dashboard_response and an updated ProductionPlanningResult.

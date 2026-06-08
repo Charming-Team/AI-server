@@ -269,9 +269,9 @@ def build_dashboard_response(
     Parameters:
         - result: Internal production planning result with adjusted plans and simulations.
         - baseline_plans: DB current production plan rows for the same planning window.
-        - baseline_simulation_rows: DB current simulation result rows for baseline metrics.
-        - baseline_simulation_detail_rows: DB simulation detail rows matching baseline history.
-        - baseline_prediction_rows: DB prediction rows used to quantify current delay risk.
+        - baseline_simulation_rows: DB simulation result history retained for historical context.
+        - baseline_simulation_detail_rows: DB simulation detail rows retained for historical context.
+        - baseline_prediction_rows: DB prediction rows retained for historical context.
         - products: Product master rows used for unit-aware fulfillment-rate calculations.
         - production_lines: Production line master rows used for application conditions.
         - product_line_capabilities: Product-line capability rows used for target products.
@@ -287,21 +287,28 @@ def build_dashboard_response(
         - llm_client: Optional LLM client, usually supplied by tests.
 
     Methodology:
-        - Normalize DB baseline rows and CP-SAT simulation metrics into one response shape.
+        - Normalize DB current plan rows and CP-SAT simulation metrics into one response shape.
         - Compute percentage and amount deltas before any LLM text generation.
         - Include only important simulation events by default to keep dashboard payloads compact.
         - When LLM evaluation is enabled, run the two-prompt flow per plan variant and replace
           fallback ai_evaluation values with grounded validated LLM output.
 
     Output:
-        - Front-end dashboard JSON comparing baseline and adjusted plan alternatives.
+        - Front-end dashboard JSON comparing current plan baseline and adjusted alternatives.
     """
     response_generated_at = generated_at or datetime.now(UTC)
-    baseline_context = build_baseline_simulation_context(
+    historical_simulation_context = build_baseline_simulation_context(
         baseline_simulation_rows or [],
         baseline_detail_rows=baseline_simulation_detail_rows or [],
         baseline_prediction_rows=baseline_prediction_rows or [],
         product_rows=products or [],
+    )
+    baseline_context = build_baseline_plan_context(
+        baseline_plans or [],
+        product_rows=products or [],
+        production_lines=production_lines or [],
+        planning_start=planning_start,
+        planning_end=planning_end,
     )
     baseline_metrics = baseline_context["metrics"]
     plan_results_by_code = {
@@ -335,8 +342,8 @@ def build_dashboard_response(
         )
         selected_plan_change_schedule = build_selected_plan_change_schedule(
             candidate,
-            baseline_context["detail_rows"],
-            baseline_context["matched_predictions"],
+            baseline_plans or [],
+            {},
             plan_result,
         )
         application_conditions = build_application_conditions(
@@ -393,21 +400,24 @@ def build_dashboard_response(
             "planning_end": _iso_or_none(planning_end),
         },
         "data_sources": {
-            "baseline": "DB_CURRENT_PLAN_AND_SIMULATION",
+            "baseline": "DB_CURRENT_PLAN",
+            "historical_simulation": "DB_SIMULATION_HISTORY_REFERENCE",
             "alternative": "CP_SAT_AND_SIMULATION",
         },
         "baseline": {
-            "source": "DB_CURRENT_PLAN_AND_SIMULATION",
+            "source": "DB_CURRENT_PLAN",
             "plans": normalize_baseline_plan_rows(baseline_plans or []),
             "simulation_metrics": baseline_metrics,
             "current_state_summary": baseline_context["current_state_summary"],
             "provenance": baseline_context["provenance"],
-            "historical_applied_result": baseline_context["historical_applied_result"],
+            "historical_applied_result": (
+                historical_simulation_context["historical_applied_result"]
+            ),
         },
         "alternatives": alternatives,
         "warnings": result.warnings,
     }
-    response = _json_safe(response)
+    response = _normalize_public_ids(_json_safe(response))
     if not enable_llm_evaluation:
         return strip_internal_dashboard_fields(
             response,
@@ -481,6 +491,49 @@ def build_baseline_simulation_context(
     }
 
 
+def build_baseline_plan_context(
+    baseline_plan_rows: list[dict[str, Any]],
+    *,
+    product_rows: list[Any],
+    production_lines: list[Any],
+    planning_start: datetime | None,
+    planning_end: datetime | None,
+) -> dict[str, Any]:
+    """
+    Parameters:
+        - baseline_plan_rows: Current DB production plan rows in the requested window.
+        - product_rows: Product master rows used for unit-aware fulfillment rate.
+        - production_lines: Production line rows used for utilization denominator.
+        - planning_start: Comparison window start.
+        - planning_end: Comparison window end.
+
+    Methodology:
+        - Treat the current production plan table/view as the baseline source.
+        - Recalculate deterministic delay, fulfillment, penalty, and utilization from
+          planned_end_at/end_time, due_date, quantity, late penalty, and line_id.
+        - Do not use schedule simulation result history for baseline metrics.
+
+    Output:
+        - Baseline context containing metrics, current-state summary, and provenance.
+    """
+    current_state_summary = build_baseline_plan_current_state_summary(
+        baseline_plan_rows,
+        product_rows,
+        production_lines,
+        planning_start,
+        planning_end,
+    )
+    return {
+        "metrics": build_baseline_plan_metrics(current_state_summary),
+        "current_state_summary": current_state_summary,
+        "provenance": build_baseline_plan_provenance(
+            baseline_plan_rows,
+            planning_start,
+            planning_end,
+        ),
+    }
+
+
 def strip_internal_dashboard_fields(
     dashboard_response: dict[str, Any],
     *,
@@ -511,6 +564,185 @@ def strip_internal_dashboard_fields(
             alternative.pop("event_timeline", None)
             alternative.pop("full_event_timeline_included", None)
     return dashboard_response
+
+
+def build_baseline_plan_current_state_summary(
+    baseline_plan_rows: list[dict[str, Any]],
+    product_rows: list[Any],
+    production_lines: list[Any],
+    planning_start: datetime | None,
+    planning_end: datetime | None,
+) -> dict[str, Any]:
+    """
+    Parameters:
+        - baseline_plan_rows: Current DB production plan rows.
+        - product_rows: Product master rows used for unit-aware quantity comparison.
+        - production_lines: Production line rows used to include known lines in utilization.
+        - planning_start: Comparison window start.
+        - planning_end: Comparison window end.
+
+    Methodology:
+        - Calculate tardiness from current planned end time against order due date.
+        - Use quantity basis only when product units are compatible and quantities are present.
+        - Calculate average line utilization from overlapped current-plan occupied minutes.
+
+    Output:
+        - Current-state summary derived from current production plans only.
+    """
+    delayed_keys = {
+        key
+        for key, row in _current_plan_rows_by_key(baseline_plan_rows).items()
+        if _current_plan_tardiness_minutes(row) > 0
+    }
+    total_tardiness_minutes = sum(
+        _current_plan_tardiness_minutes(row)
+        for row in baseline_plan_rows
+    )
+    max_tardiness_minutes = max(
+        (_current_plan_tardiness_minutes(row) for row in baseline_plan_rows),
+        default=0,
+    )
+    unit_basis = _delivery_rate_unit_basis(
+        [_first_present(row, ["product_id"]) for row in baseline_plan_rows],
+        product_rows,
+    )
+    total, delayed = _current_plan_delivery_denominator(
+        baseline_plan_rows,
+        delayed_keys,
+        unit_basis,
+    )
+    fulfillment_rate = _fulfillment_rate(total, delayed)
+    utilization = _current_plan_line_utilization(
+        baseline_plan_rows,
+        production_lines,
+        planning_start,
+        planning_end,
+    )
+    late_penalty_amount = sum(
+        (
+            _to_decimal(_first_present(row, ["late_penalty_amount"])) or Decimal("0")
+            for row in baseline_plan_rows
+            if _current_plan_key(row) in delayed_keys
+        ),
+        Decimal("0"),
+    )
+    return {
+        "expected_delay_days": _decimal_to_float(
+            Decimal(str(total_tardiness_minutes)) / Decimal("1440")
+        ),
+        "total_tardiness_minutes": total_tardiness_minutes,
+        "max_tardiness_minutes": max_tardiness_minutes,
+        "delivery_fulfillment_rate_percent": fulfillment_rate,
+        "delivery_miss_rate_percent": _miss_rate(fulfillment_rate),
+        "delay_risk_order_count": len(delayed_keys),
+        "expected_delayed_orders": len(delayed_keys),
+        "avg_line_utilization_percent": utilization["avg_line_utilization_percent"],
+        "bottleneck_line_id": utilization["bottleneck_line_id"],
+        "unit_basis": unit_basis,
+        "total_quantity_or_orders": _decimal_to_float(total),
+        "delayed_quantity_or_orders": _decimal_to_float(delayed),
+        "total_late_penalty_amount": _money_string(late_penalty_amount),
+        "total_risk_cost": _money_string(late_penalty_amount),
+        "baseline_plan_count": len(baseline_plan_rows),
+        "calculation_status": "OK" if baseline_plan_rows else "MISSING_VALUE",
+    }
+
+
+def build_baseline_plan_metrics(
+    current_state_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Parameters:
+        - current_state_summary: Plan-derived current baseline summary.
+
+    Methodology:
+        - Keep the existing metric keys used by the front-end and LLM evidence.
+        - Fill unsupported probability fields with None instead of reading simulation history.
+
+    Output:
+        - Baseline metric dictionary derived from current production plans.
+    """
+    metrics = {
+        "delay_probability_percent": None,
+        "expected_delayed_orders": current_state_summary.get("expected_delayed_orders"),
+        "p95_tardiness_minutes": current_state_summary.get("max_tardiness_minutes"),
+        "total_risk_cost": current_state_summary.get("total_risk_cost"),
+        "material_shortage_probability_percent": None,
+        "expected_delay_days": current_state_summary.get("expected_delay_days"),
+        "delivery_fulfillment_rate_percent": current_state_summary.get(
+            "delivery_fulfillment_rate_percent"
+        ),
+        "delivery_miss_rate_percent": current_state_summary.get(
+            "delivery_miss_rate_percent"
+        ),
+        "delay_risk_order_count": current_state_summary.get("delay_risk_order_count"),
+        "avg_line_utilization_percent": current_state_summary.get(
+            "avg_line_utilization_percent"
+        ),
+        "bottleneck_line_id": current_state_summary.get("bottleneck_line_id"),
+        "unit_basis": current_state_summary.get("unit_basis"),
+        "total_tardiness_minutes": current_state_summary.get("total_tardiness_minutes"),
+        "total_late_penalty_amount": current_state_summary.get(
+            "total_late_penalty_amount"
+        ),
+        "baseline_plan_count": current_state_summary.get("baseline_plan_count"),
+    }
+    missing = [
+        key
+        for key, value in metrics.items()
+        if value is None
+    ]
+    metrics["calculation_status"] = "OK" if not missing else "MISSING_VALUE"
+    metrics["missing_fields"] = missing
+    metrics["baseline_metric_source"] = "DB_CURRENT_PLAN"
+    return metrics
+
+
+def build_baseline_plan_provenance(
+    baseline_plan_rows: list[dict[str, Any]],
+    planning_start: datetime | None,
+    planning_end: datetime | None,
+) -> dict[str, Any]:
+    """
+    Parameters:
+        - baseline_plan_rows: Current DB production plan rows.
+        - planning_start: Comparison window start.
+        - planning_end: Comparison window end.
+
+    Methodology:
+        - Preserve source and row-count metadata for auditability.
+
+    Output:
+        - Baseline provenance for the current production plan source.
+    """
+    return {
+        "source": "ai_planning.v_existing_schedules_for_planning",
+        "plan_count": len(baseline_plan_rows),
+        "planning_start": _iso_or_none(planning_start),
+        "planning_end": _iso_or_none(planning_end),
+        "first_planned_start_at": _iso_or_none(
+            min(
+                (
+                    _as_datetime(_first_present(row, ["planned_start_at", "start_time"]))
+                    for row in baseline_plan_rows
+                    if _as_datetime(_first_present(row, ["planned_start_at", "start_time"]))
+                    is not None
+                ),
+                default=None,
+            )
+        ),
+        "last_planned_end_at": _iso_or_none(
+            max(
+                (
+                    _as_datetime(_first_present(row, ["planned_end_at", "end_time"]))
+                    for row in baseline_plan_rows
+                    if _as_datetime(_first_present(row, ["planned_end_at", "end_time"]))
+                    is not None
+                ),
+                default=None,
+            )
+        ),
+    }
 
 
 def build_baseline_simulation_metrics(
@@ -888,7 +1120,7 @@ def build_comparison_metrics(
 ) -> dict[str, Any]:
     """
     Parameters:
-        - baseline_metrics: Normalized DB current-plan simulation metrics.
+        - baseline_metrics: Normalized DB current-plan metrics.
         - alternative_metrics: Normalized adjusted-plan simulation metrics.
 
     Methodology:
@@ -1044,55 +1276,58 @@ def build_simulation_comparison_table(
 
 def build_selected_plan_change_schedule(
     candidate: AdjustedPlanCandidate,
-    baseline_detail_rows: list[dict[str, Any]],
+    baseline_plan_rows: list[dict[str, Any]],
     matched_predictions: dict[str, dict[str, Any]],
     plan_result,
 ) -> list[dict[str, Any]]:
     """
     Parameters:
         - candidate: Adjusted plan candidate.
-        - baseline_detail_rows: Baseline simulation details containing before_* schedule.
-        - matched_predictions: Baseline predictions keyed by detail identity.
+        - baseline_plan_rows: Current DB production plan rows containing existing schedule.
+        - matched_predictions: Deprecated compatibility argument; not used for plan baseline.
         - plan_result: CP-SAT plan result with deterministic delay status.
 
     Methodology:
-        - Match each adjusted order to baseline detail by normalized order_id.
-        - Compare DB before_* schedule values to the new CP-SAT adjusted plan.
+        - Match each adjusted order to current DB plan rows by normalized plan_id or order_id.
+        - Compare current DB schedule values to the new CP-SAT adjusted plan.
 
     Output:
         - Order-level schedule change rows for dashboard display.
     """
-    detail_by_order_id = _detail_rows_by_order_id(baseline_detail_rows)
+    _ = matched_predictions
+    detail_by_order_or_plan_id = _detail_rows_by_order_or_plan_id(baseline_plan_rows)
     delayed_order_ids = _delayed_order_ids_from_plan(plan_result)
     rows = []
     for plan in sorted(candidate.plans, key=lambda row: (row.line_id, row.plan_sequence)):
         order_key = _canonical_id(plan.order_id)
-        detail = detail_by_order_id.get(order_key, {})
+        detail = detail_by_order_or_plan_id.get(order_key, {})
         if not detail:
             continue
-        prediction = matched_predictions.get(_detail_key(detail), {})
-        before_line_id = _id_or_none(_first_present(detail, ["before_line_id"]))
+        before_line_id = _id_or_none(_first_present(detail, ["before_line_id", "line_id"]))
         after_line_id = _id_or_none(plan.line_id)
-        before_delayed = _baseline_detail_has_delay_risk(detail, prediction)
+        before_delayed = _current_plan_tardiness_minutes(detail) > 0
         after_delayed = order_key in delayed_order_ids
         rows.append(
             {
                 "order_id": _id_or_none(plan.order_id),
                 "line_change": _line_change_text(before_line_id, after_line_id),
                 "before_schedule": _schedule_text(
-                    _first_present(detail, ["before_start_at"]),
-                    _first_present(detail, ["before_end_at"]),
+                    _first_present(detail, ["before_start_at", "planned_start_at", "start_time"]),
+                    _first_present(detail, ["before_end_at", "planned_end_at", "end_time"]),
                 ),
                 "after_schedule": _schedule_text(
                     plan.planned_start_at,
                     plan.planned_end_at,
                 ),
                 "sequence_change": _sequence_change_text(
-                    _first_present(detail, ["before_sequence"]),
+                    _first_present(detail, ["before_sequence", "plan_sequence"]),
                     plan.plan_sequence,
                 ),
                 "quantity_change": _quantity_change_text(
-                    _first_present(detail, ["before_quantity"]),
+                    _first_present(
+                        detail,
+                        ["before_quantity", "planned_quantity", "order_quantity"],
+                    ),
                     plan.planned_quantity,
                 ),
                 "delay_status_change": _delay_status_change(before_delayed, after_delayed),
@@ -1240,7 +1475,7 @@ def build_evidence_json(
             "rule": "상위 기준의 근거가 없을 때만 다음 기준을 사용합니다.",
         },
         "baseline": {
-            "source": "DB_CURRENT_PLAN_AND_SIMULATION",
+            "source": "DB_CURRENT_PLAN",
             "metrics": baseline_llm_metrics,
         },
         "alternative": {
@@ -1543,9 +1778,9 @@ async def generate_ai_evaluation_from_evidence(
 
     Methodology:
         - Call Prompt 1 to create a Korean evaluation draft.
-        - Validate the draft schema and grounding against the evidence.
+        - Validate the draft schema before using it as Prompt 2 input.
         - Call Prompt 2 to normalize the validated draft into the dashboard schema.
-        - Validate the final JSON against both evidence and the draft output.
+        - Validate the final JSON against the evidence.
 
     Output:
         - Validated DashboardAiEvaluation ready to serialize in the response JSON.
@@ -1565,7 +1800,7 @@ async def generate_ai_evaluation_from_evidence(
             llm_client=client,
         )
         draft_payload = _parse_llm_json_object(draft_completion.answer, "evaluation draft")
-        draft = validate_evaluation_draft(draft_payload, safe_evidence_json)
+        draft = validate_evaluation_draft(draft_payload)
 
         final_prompt = build_json_normalization_prompt(
             safe_evidence_json,
@@ -1582,7 +1817,6 @@ async def generate_ai_evaluation_from_evidence(
         return validate_final_ai_evaluation(
             final_payload,
             safe_evidence_json,
-            draft.model_dump(mode="json"),
         )
     except PlanningValidationError as exc:
         logger.warning(
@@ -1616,16 +1850,15 @@ async def _generate_traced_llm_completion(
 
 def validate_evaluation_draft(
     payload: dict[str, Any],
-    evidence_json: dict[str, Any],
 ) -> DashboardEvaluationDraft:
     """
     Parameters:
         - payload: Raw Prompt 1 LLM output parsed as JSON.
-        - evidence_json: Formatter-generated evidence document.
 
     Methodology:
         - Validate the draft schema.
-        - Reject numeric, ID, or event tokens not grounded in the evidence JSON.
+        - Defer grounding to the final normalized JSON so both LLM steps are traceable
+          for every variant with a schema-valid draft.
 
     Output:
         - Validated DashboardEvaluationDraft.
@@ -1636,24 +1869,21 @@ def validate_evaluation_draft(
         raise PlanningValidationError(
             f"Evaluation draft JSON schema is invalid: {exc}"
         ) from exc
-    validate_llm_output_against_evidence(draft.model_dump(), evidence_json)
     return draft
 
 
 def validate_final_ai_evaluation(
     payload: dict[str, Any],
     evidence_json: dict[str, Any],
-    draft_evaluation_json: dict[str, Any] | None = None,
 ) -> DashboardAiEvaluation:
     """
     Parameters:
         - payload: Raw Prompt 2 LLM output parsed as JSON.
         - evidence_json: Formatter-generated evidence document.
-        - draft_evaluation_json: Optional validated Prompt 1 output.
 
     Methodology:
         - Validate the final dashboard schema.
-        - Ground final text against evidence and the validated draft.
+        - Ground final text against evidence only; draft text is not trusted as a factual source.
 
     Output:
         - Validated DashboardAiEvaluation.
@@ -1664,13 +1894,7 @@ def validate_final_ai_evaluation(
         raise PlanningValidationError(
             f"Final AI evaluation JSON schema is invalid: {exc}"
         ) from exc
-    grounding_source = evidence_json
-    if draft_evaluation_json is not None:
-        grounding_source = {
-            "evidence": evidence_json,
-            "draft_evaluation": draft_evaluation_json,
-        }
-    validate_llm_output_against_evidence(evaluation.model_dump(), grounding_source)
+    validate_llm_output_against_evidence(evaluation.model_dump(), evidence_json)
     return evaluation
 
 
@@ -1819,6 +2043,23 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, set):
         return sorted(_json_safe(item) for item in value)
+    return value
+
+
+def _normalize_public_ids(value: Any, key_name: str | None = None) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_public_ids(item, str(key))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        if key_name is not None and key_name.endswith("_ids"):
+            return [_id_or_none(item) for item in value]
+        return [_normalize_public_ids(item, key_name) for item in value]
+    if key_name is not None and key_name.endswith("_id"):
+        return _id_or_none(value)
+    if isinstance(value, str):
+        return re.sub(r"\bPLAN-(\d+)\b", r"\1", value)
     return value
 
 
@@ -1980,12 +2221,17 @@ def _detail_rows_by_key(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     return {_detail_key(row): row for row in rows}
 
 
-def _detail_rows_by_order_id(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _detail_rows_by_order_or_plan_id(
+    rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     result = {}
     for row in rows:
         order_id = _canonical_id(_first_present(row, ["order_id"]))
+        plan_id = _canonical_id(_first_present(row, ["plan_id", "schedule_id"]))
         if order_id is not None:
             result[order_id] = row
+        if plan_id is not None:
+            result[plan_id] = row
     return result
 
 
@@ -2070,6 +2316,152 @@ def _baseline_delivery_denominator(
         )
         return total, delayed
     return Decimal(str(len(detail_rows))), Decimal(str(len(risk_detail_keys)))
+
+
+def _current_plan_rows_by_key(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {_current_plan_key(row): row for row in rows if _current_plan_key(row)}
+
+
+def _current_plan_key(row: dict[str, Any]) -> str:
+    plan_id = _canonical_id(_first_present(row, ["plan_id", "schedule_id"]))
+    order_id = _canonical_id(_first_present(row, ["order_id"]))
+    return plan_id or order_id or ""
+
+
+def _current_plan_tardiness_minutes(row: dict[str, Any]) -> int:
+    planned_end = _as_datetime(_first_present(row, ["planned_end_at", "end_time"]))
+    due_at = _due_at_datetime(_first_present(row, ["due_date", "expected_completion_date"]))
+    if planned_end is None or due_at is None:
+        return 0
+    return max(0, int((planned_end - due_at).total_seconds() // 60))
+
+
+def _due_at_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.max.time(), tzinfo=UTC)
+    if isinstance(value, str):
+        parsed_datetime = _as_datetime(value)
+        if parsed_datetime is not None:
+            return parsed_datetime
+        parsed_date = _as_date(value)
+        if parsed_date is not None:
+            return datetime.combine(parsed_date, datetime.max.time(), tzinfo=UTC)
+    return None
+
+
+def _current_plan_delivery_denominator(
+    plan_rows: list[dict[str, Any]],
+    delayed_keys: set[str],
+    unit_basis: str,
+) -> tuple[Decimal, Decimal]:
+    if unit_basis == "QUANTITY" and _all_current_plan_quantities_present(plan_rows):
+        total = sum(
+            (
+                _to_decimal(
+                    _first_present(
+                        row,
+                        ["planned_quantity", "order_quantity", "before_quantity"],
+                    )
+                )
+                or Decimal("0")
+                for row in plan_rows
+            ),
+            Decimal("0"),
+        )
+        delayed = sum(
+            (
+                _to_decimal(
+                    _first_present(
+                        row,
+                        ["planned_quantity", "order_quantity", "before_quantity"],
+                    )
+                )
+                or Decimal("0")
+                for row in plan_rows
+                if _current_plan_key(row) in delayed_keys
+            ),
+            Decimal("0"),
+        )
+        return total, delayed
+    return Decimal(str(len(plan_rows))), Decimal(str(len(delayed_keys)))
+
+
+def _all_current_plan_quantities_present(plan_rows: list[dict[str, Any]]) -> bool:
+    if not plan_rows:
+        return False
+    return all(
+        _first_present(row, ["planned_quantity", "order_quantity", "before_quantity"])
+        is not None
+        for row in plan_rows
+    )
+
+
+def _current_plan_line_utilization(
+    plan_rows: list[dict[str, Any]],
+    production_lines: list[Any],
+    planning_start: datetime | None,
+    planning_end: datetime | None,
+) -> dict[str, Any]:
+    if planning_start is None or planning_end is None or planning_end <= planning_start:
+        return {"avg_line_utilization_percent": None, "bottleneck_line_id": None}
+    denominator = Decimal(str((planning_end - planning_start).total_seconds() / 60))
+    if denominator <= 0:
+        return {"avg_line_utilization_percent": None, "bottleneck_line_id": None}
+    known_line_ids = {
+        _canonical_id(_first_present(_plain_row(line), ["line_id"]))
+        for line in production_lines
+    }
+    known_line_ids.discard(None)
+    line_ids = known_line_ids or {
+        _canonical_id(_first_present(row, ["line_id"]))
+        for row in plan_rows
+    }
+    line_ids.discard(None)
+    if not line_ids:
+        return {"avg_line_utilization_percent": None, "bottleneck_line_id": None}
+
+    occupied_minutes_by_line = {line_id: Decimal("0") for line_id in line_ids}
+    for row in plan_rows:
+        line_id = _canonical_id(_first_present(row, ["line_id"]))
+        if line_id not in occupied_minutes_by_line:
+            continue
+        occupied_minutes_by_line[line_id] += Decimal(
+            str(_overlap_minutes(row, planning_start, planning_end))
+        )
+    utilization_by_line = {
+        line_id: (minutes / denominator) * Decimal("100")
+        for line_id, minutes in occupied_minutes_by_line.items()
+    }
+    bottleneck_line_id, bottleneck_value = max(
+        utilization_by_line.items(),
+        key=lambda item: (item[1], item[0]),
+    )
+    avg_utilization = sum(utilization_by_line.values(), Decimal("0")) / Decimal(
+        str(len(utilization_by_line))
+    )
+    return {
+        "avg_line_utilization_percent": _round_decimal(avg_utilization),
+        "bottleneck_line_id": _id_or_none(bottleneck_line_id),
+        "bottleneck_line_utilization_percent": _round_decimal(bottleneck_value),
+    }
+
+
+def _overlap_minutes(
+    row: dict[str, Any],
+    planning_start: datetime,
+    planning_end: datetime,
+) -> int:
+    start = _as_datetime(_first_present(row, ["planned_start_at", "start_time"]))
+    end = _as_datetime(_first_present(row, ["planned_end_at", "end_time"]))
+    if start is None or end is None:
+        return 0
+    overlap_start = max(start, planning_start)
+    overlap_end = min(end, planning_end)
+    if overlap_end <= overlap_start:
+        return 0
+    return int((overlap_end - overlap_start).total_seconds() // 60)
 
 
 def _fulfillment_rate(total: Decimal, delayed: Decimal) -> float | None:

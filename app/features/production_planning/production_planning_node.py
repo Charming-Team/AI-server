@@ -124,11 +124,12 @@ def generate_adjusted_production_plan_dashboard_response(
 
     Methodology:
         - Generate adjusted CP-SAT and simulation alternatives through the existing workflow.
-        - Load the DB current plan and DB simulation history as the baseline comparison source.
+        - Load the DB current plan as the baseline comparison source.
+        - Load DB simulation history only as historical context.
         - Delegate final dashboard JSON assembly and delta calculations to the formatter.
 
     Output:
-        - Dashboard JSON comparing DB baseline and adjusted production plan candidates.
+        - Dashboard JSON comparing DB current-plan baseline and adjusted candidates.
     """
     result, planning_request = _generate_adjusted_production_planning_result_with_request(
         request

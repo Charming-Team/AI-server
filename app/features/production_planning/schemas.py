@@ -436,10 +436,39 @@ class ProductionPlanningResult(BaseModel):
         """
         return {
             "adjusted_plan_candidates": [
-                candidate.model_dump(mode="json")
+                _serialize_adjusted_plan_candidate(candidate)
                 for candidate in self.adjusted_plan_candidates
             ]
         }
+
+
+def _serialize_adjusted_plan_candidate(
+    candidate: AdjustedPlanCandidate,
+) -> dict[str, Any]:
+    payload = candidate.model_dump(mode="json")
+    payload["plans"] = [
+        _serialize_adjusted_plan_row(row)
+        for row in candidate.plans
+    ]
+    return payload
+
+
+def _serialize_adjusted_plan_row(row: AdjustedPlanRow) -> dict[str, Any]:
+    payload = row.model_dump(mode="json")
+    for field_name in ("order_id", "product_id", "line_id", "operator_id"):
+        payload[field_name] = _public_numeric_id(payload.get(field_name))
+    return payload
+
+
+def _public_numeric_id(value: Any) -> Any:
+    if value is None:
+        return None
+    text = str(value)
+    if text.startswith("PLAN-") and text.removeprefix("PLAN-").isdigit():
+        return int(text.removeprefix("PLAN-"))
+    if text.isdigit():
+        return int(text)
+    return value
 
 
 @dataclass(frozen=True)
