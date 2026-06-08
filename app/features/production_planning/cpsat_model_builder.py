@@ -7,6 +7,7 @@ from typing import Any
 from ortools.sat.python import cp_model
 
 from app.features.production_planning.config import SolverConfig
+from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.preprocessing import (
     calculate_required_material_quantity_scaled,
     get_changeover_cost,
@@ -65,6 +66,7 @@ def build_base_cpsat_model(
     )
 
     _build_order_assignment_variables(bundle, data, config)
+    _add_locked_order_constraints(bundle, data)
     _add_line_no_overlap_constraints(bundle, data, config)
     _add_line_availability_constraints(bundle, data)
     _add_daily_capacity_constraints(bundle, data)
@@ -135,7 +137,8 @@ def _build_order_assignment_variables(
         bundle.model.Add(completion >= due_offset + 1).OnlyEnforceIf(
             [scheduled, due_date_met.Not()]
         )
-        if config.due_date_policy == "HARD":
+        if config.due_date_policy == "HARD" and not normalized_order.order.is_locked:
+            # Locked edits are fixed user decisions; their lateness is measured, not repaired.
             bundle.model.Add(completion <= normalized_order.due_date_offset).OnlyEnforceIf(
                 scheduled
             )
@@ -151,6 +154,37 @@ def _build_order_assignment_variables(
         }
         bundle.tardiness_vars[order_id] = tardiness
         bundle.unscheduled_vars[order_id] = unscheduled
+
+
+def _add_locked_order_constraints(
+    bundle: CpsatModelBundle,
+    data: NormalizedPlanningData,
+) -> None:
+    for order_id, normalized_order in data.orders.items():
+        order = normalized_order.order
+        if not order.is_locked:
+            continue
+        if order.locked_plan is None:
+            raise PlanningValidationError(f"Locked order {order_id} requires locked_plan.")
+        locked_line_id = order.locked_plan.line_id
+        order_vars = bundle.order_vars[order_id]
+        if locked_line_id not in order_vars["assigned"]:
+            raise PlanningValidationError(
+                f"Locked order {order_id} has no assignment variable on line {locked_line_id}."
+            )
+        locked_start = to_minute_offset(order.locked_plan.planned_start_at, data.planning_start)
+        locked_end = to_minute_offset(order.locked_plan.planned_end_at, data.planning_start)
+
+        bundle.model.Add(order_vars["scheduled"] == 1)
+        bundle.model.Add(order_vars["unscheduled"] == 0)
+        bundle.model.Add(order_vars["completion"] == locked_end)
+        for line_id, assigned in order_vars["assigned"].items():
+            if line_id == locked_line_id:
+                bundle.model.Add(assigned == 1)
+                bundle.model.Add(order_vars["start"][line_id] == locked_start)
+                bundle.model.Add(order_vars["end"][line_id] == locked_end)
+            else:
+                bundle.model.Add(assigned == 0)
 
 
 def _add_line_no_overlap_constraints(
@@ -278,6 +312,13 @@ def _add_daily_capacity_constraints(
         for bucket_index in range(bucket_count):
             line_terms = []
             for candidate in candidates:
+                if not _fits_completion_bucket_capacity(
+                    bundle,
+                    "line",
+                    candidate,
+                    line.max_capacity_per_day,
+                ):
+                    continue
                 in_bucket = _build_completion_bucket_var(bundle, candidate, bucket_index)
                 line_terms.append(candidate.planned_production_quantity * in_bucket)
             if line.max_capacity_per_day is not None and line_terms:
@@ -291,12 +332,43 @@ def _add_daily_capacity_constraints(
                 capability = data.capabilities[(product_id, line_id)]
                 if capability.capacity_per_day is None:
                     continue
-                terms = [
-                    candidate.planned_production_quantity
-                    * _build_completion_bucket_var(bundle, candidate, bucket_index)
-                    for candidate in product_candidates
-                ]
+                terms = []
+                for candidate in product_candidates:
+                    if not _fits_completion_bucket_capacity(
+                        bundle,
+                        "product-line",
+                        candidate,
+                        capability.capacity_per_day,
+                    ):
+                        continue
+                    terms.append(
+                        candidate.planned_production_quantity
+                        * _build_completion_bucket_var(bundle, candidate, bucket_index)
+                    )
+                if not terms:
+                    continue
                 bundle.model.Add(sum(terms) <= capability.capacity_per_day)
+
+
+def _fits_completion_bucket_capacity(
+    bundle: CpsatModelBundle,
+    scope: str,
+    candidate: ProcessingCandidate,
+    capacity: int | None,
+) -> bool:
+    if capacity is None or candidate.planned_production_quantity <= capacity:
+        return True
+
+    skipped = bundle.metric_vars.setdefault("oversized_capacity_candidates", set())
+    key = (scope, candidate.order_id, candidate.line_id)
+    if key not in skipped:
+        skipped.add(key)
+        bundle.warnings.append(
+            f"Skipped {scope} completion-bucket capacity for order {candidate.order_id} "
+            f"on line {candidate.line_id}: planned quantity "
+            f"{candidate.planned_production_quantity} exceeds daily capacity {capacity}."
+        )
+    return False
 
 
 def _build_completion_bucket_var(

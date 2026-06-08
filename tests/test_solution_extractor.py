@@ -55,7 +55,7 @@ def test_solution_extractor_respects_locked_existing_schedule() -> None:
     plan = next(
         plan
         for plan in result.plan_results
-        if plan.plan_variant_code == "DUE_DATE_MIN_DELAY_COUNT"
+        if plan.plan_variant_code == "DUE_DATE_OPTIMAL"
     )
     item = plan.schedule_items[0]
 

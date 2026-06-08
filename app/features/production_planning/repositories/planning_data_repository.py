@@ -68,28 +68,65 @@ class PlanningDataRepository:
     single shared connection provided by load_planning_input_bundle().
     """
 
-    def load_planning_input_bundle(self) -> PlanningInputBundle:
+    def load_planning_input_bundle(
+        self,
+        planning_start: _dt.datetime | None = None,
+        planning_end: _dt.datetime | None = None,
+        excluded_order_statuses: list[str] | None = None,
+        use_existing_plans_as_orders: bool = False,
+        excluded_rescheduling_plan_statuses: list[str] | None = None,
+    ) -> PlanningInputBundle:
         """
         Parameters:
-            - None.
+            - planning_start: Optional inclusive planning window start for DB-side filters.
+            - planning_end: Optional exclusive planning window end for DB-side filters.
+            - excluded_order_statuses: Optional order status labels to exclude in the DB query.
+            - use_existing_plans_as_orders: Whether future production plans become the
+              rescheduling targets.
+            - excluded_rescheduling_plan_statuses: Plan statuses excluded from rescheduling.
 
         Methodology:
             - Open a single connection and run all view queries sequentially.
             - Map every result set to the corresponding planning input type.
+            - Apply planning window filters where rows represent time-bounded planning inputs.
 
         Output:
             - PlanningInputBundle containing all data needed to build a ProductionPlanningRequest.
         """
         try:
             with planning_engine.connect() as conn:
+                orders = (
+                    self.get_reschedulable_orders_from_existing_plans(
+                        conn,
+                        planning_start,
+                        excluded_rescheduling_plan_statuses,
+                    )
+                    if use_existing_plans_as_orders
+                    else self.get_orders_for_planning(
+                        conn,
+                        planning_start,
+                        planning_end,
+                        excluded_order_statuses,
+                    )
+                )
                 return PlanningInputBundle(
-                    orders=self.get_orders_for_planning(conn),
+                    orders=orders,
                     products=self.get_products_for_planning(conn),
                     production_lines=self.get_production_lines_for_planning(conn),
                     product_line_capabilities=self.get_product_line_capabilities_for_planning(conn),
-                    existing_schedules=self.get_existing_schedules_for_planning(conn),
+                    existing_schedules=self.get_existing_schedules_for_planning(
+                        conn,
+                        planning_start,
+                        planning_end,
+                        excluded_rescheduling_plan_statuses
+                        if use_existing_plans_as_orders
+                        else None,
+                    ),
                     changeover_rules=self.get_changeover_rules_for_planning(conn),
-                    material_inventories=self.get_material_inventories_for_planning(conn),
+                    material_inventories=self.get_material_inventories_for_planning(
+                        conn,
+                        planning_end,
+                    ),
                     bom_items=self.get_bom_items_for_planning(conn),
                     line_statuses=self.get_latest_line_statuses_for_planning(conn),
                     machine_statuses=self.get_latest_machine_statuses_for_planning(conn),
@@ -101,21 +138,193 @@ class PlanningDataRepository:
                 f"Failed to load planning input bundle: {exc}"
             ) from exc
 
-    def get_orders_for_planning(self, conn: Connection) -> list[OrderInput]:
+    def get_reschedulable_orders_from_existing_plans(
+        self,
+        conn: Connection,
+        planning_start: _dt.datetime | None,
+        excluded_plan_statuses: list[str] | None = None,
+    ) -> list[OrderInput]:
         """
         Parameters:
             - conn: Active SQLAlchemy connection to the planning database.
+            - planning_start: Inclusive lower bound for existing plan start times.
+            - excluded_plan_statuses: Plan statuses that must not be rescheduled.
+
+        Methodology:
+            - Read existing production plans that start at or after planning_start.
+            - Exclude completed and in-progress plans from the rescheduling target set.
+            - Join order attributes from the planning order view first, then the historical
+              order view because completed source orders can still have future open plans.
+            - Convert each plan row into a unique OrderInput so CP-SAT can rearrange plan-level
+              work. If one source order appears in multiple plan rows, split quantity and
+              monetary values across those plan targets.
+
+        Output:
+            - List of OrderInput objects representing reschedulable production plan rows.
+        """
+        if planning_start is None:
+            raise PlanningDataAccessError(
+                "planning_start is required when existing plans are used as planning targets.",
+                view="ai_planning.v_existing_schedules_for_planning",
+            )
+
+        params: dict[str, Any] = {"planning_start": planning_start}
+        excluded_status_clause = _build_status_exclusion_clause(
+            "plan_status",
+            excluded_plan_statuses or ["COMPLETED", "IN_PROGRESS"],
+            params,
+            key_prefix="excluded_plan_status",
+        )
+        where_clauses = ["start_time >= :planning_start"]
+        if excluded_status_clause:
+            where_clauses.append(excluded_status_clause)
+
+        query = text(
+            f"""
+            WITH target_plan AS (
+                SELECT
+                    schedule_id,
+                    order_id AS source_order_id,
+                    product_id AS plan_product_id,
+                    line_id AS original_line_id,
+                    start_time,
+                    end_time,
+                    plan_status,
+                    COUNT(*) OVER (PARTITION BY order_id) AS split_count,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY order_id
+                        ORDER BY start_time, schedule_id
+                    ) AS split_index
+                FROM ai_planning.v_existing_schedules_for_planning
+                WHERE {" AND ".join(where_clauses)}
+            ),
+            all_orders AS (
+                SELECT
+                    1 AS source_priority,
+                    order_id,
+                    product_id,
+                    order_quantity,
+                    due_date,
+                    contract_amount,
+                    late_penalty_amount,
+                    order_status
+                FROM ai_planning.v_orders_for_planning
+                UNION ALL
+                SELECT
+                    2 AS source_priority,
+                    order_id,
+                    product_id,
+                    order_quantity,
+                    due_date,
+                    contract_amount,
+                    late_penalty_amount,
+                    order_status
+                FROM ai_planning.v_orders_history_for_sampling
+            ),
+            order_data AS (
+                SELECT DISTINCT ON (order_id)
+                    order_id,
+                    product_id,
+                    order_quantity,
+                    due_date,
+                    contract_amount,
+                    late_penalty_amount,
+                    order_status
+                FROM all_orders
+                ORDER BY order_id, source_priority
+            )
+            SELECT
+                target_plan.schedule_id,
+                target_plan.source_order_id,
+                target_plan.plan_product_id,
+                target_plan.original_line_id,
+                target_plan.start_time,
+                target_plan.end_time,
+                target_plan.plan_status,
+                target_plan.split_count,
+                target_plan.split_index,
+                order_data.order_id AS joined_order_id,
+                order_data.product_id AS order_product_id,
+                order_data.order_quantity,
+                order_data.due_date,
+                order_data.contract_amount,
+                order_data.late_penalty_amount,
+                order_data.order_status
+            FROM target_plan
+            LEFT JOIN order_data
+              ON order_data.order_id = target_plan.source_order_id
+            ORDER BY target_plan.start_time, target_plan.schedule_id
+            """
+        )
+
+        try:
+            rows = conn.execute(query, params).mappings().all()
+        except Exception as exc:
+            raise PlanningDataAccessError(
+                f"Failed to query reschedulable existing plans: {exc}",
+                view="ai_planning.v_existing_schedules_for_planning",
+            ) from exc
+
+        missing_order_ids = [
+            str(row["source_order_id"])
+            for row in rows
+            if row["joined_order_id"] is None
+        ]
+        if missing_order_ids:
+            raise PlanningDataAccessError(
+                "Order data is missing for reschedulable plans: "
+                + ", ".join(sorted(missing_order_ids)),
+                view="ai_planning.v_existing_schedules_for_planning",
+            )
+        if not rows:
+            raise PlanningDataAccessError(
+                "No reschedulable existing production plans were found.",
+                view="ai_planning.v_existing_schedules_for_planning",
+            )
+
+        return [_reschedulable_plan_row_to_order(row) for row in rows]
+
+    def get_orders_for_planning(
+        self,
+        conn: Connection,
+        planning_start: _dt.datetime | None = None,
+        planning_end: _dt.datetime | None = None,
+        excluded_order_statuses: list[str] | None = None,
+    ) -> list[OrderInput]:
+        """
+        Parameters:
+            - conn: Active SQLAlchemy connection to the planning database.
+            - planning_start: Optional inclusive planning date lower bound.
+            - planning_end: Optional inclusive planning date upper bound.
+            - excluded_order_statuses: Optional order status labels to remove in SQL.
 
         Methodology:
             - Query ai_planning.v_orders_for_planning.
-            - Include only WAITING, IN_PROGRESS, and DELAYED orders.
+            - Exclude completed-style statuses while leaving final policy filtering to
+              SolverConfig during preprocessing.
+            - When a planning end is supplied, include unfinished overdue orders by filtering
+              only due_date <= planning_end.
             - Map contract_amount → order_amount, late_penalty_amount as-is.
 
         Output:
             - List of OrderInput objects ready for the planning solver.
         """
+        where_clauses = ["1 = 1"]
+        params: dict[str, Any] = {}
+        statuses_to_exclude = excluded_order_statuses or ["COMPLETED"]
+        status_clause = _build_status_exclusion_clause(
+            "order_status",
+            statuses_to_exclude,
+            params,
+        )
+        if status_clause:
+            where_clauses.append(status_clause)
+        if planning_end is not None:
+            where_clauses.append("due_date <= CAST(:planning_end AS date)")
+            params["planning_end"] = planning_end
+
         query = text(
-            """
+            f"""
             SELECT
                 order_id,
                 product_id,
@@ -125,13 +334,13 @@ class PlanningDataRepository:
                 late_penalty_amount,
                 order_status
             FROM ai_planning.v_orders_for_planning
-            WHERE order_status IN ('WAITING', 'IN_PROGRESS', 'DELAYED')
+            WHERE {" AND ".join(where_clauses)}
             ORDER BY order_id
             """
         )
 
         try:
-            rows = conn.execute(query).mappings().all()
+            rows = conn.execute(query, params).mappings().all()
         except Exception as exc:
             raise PlanningDataAccessError(
                 f"Failed to query v_orders_for_planning: {exc}",
@@ -339,22 +548,53 @@ class PlanningDataRepository:
     def get_existing_schedules_for_planning(
         self,
         conn: Connection,
+        planning_start: _dt.datetime | None = None,
+        planning_end: _dt.datetime | None = None,
+        excluded_rescheduling_plan_statuses: list[str] | None = None,
     ) -> list[ExistingScheduleInput]:
         """
         Parameters:
             - conn: Active SQLAlchemy connection.
+            - planning_start: Optional inclusive planning window start.
+            - planning_end: Optional exclusive planning window end.
+            - excluded_rescheduling_plan_statuses: When supplied, plans starting at or after
+              planning_start and not in these statuses are rescheduling targets, not blockers.
 
         Methodology:
             - Query ai_planning.v_existing_schedules_for_planning.
             - Include only SCHEDULED, IN_PROGRESS, and DELAYED plans as fixed blockers.
+            - When a planning window is supplied, keep only schedules that overlap it.
             - These intervals are added to CP-SAT NoOverlap constraints so new orders
               cannot be placed on top of them.
 
         Output:
             - List of ExistingScheduleInput objects with is_locked=True.
         """
+        where_clauses = ["plan_status IN ('SCHEDULED', 'IN_PROGRESS', 'DELAYED')"]
+        params: dict[str, Any] = {}
+        if planning_start is not None:
+            where_clauses.append("end_time > :planning_start")
+            params["planning_start"] = planning_start
+        if planning_end is not None:
+            where_clauses.append("start_time < :planning_end")
+            params["planning_end"] = planning_end
+        if planning_start is not None and excluded_rescheduling_plan_statuses is not None:
+            rescheduling_params: dict[str, Any] = {}
+            rescheduling_status_clause = _build_status_exclusion_clause(
+                "plan_status",
+                excluded_rescheduling_plan_statuses,
+                rescheduling_params,
+                key_prefix="reschedule_excluded_status",
+            )
+            if rescheduling_status_clause:
+                params.update(rescheduling_params)
+                where_clauses.append(
+                    "NOT (start_time >= :planning_start "
+                    f"AND {rescheduling_status_clause})"
+                )
+
         query = text(
-            """
+            f"""
             SELECT
                 schedule_id,
                 line_id,
@@ -364,13 +604,13 @@ class PlanningDataRepository:
                 end_time,
                 plan_status
             FROM ai_planning.v_existing_schedules_for_planning
-            WHERE plan_status IN ('SCHEDULED', 'IN_PROGRESS', 'DELAYED')
+            WHERE {" AND ".join(where_clauses)}
             ORDER BY line_id, start_time
             """
         )
 
         try:
-            rows = conn.execute(query).mappings().all()
+            rows = conn.execute(query, params).mappings().all()
         except Exception as exc:
             raise PlanningDataAccessError(
                 f"Failed to query v_existing_schedules_for_planning: {exc}",
@@ -454,35 +694,59 @@ class PlanningDataRepository:
     def get_material_inventories_for_planning(
         self,
         conn: Connection,
+        planning_end: _dt.datetime | None = None,
     ) -> list[MaterialInput]:
         """
         Parameters:
             - conn: Active SQLAlchemy connection.
+            - planning_end: Optional planning window end used to ignore later inbound stock.
 
         Methodology:
             - Query ai_planning.v_material_inventories_for_planning.
             - Use available_now_quantity as the planning-safe inventory level.
               (available_now_quantity already excludes reserved and safety stock.)
-            - expected_inbound_quantity is mapped to confirmed_inbound_quantity
-              for potential inbound-aware material constraints.
+            - Keep expected inbound only when it can arrive during the planning window.
 
         Output:
             - List of MaterialInput objects.
         """
-        query = text(
-            """
-            SELECT
-                material_id,
-                available_now_quantity,
-                expected_inbound_quantity,
-                expected_inbound_at
-            FROM ai_planning.v_material_inventories_for_planning
-            ORDER BY material_id
-            """
-        )
+        if planning_end is None:
+            query = text(
+                """
+                SELECT
+                    material_id,
+                    available_now_quantity,
+                    expected_inbound_quantity,
+                    expected_inbound_at
+                FROM ai_planning.v_material_inventories_for_planning
+                ORDER BY material_id
+                """
+            )
+            params = {}
+        else:
+            query = text(
+                """
+                SELECT
+                    material_id,
+                    available_now_quantity,
+                    CASE
+                        WHEN expected_inbound_at <= :planning_end
+                        THEN expected_inbound_quantity
+                        ELSE NULL
+                    END AS expected_inbound_quantity,
+                    CASE
+                        WHEN expected_inbound_at <= :planning_end
+                        THEN expected_inbound_at
+                        ELSE NULL
+                    END AS expected_inbound_at
+                FROM ai_planning.v_material_inventories_for_planning
+                ORDER BY material_id
+                """
+            )
+            params = {"planning_end": planning_end}
 
         try:
-            rows = conn.execute(query).mappings().all()
+            rows = conn.execute(query, params).mappings().all()
         except Exception as exc:
             raise PlanningDataAccessError(
                 f"Failed to query v_material_inventories_for_planning: {exc}",
@@ -658,6 +922,62 @@ def _to_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def _build_status_exclusion_clause(
+    column_name: str,
+    statuses: list[str],
+    params: dict[str, Any],
+    key_prefix: str = "excluded_order_status",
+) -> str | None:
+    normalized_statuses = [
+        status.strip().upper()
+        for status in statuses
+        if status is not None and status.strip()
+    ]
+    if not normalized_statuses:
+        return None
+
+    placeholders = []
+    for index, status in enumerate(normalized_statuses):
+        key = f"{key_prefix}_{index}"
+        params[key] = status
+        placeholders.append(f":{key}")
+    return f"UPPER(TRIM({column_name}::text)) NOT IN ({', '.join(placeholders)})"
+
+
+def _reschedulable_plan_row_to_order(row) -> OrderInput:
+    source_quantity = int(row["order_quantity"])
+    split_count = int(row["split_count"] or 1)
+    split_index = int(row["split_index"] or 1)
+    plan_quantity = _split_integer_value(source_quantity, split_count, split_index)
+    amount = _split_money_value(row["contract_amount"], source_quantity, plan_quantity)
+    late_penalty = _split_money_value(row["late_penalty_amount"], source_quantity, plan_quantity)
+
+    return OrderInput(
+        order_id=f"PLAN-{row['schedule_id']}",
+        product_id=str(row["plan_product_id"]),
+        customer_id=str(row["source_order_id"]) if row["source_order_id"] is not None else None,
+        order_quantity=plan_quantity,
+        due_date=_due_date_to_datetime(row["due_date"]),
+        order_amount=amount,
+        late_penalty_amount=late_penalty,
+        status=str(row["plan_status"]) if row["plan_status"] else None,
+    )
+
+
+def _split_integer_value(total: int, split_count: int, split_index: int) -> int:
+    if split_count <= 1:
+        return total
+    base = total // split_count
+    remainder = total % split_count
+    return base + (1 if split_index <= remainder else 0)
+
+
+def _split_money_value(value: Any, source_quantity: int, plan_quantity: int) -> int:
+    if value is None or source_quantity <= 0:
+        return 0
+    return round(Decimal(str(value)) * Decimal(plan_quantity) / Decimal(source_quantity))
 
 
 def _apply_loss_rate(required_quantity_per_unit: Any, loss_rate: Any) -> Decimal:

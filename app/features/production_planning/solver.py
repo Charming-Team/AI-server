@@ -28,7 +28,7 @@ def solve_model(
     """
     Parameters:
         - bundle: CP-SAT model bundle with objective already applied.
-        - variant_code: Plan variant code being solved (e.g. "DUE_DATE_MIN_DELAY_COUNT").
+        - variant_code: Plan variant code being solved (for example, "DUE_DATE_OPTIMAL").
         - config: Solver execution configuration.
 
     Methodology:

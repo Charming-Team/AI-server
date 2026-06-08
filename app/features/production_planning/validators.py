@@ -83,6 +83,15 @@ def validate_request(request: ProductionPlanningRequest) -> ProductionPlanningRe
         request.solver_config.interchangeable_line_groups,
         line_by_id,
     )
+    validate_locked_orders(
+        request.orders,
+        request.product_line_capabilities,
+        active_line_ids,
+        request.solver_config.interchangeable_line_groups,
+        line_by_id,
+        request.planning_start,
+        request.planning_end,
+    )
     validate_existing_schedules(request.existing_schedules, line_by_id)
     validate_material_constraints(request.materials, request.bom_items, product_by_id)
     validate_changeover_rules(request.changeover_rules, line_by_id, product_by_id)
@@ -225,6 +234,86 @@ def validate_interchangeable_line_groups(
             raise PlanningValidationError(
                 "Each interchangeable line group must contain at least two line IDs."
             )
+
+
+def validate_locked_orders(
+    orders: list,
+    capabilities: list[ProductLineCapabilityInput],
+    active_line_ids: set[str],
+    interchangeable_line_groups: list[list[str]],
+    line_by_id: dict[str, ProductionLineInput],
+    planning_start,
+    planning_end,
+) -> None:
+    """
+    Parameters:
+        - orders: Orders that may include user-locked plan positions.
+        - capabilities: Product-line capabilities used to validate locked lines.
+        - active_line_ids: Lines eligible for production.
+        - interchangeable_line_groups: Configured line substitution groups.
+        - line_by_id: Valid line lookup.
+        - planning_start: Planning window start.
+        - planning_end: Planning window end.
+
+    Methodology:
+        - Treat locked orders as fixed production-plan rows.
+        - Validate that each fixed row has a valid time range, line, and product-line
+          capability before CP-SAT creates equality constraints.
+
+    Output:
+        - None. Raises PlanningValidationError when a locked order is invalid.
+    """
+    expanded_capabilities = expand_interchangeable_line_capabilities(
+        capabilities,
+        active_line_ids,
+        interchangeable_line_groups,
+    )
+    capable_keys = {
+        (capability.product_id, capability.line_id) for capability in expanded_capabilities
+    }
+    intervals_by_line: dict[str, list[tuple]] = {}
+    for order in orders:
+        if not order.is_locked:
+            continue
+        if order.locked_plan is None:
+            raise PlanningValidationError(f"Locked order {order.order_id} requires locked_plan.")
+        locked_plan = order.locked_plan
+        if locked_plan.line_id not in line_by_id:
+            raise PlanningValidationError(f"Locked order {order.order_id} references unknown line.")
+        if locked_plan.line_id not in active_line_ids:
+            raise PlanningValidationError(
+                f"Locked order {order.order_id} references inactive line."
+            )
+        if (order.product_id, locked_plan.line_id) not in capable_keys:
+            raise PlanningValidationError(
+                f"Locked order {order.order_id} line {locked_plan.line_id} "
+                "cannot produce the order product."
+            )
+        if locked_plan.planned_start_at >= locked_plan.planned_end_at:
+            raise PlanningValidationError(
+                f"Locked order {order.order_id} planned_start_at must be before planned_end_at."
+            )
+        if (
+            locked_plan.planned_start_at < planning_start
+            or locked_plan.planned_end_at > planning_end
+        ):
+            raise PlanningValidationError(
+                f"Locked order {order.order_id} must stay inside the planning window."
+            )
+        intervals_by_line.setdefault(locked_plan.line_id, []).append(
+            (locked_plan.planned_start_at, locked_plan.planned_end_at, order.order_id)
+        )
+
+    for line_id, intervals in intervals_by_line.items():
+        intervals.sort()
+        for index in range(len(intervals) - 1):
+            current_start, current_end, current_order_id = intervals[index]
+            next_start, _, next_order_id = intervals[index + 1]
+            if current_end > next_start:
+                raise PlanningValidationError(
+                    f"Locked orders {current_order_id} and {next_order_id} overlap "
+                    f"on line {line_id}."
+                )
 
 
 def validate_existing_schedules(
