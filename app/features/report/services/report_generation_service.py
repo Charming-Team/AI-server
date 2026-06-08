@@ -422,6 +422,17 @@ class ReportGenerationService:
     ) -> list[dict[str, str]]:
         rows = sections.get("topLineStatuses", [])
 
+        if not rows:
+            return [
+                {
+                    "line": "확인 필요",
+                    "utilization": "-",
+                    "completed": "-",
+                    "defectRate": "-",
+                    "note": "확인 필요",
+                }
+            ]
+
         return [
             {
                 "line": self._format_named_resource(
@@ -444,6 +455,16 @@ class ReportGenerationService:
         sections: dict[str, Any],
     ) -> list[dict[str, str]]:
         rows = sections.get("topMachineStatuses", [])
+
+        if not rows:
+            return [
+                {
+                    "name": "확인 필요",
+                    "utilization": "-",
+                    "downTime": "-",
+                    "status": "확인 필요",
+                }
+            ]
 
         return [
             {
