@@ -20,7 +20,9 @@ class ReportQueryRepository:
         }
 
         if report_type:
-            where_conditions.append("report_type = CAST(:report_type AS report_type_enum)")
+            where_conditions.append(
+                "report_type = CAST(:report_type AS public.report_type_enum)"
+            )
             params["report_type"] = report_type
 
         where_clause = ""
@@ -39,7 +41,7 @@ class ReportQueryRepository:
                 related_simulation_id,
                 created_at,
                 updated_at
-            FROM reports
+            FROM public.reports
             {where_clause}
             ORDER BY created_at DESC, report_id DESC
             LIMIT :limit
@@ -50,7 +52,7 @@ class ReportQueryRepository:
         count_query = text(
             f"""
             SELECT COUNT(*) AS total_count
-            FROM reports
+            FROM public.reports
             {where_clause}
             """
         )
@@ -80,7 +82,7 @@ class ReportQueryRepository:
                 related_simulation_id,
                 created_at,
                 updated_at
-            FROM reports
+            FROM public.reports
             WHERE report_id = :report_id
             """
         )

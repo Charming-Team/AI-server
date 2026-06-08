@@ -76,7 +76,7 @@ class PostgresReportRepository:
                 COUNT(*) FILTER (
                     WHERE order_status::TEXT ILIKE '%DELAY%'
                 ) AS delayed_order_count
-            FROM customer_orders
+            FROM public.customer_orders
             WHERE order_date <= :end_date
               AND due_date >= :start_date
             """
@@ -105,7 +105,7 @@ class PostgresReportRepository:
                 COUNT(*) FILTER (
                     WHERE plan_status::TEXT ILIKE '%DELAY%'
                 ) AS delayed_plan_count
-            FROM production_plans
+            FROM public.production_plans
             WHERE planned_start_at::DATE <= :end_date
               AND planned_end_at::DATE >= :start_date
             """
@@ -142,7 +142,7 @@ class PostgresReportRepository:
                 COUNT(*) FILTER (
                     WHERE result_status::TEXT = 'REWORK'
                 ) AS rework_result_count
-            FROM production_results
+            FROM public.production_results
             WHERE planned_start_at::DATE <= :end_date
             AND planned_end_at::DATE >= :start_date
             """
@@ -171,7 +171,7 @@ class PostgresReportRepository:
                 COALESCE(SUM(current_quantity), 0) AS total_current_quantity,
                 COALESCE(SUM(available_quantity), 0) AS total_available_quantity,
                 COALESCE(SUM(reserved_quantity), 0) AS total_reserved_quantity
-            FROM material_inventories
+            FROM public.material_inventories
             """
         )
 
@@ -195,8 +195,8 @@ class PostgresReportRepository:
                 COUNT(*) FILTER (
                     WHERE ppm.shortage_quantity > 0
                 ) AS shortage_plan_material_count
-            FROM production_plan_materials ppm
-            JOIN production_plans pp
+            FROM public.production_plan_materials ppm
+            JOIN public.production_plans pp
               ON ppm.plan_id = pp.plan_id
             WHERE pp.planned_start_at::DATE <= :end_date
               AND pp.planned_end_at::DATE >= :start_date
@@ -231,8 +231,8 @@ class PostgresReportRepository:
                 ) AS warning_risk_count,
                 COALESCE(AVG(apr.delay_probability), 0) AS avg_delay_probability,
                 COALESCE(AVG(apr.predicted_delay_days), 0) AS avg_predicted_delay_days
-            FROM ai_prediction_results apr
-            JOIN customer_orders co
+            FROM public.ai_prediction_results apr
+            JOIN public.customer_orders co
             ON apr.order_id = co.order_id
             WHERE apr.predicted_at::DATE BETWEEN :start_date AND :end_date
             AND co.order_date <= :end_date
@@ -266,7 +266,7 @@ class PostgresReportRepository:
                 COUNT(*) FILTER (
                     WHERE operation_status::TEXT NOT IN ('RUNNING', 'OPERATING', 'ACTIVE')
                 ) AS non_running_line_status_count
-            FROM line_status
+            FROM public.line_status
             WHERE recorded_at::DATE BETWEEN :start_date AND :end_date
             """
         )
@@ -294,7 +294,7 @@ class PostgresReportRepository:
                 COUNT(*) FILTER (
                     WHERE operation_status::TEXT NOT IN ('RUNNING', 'OPERATING', 'ACTIVE')
                 ) AS abnormal_machine_status_count
-            FROM machine_statuses
+            FROM public.machine_statuses
             WHERE recorded_at::DATE BETWEEN :start_date AND :end_date
             """
         )
@@ -327,10 +327,10 @@ class PostgresReportRepository:
                 apr.analysis_summary,
                 apr.recommended_action,
                 apr.predicted_at
-            FROM ai_prediction_results apr
-            JOIN customer_orders co
+            FROM public.ai_prediction_results apr
+            JOIN public.customer_orders co
               ON apr.order_id = co.order_id
-            JOIN products p
+            JOIN public.products p
               ON co.product_id = p.product_id
             WHERE apr.predicted_at::DATE BETWEEN :start_date AND :end_date
               AND apr.risk_level::TEXT IN ('WARNING', 'CRITICAL')
@@ -373,10 +373,10 @@ class PostgresReportRepository:
                 ppm.material_plan_status::TEXT AS material_plan_status,
                 pp.planned_start_at,
                 pp.planned_end_at
-            FROM production_plan_materials ppm
-            JOIN production_plans pp
+            FROM public.production_plan_materials ppm
+            JOIN public.production_plans pp
               ON ppm.plan_id = pp.plan_id
-            JOIN materials m
+            JOIN public.materials m
               ON ppm.material_id = m.material_id
             WHERE pp.planned_start_at::DATE <= :end_date
               AND pp.planned_end_at::DATE >= :start_date
@@ -413,8 +413,8 @@ class PostgresReportRepository:
                 ls.processed_quantity,
                 ls.defect_quantity,
                 ls.recorded_at
-            FROM line_status ls
-            JOIN production_lines pl
+            FROM public.line_status ls
+            JOIN public.production_lines pl
               ON ls.line_id = pl.line_id
             WHERE ls.recorded_at::DATE BETWEEN :start_date AND :end_date
             ORDER BY
@@ -458,10 +458,10 @@ class PostgresReportRepository:
                 ms.defect_quantity,
                 ms.status_note,
                 ms.recorded_at
-            FROM machine_statuses ms
-            JOIN production_machines pm
+            FROM public.machine_statuses ms
+            JOIN public.production_machines pm
               ON ms.machine_id = pm.machine_id
-            JOIN production_lines pl
+            JOIN public.production_lines pl
               ON pm.line_id = pl.line_id
             WHERE ms.recorded_at::DATE BETWEEN :start_date AND :end_date
             ORDER BY
