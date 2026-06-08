@@ -39,7 +39,7 @@ class ReportGenerationService:
                 reportJobId=request.report_job_id,
                 status=ReportStatus.FAILED,
                 title=None,
-                reportType=request.report_type.value,
+                reportType=self._format_response_report_type(request.report_type.value),
                 markdown=None,
                 sections=None,
                 evidence=[],
@@ -75,6 +75,11 @@ class ReportGenerationService:
             base_markdown=base_markdown,
         )
 
+        response_sections = self._build_response_sections(
+            sections=sections,
+            report_type=request.report_type.value,
+        )
+
         evidence = self._build_evidence()
 
         validation = ReportValidationResult(
@@ -87,9 +92,9 @@ class ReportGenerationService:
             reportJobId=request.report_job_id,
             status=ReportStatus.COMPLETED,
             title=title,
-            reportType=request.report_type.value,
+            reportType=self._format_response_report_type(request.report_type.value),
             markdown=markdown,
-            sections=sections,
+            sections=response_sections,
             evidence=evidence,
             validation=validation,
             errorMessage=None,
@@ -337,6 +342,369 @@ class ReportGenerationService:
                 "priority": self._build_final_comment(economic_analysis)
             },
         }
+
+    def _build_response_sections(
+        self,
+        *,
+        sections: dict[str, Any],
+        report_type: str,
+    ) -> dict[str, Any]:
+        response_sections = dict(sections)
+        response_sections.update(
+            {
+                "summaryRows": self._build_summary_rows(sections, report_type),
+                "lineRows": self._build_line_rows(sections),
+                "equipmentRows": self._build_equipment_rows(sections),
+                "analysis": self._build_frontend_analysis(sections),
+            }
+        )
+        return response_sections
+
+    def _build_summary_rows(
+        self,
+        sections: dict[str, Any],
+        report_type: str,
+    ) -> list[dict[str, str]]:
+        summary = sections.get("summary", {})
+        line_performance = sections.get("linePerformance", {})
+        machine_status = sections.get("machineStatus", {})
+
+        return [
+            {
+                "label": "보고서 기간",
+                "value": self._format_text(summary.get("period")),
+                "change": "-",
+            },
+            {
+                "label": "보고서 유형",
+                "value": self._format_report_type(report_type),
+                "change": "-",
+            },
+            {
+                "label": "총 주문 수",
+                "value": self._format_count(summary.get("totalOrderCount")),
+                "change": "-",
+            },
+            {
+                "label": "총 생산계획 수",
+                "value": self._format_count(summary.get("totalPlanCount")),
+                "change": "-",
+            },
+            {
+                "label": "납기 위험 주문 수",
+                "value": self._format_count(summary.get("delayRiskOrderCount")),
+                "change": "-",
+            },
+            {
+                "label": "자재 위험 품목 수",
+                "value": self._format_count(summary.get("materialRiskCount")),
+                "change": "-",
+            },
+            {
+                "label": "평균 라인 가동률",
+                "value": self._format_percentage(
+                    line_performance.get("avgLineUtilizationRate")
+                ),
+                "change": "-",
+            },
+            {
+                "label": "비정상 설비 상태 수",
+                "value": self._format_count(
+                    machine_status.get("abnormalMachineStatusCount")
+                ),
+                "change": "-",
+            },
+        ]
+
+    def _build_line_rows(
+        self,
+        sections: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        rows = sections.get("topLineStatuses", [])
+
+        return [
+            {
+                "line": self._format_named_resource(
+                    row.get("line_code"),
+                    row.get("line_name"),
+                ),
+                "utilization": self._format_percentage(row.get("utilization_rate")),
+                "completed": self._format_number(row.get("processed_quantity")),
+                "defectRate": self._format_rate(
+                    row.get("defect_quantity"),
+                    row.get("processed_quantity"),
+                ),
+                "note": self._format_operation_status(row.get("operation_status")),
+            }
+            for row in rows
+        ]
+
+    def _build_equipment_rows(
+        self,
+        sections: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        rows = sections.get("topMachineStatuses", [])
+
+        return [
+            {
+                "name": self._format_named_resource(
+                    row.get("machine_code"),
+                    row.get("machine_name"),
+                ),
+                "utilization": "-",
+                "downTime": "-",
+                "status": self._format_operation_status(row.get("operation_status")),
+            }
+            for row in rows
+        ]
+
+    def _build_frontend_analysis(
+        self,
+        sections: dict[str, Any],
+    ) -> dict[str, Any]:
+        summary = sections.get("summary", {})
+        analysis_sections = self._build_frontend_analysis_sections(sections)
+
+        return {
+            "overview": self._build_frontend_analysis_overview(summary),
+            "sections": analysis_sections,
+            "recommendation": self._format_text(
+                sections.get("recommendation", {}).get("priority")
+            ),
+        }
+
+    def _build_frontend_analysis_overview(
+        self,
+        summary: dict[str, Any],
+    ) -> str:
+        delay_risk_order_count = self._to_int(summary.get("delayRiskOrderCount", 0))
+        material_risk_count = self._to_int(summary.get("materialRiskCount", 0))
+        abnormal_machine_status_count = self._to_int(
+            summary.get("abnormalMachineStatusCount", 0)
+        )
+
+        if (
+            delay_risk_order_count == 0
+            and material_risk_count == 0
+            and abnormal_machine_status_count == 0
+        ):
+            return "보고서 기간 내 주요 납기, 자재, 설비 리스크는 확인되지 않았습니다."
+
+        return (
+            "보고서 기간 동안 "
+            f"납기 위험 주문 {delay_risk_order_count}건, "
+            f"자재 위험 품목 {material_risk_count}건, "
+            f"비정상 설비 상태 {abnormal_machine_status_count}건이 확인되었습니다."
+        )
+
+    def _build_frontend_analysis_sections(
+        self,
+        sections: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        analysis_sections = []
+
+        material_items = self._build_material_analysis_items(
+            sections.get("topMaterialShortages", [])
+        )
+        if material_items:
+            analysis_sections.append(
+                {
+                    "title": "자재 부족 분석",
+                    "items": material_items,
+                }
+            )
+
+        risk_items = self._build_delivery_risk_analysis_items(
+            sections.get("topRiskOrders", [])
+        )
+        if risk_items:
+            analysis_sections.append(
+                {
+                    "title": "납기 위험 분석",
+                    "items": risk_items,
+                }
+            )
+
+        status_items = self._build_operation_status_analysis_items(
+            sections.get("topLineStatuses", []),
+            sections.get("topMachineStatuses", []),
+        )
+        if status_items:
+            analysis_sections.append(
+                {
+                    "title": "라인 및 설비 상태 분석",
+                    "items": status_items,
+                }
+            )
+
+        economic_items = self._build_economic_analysis_items(
+            sections.get("economicAnalysis", {})
+        )
+        if economic_items:
+            analysis_sections.append(
+                {
+                    "title": "대응안 분석",
+                    "items": economic_items,
+                }
+            )
+
+        if analysis_sections:
+            return analysis_sections
+
+        return [
+            {
+                "title": "종합 분석",
+                "items": ["보고서 기간 내 추가 분석이 필요한 고위험 항목은 확인되지 않았습니다."],
+            }
+        ]
+
+    def _build_material_analysis_items(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[str]:
+        return [
+            (
+                f"{self._format_text(row.get('material_name'))} 자재는 "
+                f"계획 {self._format_text(row.get('plan_id'))}에서 "
+                f"{self._format_number(row.get('shortage_quantity'))} 부족이 확인되었습니다."
+            )
+            for row in rows
+        ]
+
+    def _build_delivery_risk_analysis_items(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[str]:
+        return [
+            (
+                f"주문 {self._format_text(row.get('order_id'))}는 "
+                f"{self._format_text(row.get('risk_level'))} 위험으로 분류되었고, "
+                f"예상 지연일은 {self._format_number(row.get('predicted_delay_days'))}일입니다."
+            )
+            for row in rows
+        ]
+
+    def _build_operation_status_analysis_items(
+        self,
+        line_rows: list[dict[str, Any]],
+        machine_rows: list[dict[str, Any]],
+    ) -> list[str]:
+        items = [
+            (
+                f"{self._format_named_resource(row.get('line_code'), row.get('line_name'))} "
+                f"라인 상태는 {self._format_operation_status(row.get('operation_status'))}이며, "
+                f"가동률은 {self._format_percentage(row.get('utilization_rate'))}입니다."
+            )
+            for row in line_rows
+        ]
+
+        items.extend(
+            (
+                f"{self._format_named_resource(row.get('machine_code'), row.get('machine_name'))} "
+                f"설비 상태는 {self._format_operation_status(row.get('operation_status'))}입니다."
+            )
+            for row in machine_rows
+        )
+
+        return items
+
+    def _build_economic_analysis_items(
+        self,
+        economic_analysis: dict[str, Any],
+    ) -> list[str]:
+        best_scenario = economic_analysis.get("bestScenario")
+
+        if not best_scenario:
+            return []
+
+        return [
+            (
+                f"{self._format_text(best_scenario.get('simulationName'))} 적용 시 "
+                f"총 지연 시간을 {self._format_number(best_scenario.get('delayReductionHr'))}시간 "
+                "감소시킬 수 있는 것으로 분석되었습니다."
+            )
+        ]
+
+    def _format_text(self, value: Any) -> str:
+        if value is None or value == "":
+            return "-"
+
+        return str(value)
+
+    def _format_report_type(self, report_type: str) -> str:
+        report_type_labels = {
+            "MONTHLY": "월간",
+            "AD_HOC": "수시",
+            "ON_DEMAND": "수시",
+        }
+
+        return report_type_labels.get(report_type, report_type)
+
+    def _format_response_report_type(self, report_type: str) -> str:
+        report_type_values = {
+            "AD_HOC": "ON_DEMAND",
+        }
+
+        return report_type_values.get(report_type, report_type)
+
+    def _format_count(self, value: Any) -> str:
+        return f"{self._to_int(value):,}"
+
+    def _format_number(self, value: Any) -> str:
+        if value is None:
+            return "-"
+
+        number = self._to_float(value)
+        if number.is_integer():
+            return f"{number:,.0f}"
+
+        return f"{number:,.2f}".rstrip("0").rstrip(".")
+
+    def _format_percentage(self, value: Any) -> str:
+        if value is None:
+            return "-"
+
+        percent = self._to_float(value)
+        if 0 <= percent <= 1:
+            percent *= 100
+
+        return f"{percent:.2f}".rstrip("0").rstrip(".") + "%"
+
+    def _format_rate(self, numerator: Any, denominator: Any) -> str:
+        if numerator is None or denominator is None:
+            return "-"
+
+        denominator_value = self._to_float(denominator)
+        if denominator_value <= 0:
+            return "-"
+
+        return self._format_percentage(self._to_float(numerator) / denominator_value)
+
+    def _format_named_resource(self, code: Any, name: Any) -> str:
+        code_text = self._format_text(code)
+        name_text = self._format_text(name)
+
+        if code_text == "-":
+            return name_text
+
+        if name_text == "-":
+            return code_text
+
+        return f"{code_text} {name_text}"
+
+    def _format_operation_status(self, status: Any) -> str:
+        status_text = self._format_text(status)
+        status_labels = {
+            "RUNNING": "정상",
+            "OPERATING": "정상",
+            "ACTIVE": "정상",
+            "DOWN": "비가동",
+            "ERROR": "비가동",
+            "STOPPED": "비가동",
+            "MAINTENANCE": "점검",
+        }
+
+        return status_labels.get(status_text, status_text)
 
     def _build_title(self, request: ReportGenerateRequest) -> str:
         if request.report_type.value == "MONTHLY":
