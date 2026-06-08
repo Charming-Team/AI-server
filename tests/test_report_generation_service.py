@@ -112,6 +112,52 @@ def test_report_generation_adds_frontend_table_sections_inside_sections() -> Non
     assert sections["analysis"]["recommendation"].startswith("납기 위험 주문")
 
 
+def test_report_generation_keeps_frontend_table_rows_when_source_rows_are_empty() -> None:
+    service = ReportGenerationService()
+    service.rdb_data_collection_agent = FakeRdbDataCollectionAgent({})
+    service.llm_report_writing_agent = FakeLlmReportWritingAgent()
+
+    response = service.generate_report(
+        ReportGenerateRequest(
+            reportJobId=2,
+            requestedBy=100,
+            userRole="PRODUCTION_MANAGER",
+            reportType="AD_HOC",
+            period={
+                "startDate": date(2026, 6, 1),
+                "endDate": date(2026, 6, 1),
+            },
+        )
+    )
+
+    sections = response.model_dump(by_alias=True)["sections"]
+
+    assert len(sections["summaryRows"]) >= 8
+    assert sections["lineRows"] == [
+        {
+            "line": "확인 필요",
+            "utilization": "-",
+            "completed": "-",
+            "defectRate": "-",
+            "note": "확인 필요",
+        }
+    ]
+    assert sections["equipmentRows"] == [
+        {
+            "name": "확인 필요",
+            "utilization": "-",
+            "downTime": "-",
+            "status": "확인 필요",
+        }
+    ]
+    assert sections["analysis"]["sections"] == [
+        {
+            "title": "종합 분석",
+            "items": ["보고서 기간 내 추가 분석이 필요한 고위험 항목은 확인되지 않았습니다."],
+        }
+    ]
+
+
 def _build_raw_data() -> dict[str, Any]:
     return {
         "order_summary": {

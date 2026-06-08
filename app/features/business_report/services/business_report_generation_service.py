@@ -58,10 +58,12 @@ class BusinessReportGenerationService:
                 },
             ) from error
 
-        transformed_payload = self._parse_llm_json(transformed_text)
         current_timestamp = datetime.now(UTC)
-        transformed_payload["created_at"] = current_timestamp.isoformat().replace("+00:00", "Z")
-        transformed_payload["updated_at"] = current_timestamp.isoformat().replace("+00:00", "Z")
+        transformed_payload = self._build_response_payload(
+            source=source,
+            llm_payload=self._parse_llm_json(transformed_text),
+            current_timestamp=current_timestamp,
+        )
         return BusinessReportGenerateResponse.model_validate(transformed_payload)
 
     def _validate_source(self, source: BusinessReportSource) -> None:
@@ -110,6 +112,57 @@ class BusinessReportGenerationService:
                 },
             )
         return payload
+
+    def _build_response_payload(
+        self,
+        *,
+        source: BusinessReportSource,
+        llm_payload: dict[str, Any],
+        current_timestamp: datetime,
+    ) -> dict[str, Any]:
+        timestamp = current_timestamp.isoformat().replace("+00:00", "Z")
+        report_content = llm_payload.get("report_content")
+
+        if not isinstance(report_content, dict):
+            report_content = source.report_content
+
+        return {
+            "report_id": source.report_id,
+            "report_type": self._build_business_report_type(source.report_type),
+            "report_title": self._build_business_report_title(source),
+            "author_id": source.author_id,
+            "target_start_date": source.target_start_date.isoformat(),
+            "target_end_date": source.target_end_date.isoformat(),
+            "report_content": report_content,
+            "report_evidence": source.report_evidence,
+            "related_simulation_id": source.related_simulation_id,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+
+    def _build_business_report_type(
+        self,
+        source_report_type: str,
+    ) -> str:
+        report_type_map = {
+            "ON_DEMAND": "ON_DEMAND_BUSINESS",
+            "MONTHLY": "MONTHLY_BUSINESS",
+        }
+
+        return report_type_map[source_report_type]
+
+    def _build_business_report_title(
+        self,
+        source: BusinessReportSource,
+    ) -> str:
+        if source.report_type == "MONTHLY":
+            period = source.target_start_date.strftime("%Y년 %m월")
+            return f"[{period}] 생산계획 월간 비즈니스 보고서"
+
+        return (
+            f"[{source.target_start_date.isoformat()} ~ "
+            f"{source.target_end_date.isoformat()}] 생산계획 리스크 비즈니스 보고서"
+        )
 
     def _strip_code_fence(self, answer: str) -> str:
         stripped = answer.strip()
