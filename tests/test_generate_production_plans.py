@@ -13,6 +13,7 @@ from app.features.production_planning.exceptions import (
 from app.features.production_planning.plan_comparator import compare_plans
 from app.features.production_planning.production_planning_node import (
     build_adjusted_planning_request_from_bundle,
+    generate_adjusted_production_plan_api_response,
     generate_adjusted_production_plan_dashboard_response,
     generate_production_plans,
 )
@@ -384,7 +385,6 @@ def test_adjusted_dashboard_response_runs_db_langgraph_formatter_pipeline(
 
     assert response["data_sources"] == {
         "baseline": "DB_CURRENT_PLAN",
-        "historical_simulation": "DB_SIMULATION_HISTORY_REFERENCE",
         "alternative": "CP_SAT_AND_SIMULATION",
     }
     assert response["planning_window"] == {
@@ -404,6 +404,32 @@ def test_adjusted_dashboard_response_runs_db_langgraph_formatter_pipeline(
     }.issubset(response["alternatives"][0])
     assert "llm_evidence" not in response["alternatives"][0]
     assert "llm_prompts" not in response["alternatives"][0]
+
+
+def test_adjusted_api_response_returns_planning_and_simulation_payloads(
+    monkeypatch,
+) -> None:
+    start = datetime(2026, 5, 22, 9, tzinfo=UTC)
+    adjustment = ProductionPlanningAdjustmentRequest(
+        planning_start=start,
+        planning_end=start + timedelta(hours=4),
+    )
+
+    def fake_load_planning_bundle(self, *args, **kwargs):
+        return _planning_bundle_for_adjustment()
+
+    monkeypatch.setattr(
+        PlanningDataRepository,
+        "load_planning_input_bundle",
+        fake_load_planning_bundle,
+    )
+
+    response = generate_adjusted_production_plan_api_response(adjustment)
+
+    assert set(response) == {"planning_response", "simulation_response"}
+    assert "adjusted_plan_candidates" in response["planning_response"]
+    assert response["simulation_response"]["baseline"]["source"] == "DB_CURRENT_PLAN"
+    assert len(response["simulation_response"]["alternatives"]) == 2
 
 
 def test_adjustment_duplicate_add_orders_fail_validation() -> None:
