@@ -4,6 +4,7 @@ from app.features.report.schemas.request import ReportGenerateRequest
 from app.features.report.schemas.response import (
     ReportDetailResponse,
     ReportGenerateResponse,
+    ReportIncludedItemsBackfillResponse,
     ReportListResponse,
 )
 from app.features.report.services.report_generation_service import ReportGenerationService
@@ -41,6 +42,29 @@ def get_reports(
         limit=limit,
         offset=offset,
         report_type=report_type,
+    )
+
+
+@router.post(
+    "/{report_id}/included-items/backfill",
+    response_model=ReportIncludedItemsBackfillResponse,
+)
+def backfill_report_included_items(
+    report_id: int,
+) -> ReportIncludedItemsBackfillResponse:
+    try:
+        report = report_query_service.get_report_detail(report_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    sections = report_generation_service.build_sections_for_period(
+        start_date=report.target_start_date,
+        end_date=report.target_end_date,
+        report_type=report.report_type,
+    )
+    return ReportIncludedItemsBackfillResponse(
+        reportId=report_id,
+        sections=sections,
     )
 
 

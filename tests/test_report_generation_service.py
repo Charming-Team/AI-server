@@ -94,8 +94,8 @@ def test_report_generation_adds_frontend_table_sections_inside_sections() -> Non
     assert sections["equipmentRows"] == [
         {
             "name": "EXT-1 압출기",
-            "utilization": "-",
-            "downTime": "-",
+            "utilization": "확인 필요",
+            "downTime": "확인 필요",
             "status": "정상",
         }
     ]
@@ -133,6 +133,21 @@ def test_report_generation_keeps_frontend_table_rows_when_source_rows_are_empty(
     sections = response.model_dump(by_alias=True)["sections"]
 
     assert len(sections["summaryRows"]) >= 8
+    assert [row["label"] for row in sections["summaryRows"]] == [
+        "보고서 기간",
+        "보고서 유형",
+        "총 주문 수",
+        "총 생산계획 수",
+        "총 생산 계획 수량",
+        "총 생산 완료 수량",
+        "생산 계획 대비 실적",
+        "라인 가동률",
+        "불량 수량",
+        "불량률",
+        "납기 위험 주문 수",
+        "자재 위험 품목 수",
+        "비정상 설비 상태 수",
+    ]
     assert sections["lineRows"] == [
         {
             "line": "확인 필요",
@@ -145,17 +160,19 @@ def test_report_generation_keeps_frontend_table_rows_when_source_rows_are_empty(
     assert sections["equipmentRows"] == [
         {
             "name": "확인 필요",
-            "utilization": "-",
-            "downTime": "-",
+            "utilization": "확인 필요",
+            "downTime": "확인 필요",
             "status": "확인 필요",
         }
     ]
     assert sections["analysis"]["sections"] == [
         {
             "title": "종합 분석",
-            "items": ["보고서 기간 내 추가 분석이 필요한 고위험 항목은 확인되지 않았습니다."],
+            "items": ["분석 내용이 없습니다."],
         }
     ]
+    assert sections["analysis"]["overview"] == "분석 내용이 없습니다."
+    assert sections["analysis"]["recommendation"] == "생성 필요"
 
 
 def _build_raw_data() -> dict[str, Any]:

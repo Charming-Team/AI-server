@@ -11,9 +11,9 @@ class BusinessReportSource(BaseModel):
     author_id: int
     target_start_date: date
     target_end_date: date
+    included_items: Any = None
     report_content: Any
     report_evidence: Any = None
     related_simulation_id: int | None = None
     created_at: datetime
     updated_at: datetime
-
