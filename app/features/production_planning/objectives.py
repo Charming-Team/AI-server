@@ -1081,7 +1081,6 @@ def apply_amount_objective(
 
     Methodology:
         - Maximize protected contract amount by minimizing unscheduled contract amount.
-        - Minimize delayed order count as the primary due-date guard (weighted above changeover terms).
         - Minimize late penalties, cleaning/setup time, line change cost, and product changes.
         - Keep due dates soft through total tardiness penalties.
         - Weight hierarchy: unscheduled(10^9·amount) > delayed_count(10^10) >
