@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     prompt_max_document_sources: int = Field(default=2, ge=0, le=20)
     prompt_max_summary_chars: int = Field(default=280, ge=1, le=2_000)
     prompt_max_total_chars: int = Field(default=3_000, ge=1_000, le=20_000)
+    langsmith_tracing: bool = False
+    langsmith_api_key: str | None = None
+    langsmith_project: str = "s-map-production-planning"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_trace_payloads: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -117,6 +122,27 @@ class Settings(BaseSettings):
         if value is None:
             return []
         return cls._parse_string_list(value, field_label="LLM_ALLOWED_MODELS")
+
+    @field_validator(
+        "chat_answer_internal_token",
+        "chat_recommendation_internal_token",
+        "evidence_lookup_internal_token",
+        "rdb_evidence_dsn",
+        "report_rdb_dsn",
+        "planning_rdb_dsn",
+        "qdrant_api_key",
+        "document_index_internal_token",
+        "embedding_api_key",
+        "llm_api_key",
+        "openai_api_key",
+        "langsmith_api_key",
+        mode="before",
+    )
+    @classmethod
+    def empty_secret_value_to_none(cls, value: str | None) -> str | None:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @staticmethod
     def _parse_string_list(value: str | list[str], field_label: str) -> list[str]:
