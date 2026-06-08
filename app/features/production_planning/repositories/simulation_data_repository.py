@@ -41,7 +41,7 @@ class SimulationInputBundle:
 @dataclass
 class BaselineSimulationSnapshot:
     """
-    Current DB plan and simulation rows used as dashboard comparison baseline.
+    Current DB plan rows used as dashboard baseline plus simulation history context.
     """
 
     current_plan_rows: list[dict[str, Any]]
@@ -156,8 +156,8 @@ class SimulationDataRepository:
 
         Methodology:
             - Read current production plans overlapping the requested window from the DB view.
-            - Read persisted simulation result/detail history for baseline comparison.
-            - Keep simulation rows schema-flexible because the history view is owned by DB.
+            - Read current production plans overlapping the requested window as baseline.
+            - Read persisted simulation result/detail history only as historical context.
 
         Output:
             - BaselineSimulationSnapshot consumed by the JSON formatter.
@@ -167,6 +167,9 @@ class SimulationDataRepository:
             with planning_engine.connect() as conn:
                 simulation_result_rows = self._get_latest_baseline_simulation_result_rows(
                     conn,
+                    planning_start,
+                    planning_end,
+                    warnings,
                 )
                 baseline_simulation_id = (
                     simulation_result_rows[0].get("simulation_id")
@@ -203,8 +206,51 @@ class SimulationDataRepository:
     def _get_latest_baseline_simulation_result_rows(
         self,
         conn: Connection,
+        planning_start: datetime,
+        planning_end: datetime,
+        warnings: list[str],
     ) -> list[dict[str, Any]]:
         query = text(
+            """
+            SELECT result_row.*
+            FROM ai_planning.v_schedule_simulation_results_history_for_sampling AS result_row
+            WHERE EXISTS (
+                SELECT 1
+                FROM ai_planning.v_schedule_simulation_details_history_for_sampling AS detail_row
+                WHERE detail_row.simulation_id = result_row.simulation_id
+                  AND COALESCE(
+                        detail_row.after_end_at,
+                        detail_row.before_end_at,
+                        detail_row.expected_completion_date
+                      ) > :planning_start
+                  AND COALESCE(
+                        detail_row.after_start_at,
+                        detail_row.before_start_at,
+                        detail_row.expected_completion_date
+                      ) < :planning_end
+            )
+            ORDER BY COALESCE(result_row.applied_at, result_row.created_at) DESC NULLS LAST,
+                     result_row.simulation_id DESC NULLS LAST
+            LIMIT 1
+            """
+        )
+        rows = self._execute_auxiliary_query(
+            conn,
+            query,
+            "ai_planning.v_schedule_simulation_results_history_for_sampling",
+            {
+                "planning_start": planning_start,
+                "planning_end": planning_end,
+            },
+        )
+        if rows:
+            return rows
+
+        warnings.append(
+            "No baseline simulation result overlaps the planning window; "
+            "falling back to latest result."
+        )
+        fallback_query = text(
             """
             SELECT *
             FROM ai_planning.v_schedule_simulation_results_history_for_sampling
@@ -215,7 +261,7 @@ class SimulationDataRepository:
         )
         return self._execute_auxiliary_query(
             conn,
-            query,
+            fallback_query,
             "ai_planning.v_schedule_simulation_results_history_for_sampling",
         )
 
@@ -282,11 +328,58 @@ class SimulationDataRepository:
     ) -> list[dict[str, Any]]:
         query = text(
             """
-            SELECT *
-            FROM ai_planning.v_existing_schedules_for_planning
-            WHERE end_time > :planning_start
-              AND start_time < :planning_end
-            ORDER BY start_time, schedule_id
+            WITH current_plans AS (
+                SELECT *
+                FROM ai_planning.v_existing_schedules_for_planning
+                WHERE end_time > :planning_start
+                  AND start_time < :planning_end
+            ),
+            all_orders AS (
+                SELECT
+                    1 AS source_priority,
+                    order_id,
+                    product_id,
+                    order_quantity,
+                    due_date,
+                    contract_amount,
+                    late_penalty_amount,
+                    order_status
+                FROM ai_planning.v_orders_for_planning
+                UNION ALL
+                SELECT
+                    2 AS source_priority,
+                    order_id,
+                    product_id,
+                    order_quantity,
+                    due_date,
+                    contract_amount,
+                    late_penalty_amount,
+                    order_status
+                FROM ai_planning.v_orders_history_for_sampling
+            ),
+            order_data AS (
+                SELECT DISTINCT ON (order_id)
+                    order_id,
+                    product_id AS order_product_id,
+                    order_quantity,
+                    due_date,
+                    contract_amount,
+                    late_penalty_amount,
+                    order_status
+                FROM all_orders
+                ORDER BY order_id, source_priority
+            )
+            SELECT
+                current_plans.*,
+                order_data.order_quantity,
+                order_data.due_date,
+                order_data.contract_amount,
+                order_data.late_penalty_amount,
+                order_data.order_status
+            FROM current_plans
+            LEFT JOIN order_data
+              ON order_data.order_id = current_plans.order_id
+            ORDER BY current_plans.start_time, current_plans.schedule_id
             """
         )
         try:
