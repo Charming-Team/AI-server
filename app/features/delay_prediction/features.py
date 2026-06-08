@@ -5,13 +5,11 @@ FEATURE_COLUMNS = [
     "due_gap_days",
     "product_id",
     "average_yield_rate",
-    "line_count",
     "estimated_duration_hr_sum",
-    "plan_sequence_max",
     "plan_overdue_days_max",
+    "overdue_plan_ratio",
     "waiting_time_hr_avg",
     "utilization_rate_avg",
-    "shortage_ratio",
 ]
 
 CATEGORICAL_COLUMNS = ["product_id"]
