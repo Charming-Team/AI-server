@@ -813,7 +813,7 @@ def _generate_amount_plan(
         and hard_plan.metrics.scheduled_count >= soft_plan.metrics.scheduled_count
     ):
         hard_plan.warnings.append(
-            "AMOUNT_OPTIMAL used HARD due-date constraints without reducing scheduled count."
+            "AMOUNT_OPTIMAL enforced HARD due dates without reducing scheduled count."
         )
         return hard_plan
 
