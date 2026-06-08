@@ -471,27 +471,18 @@ def format_dashboard_response_node(
     validated = state["validated_request"]
     simulation_input = state.get("simulation_input")
     settings = get_settings()
+    baseline_inputs, baseline_warnings = _load_dashboard_baseline_inputs(
+        validated,
+        simulation_input,
+    )
     dashboard_response = build_dashboard_response(
         state["result"],
-        baseline_plans=[
-            schedule.model_dump(mode="python")
-            for schedule in validated.existing_schedules
+        baseline_plans=baseline_inputs["baseline_plans"],
+        baseline_simulation_rows=baseline_inputs["baseline_simulation_rows"],
+        baseline_simulation_detail_rows=baseline_inputs[
+            "baseline_simulation_detail_rows"
         ],
-        baseline_simulation_rows=(
-            simulation_input.simulation_results_history
-            if simulation_input is not None
-            else []
-        ),
-        baseline_simulation_detail_rows=(
-            simulation_input.simulation_details_history
-            if simulation_input is not None
-            else []
-        ),
-        baseline_prediction_rows=(
-            simulation_input.ai_prediction_results
-            if simulation_input is not None
-            else []
-        ),
+        baseline_prediction_rows=baseline_inputs["baseline_prediction_rows"],
         products=validated.products,
         production_lines=validated.production_lines,
         product_line_capabilities=validated.product_line_capabilities,
@@ -500,6 +491,7 @@ def format_dashboard_response_node(
         enable_llm_evaluation=True,
         settings=settings,
     )
+    dashboard_response["warnings"].extend(baseline_warnings)
     result = state["result"].model_copy(
         update={"dashboard_response": dashboard_response}
     )
@@ -507,6 +499,64 @@ def format_dashboard_response_node(
         "dashboard_response": dashboard_response,
         "result": result,
     }
+
+
+def _load_dashboard_baseline_inputs(
+    validated: ProductionPlanningRequest,
+    simulation_input: SimulationInputBundle | None,
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    """
+    Parameters:
+        - validated: Validated planning request from the graph state.
+        - simulation_input: Sampling/history bundle loaded earlier in the graph.
+
+    Methodology:
+        - Prefer the DB current-plan snapshot so dashboard baseline KPIs are calculated from
+          current production plans joined with order due dates, quantities, and penalties.
+        - Keep simulation result/detail history as historical context only.
+        - Fall back to in-request existing schedules when the graph is used without DB access.
+
+    Output:
+        - Tuple of formatter baseline input rows and non-fatal warning messages.
+    """
+    fallback = {
+        "baseline_plans": [
+            schedule.model_dump(mode="python")
+            for schedule in validated.existing_schedules
+        ],
+        "baseline_simulation_rows": (
+            simulation_input.simulation_results_history
+            if simulation_input is not None
+            else []
+        ),
+        "baseline_simulation_detail_rows": (
+            simulation_input.simulation_details_history
+            if simulation_input is not None
+            else []
+        ),
+        "baseline_prediction_rows": (
+            simulation_input.ai_prediction_results
+            if simulation_input is not None
+            else []
+        ),
+    }
+    if simulation_input is None:
+        return fallback, []
+
+    try:
+        snapshot = SimulationDataRepository().load_baseline_simulation_snapshot(
+            validated.planning_start,
+            validated.planning_end,
+        )
+    except PlanningDataAccessError as exc:
+        return fallback, [f"Dashboard baseline DB snapshot fallback used: {exc}"]
+
+    return {
+        "baseline_plans": snapshot.current_plan_rows,
+        "baseline_simulation_rows": snapshot.simulation_result_rows,
+        "baseline_simulation_detail_rows": snapshot.simulation_detail_rows,
+        "baseline_prediction_rows": snapshot.ai_prediction_result_rows,
+    }, snapshot.warnings
 
 
 def _build_adjusted_plan_candidates(

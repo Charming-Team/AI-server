@@ -954,6 +954,43 @@ def build_historical_applied_result(
         - Historical after-state metadata and order-level details.
     """
     return {
+        "simulation_result": {
+            "simulation_id": _id_or_none(_first_present(row, ["simulation_id"])),
+            "simulation_group_id": _first_present(row, ["simulation_group_id"]),
+            "simulation_name": _first_present(row, ["simulation_name"]),
+            "simulation_type": _first_present(row, ["simulation_type"]),
+            "before_total_delay_hr": _decimal_to_raw_float(
+                _to_decimal(_first_present(row, ["before_total_delay_hr"]))
+            ),
+            "after_total_delay_hr": _decimal_to_raw_float(
+                _to_decimal(_first_present(row, ["after_total_delay_hr"]))
+            ),
+            "delay_reduction_hr": _decimal_to_raw_float(
+                _to_decimal(_first_present(row, ["delay_reduction_hr"]))
+            ),
+            "before_avg_line_utilization_rate": _decimal_to_raw_float(
+                _to_decimal(_first_present(row, ["before_avg_line_utilization_rate"]))
+            ),
+            "after_avg_line_utilization_rate": _decimal_to_raw_float(
+                _to_decimal(_first_present(row, ["after_avg_line_utilization_rate"]))
+            ),
+            "before_total_production_quantity": _first_present(
+                row, ["before_total_production_quantity"]
+            ),
+            "after_total_production_quantity": _first_present(
+                row, ["after_total_production_quantity"]
+            ),
+            "before_bottleneck_line_id": _id_or_none(
+                _first_present(row, ["before_bottleneck_line_id"])
+            ),
+            "after_bottleneck_line_id": _id_or_none(
+                _first_present(row, ["after_bottleneck_line_id"])
+            ),
+            "cost_change_amount": _money_or_none(_first_present(row, ["cost_change_amount"])),
+            "recommendation_grade": _first_present(row, ["recommendation_grade"]),
+            "created_at": _iso_or_none(_first_present(row, ["created_at"])),
+            "applied_at": _iso_or_none(_first_present(row, ["applied_at"])),
+        },
         "after_total_delay_hr": _decimal_to_float(
             _to_decimal(_first_present(row, ["after_total_delay_hr"]))
         ),
@@ -972,12 +1009,21 @@ def build_historical_applied_result(
         "action_result": _first_present(row, ["action_result"]),
         "details": [
             {
+                "simulation_id": _id_or_none(_first_present(detail, ["simulation_id"])),
                 "order_id": _id_or_none(_first_present(detail, ["order_id"])),
                 "plan_id": _id_or_none(_first_present(detail, ["plan_id"])),
+                "before_line_id": _id_or_none(_first_present(detail, ["before_line_id"])),
                 "after_line_id": _id_or_none(_first_present(detail, ["after_line_id"])),
+                "before_sequence": _first_present(detail, ["before_sequence"]),
                 "after_sequence": _first_present(detail, ["after_sequence"]),
+                "before_start_at": _iso_or_none(_first_present(detail, ["before_start_at"])),
+                "before_end_at": _iso_or_none(_first_present(detail, ["before_end_at"])),
                 "after_start_at": _iso_or_none(_first_present(detail, ["after_start_at"])),
                 "after_end_at": _iso_or_none(_first_present(detail, ["after_end_at"])),
+                "expected_completion_date": _iso_or_none(
+                    _first_present(detail, ["expected_completion_date"])
+                ),
+                "before_quantity": _first_present(detail, ["before_quantity"]),
                 "after_quantity": _first_present(detail, ["after_quantity"]),
                 "after_is_delayed": _first_present(detail, ["after_is_delayed"]),
                 "change_reason": _first_present(detail, ["change_reason"]),
@@ -2853,6 +2899,12 @@ def _decimal_to_float(value: Decimal | None) -> float | None:
     if value is None:
         return None
     return _round_decimal(value)
+
+
+def _decimal_to_raw_float(value: Decimal | None) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _is_important_summary_event(row: dict[str, Any], event_name: str) -> bool:
