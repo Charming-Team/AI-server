@@ -19,6 +19,7 @@ class DueDateOptimizationConfig(BaseModel):
 class CostOptimizationConfig(BaseModel):
     unscheduled_contract_amount_weight: int = 1_000_000_000
     late_penalty_amount_weight: int = 100_000_000
+    delayed_order_count_weight: int = 10_000_000_000
     total_cleaning_cost_weight: int = 1_000_000
     line_change_cost_weight: int = 1_000_000
     different_product_sequence_count_weight: int = 1_000_000
