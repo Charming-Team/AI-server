@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -46,6 +47,27 @@ class ReportGenerationService:
                 validation=validation,
                 errorMessage=str(error),
             )
+
+    def build_sections_for_period(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        report_type: str,
+    ) -> dict[str, Any]:
+        raw_data = self.rdb_data_collection_agent.repository.fetch_report_source_data(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        period_text = f"{start_date} ~ {end_date}"
+        sections = self._build_sections(
+            period_text=period_text,
+            raw_data=raw_data,
+        )
+        return self._build_response_sections(
+            sections=sections,
+            report_type=report_type,
+        )
 
     def _build_response_from_state(
         self,
@@ -391,6 +413,38 @@ class ReportGenerationService:
                 "change": "-",
             },
             {
+                "label": "총 생산 계획 수량",
+                "value": self._format_number(summary.get("totalPlannedQuantity")),
+                "change": "-",
+            },
+            {
+                "label": "총 생산 완료 수량",
+                "value": self._format_number(summary.get("totalCompletedQuantity")),
+                "change": "-",
+            },
+            {
+                "label": "생산 계획 대비 실적",
+                "value": self._format_percentage(summary.get("achievementRate")),
+                "change": "-",
+            },
+            {
+                "label": "라인 가동률",
+                "value": self._format_percentage(
+                    line_performance.get("avgLineUtilizationRate")
+                ),
+                "change": "-",
+            },
+            {
+                "label": "불량 수량",
+                "value": self._format_number(summary.get("defectQuantity")),
+                "change": "-",
+            },
+            {
+                "label": "불량률",
+                "value": self._format_percentage(summary.get("defectRate")),
+                "change": "-",
+            },
+            {
                 "label": "납기 위험 주문 수",
                 "value": self._format_count(summary.get("delayRiskOrderCount")),
                 "change": "-",
@@ -398,13 +452,6 @@ class ReportGenerationService:
             {
                 "label": "자재 위험 품목 수",
                 "value": self._format_count(summary.get("materialRiskCount")),
-                "change": "-",
-            },
-            {
-                "label": "평균 라인 가동률",
-                "value": self._format_percentage(
-                    line_performance.get("avgLineUtilizationRate")
-                ),
                 "change": "-",
             },
             {
@@ -460,8 +507,8 @@ class ReportGenerationService:
             return [
                 {
                     "name": "확인 필요",
-                    "utilization": "-",
-                    "downTime": "-",
+                    "utilization": "확인 필요",
+                    "downTime": "확인 필요",
                     "status": "확인 필요",
                 }
             ]
@@ -472,8 +519,8 @@ class ReportGenerationService:
                     row.get("machine_code"),
                     row.get("machine_name"),
                 ),
-                "utilization": "-",
-                "downTime": "-",
+                "utilization": "확인 필요",
+                "downTime": "확인 필요",
                 "status": self._format_operation_status(row.get("operation_status")),
             }
             for row in rows
@@ -485,6 +532,13 @@ class ReportGenerationService:
     ) -> dict[str, Any]:
         summary = sections.get("summary", {})
         analysis_sections = self._build_frontend_analysis_sections(sections)
+
+        if self._is_fallback_analysis_sections(analysis_sections):
+            return {
+                "overview": "분석 내용이 없습니다.",
+                "sections": analysis_sections,
+                "recommendation": "생성 필요",
+            }
 
         return {
             "overview": self._build_frontend_analysis_overview(summary),
@@ -575,7 +629,18 @@ class ReportGenerationService:
         return [
             {
                 "title": "종합 분석",
-                "items": ["보고서 기간 내 추가 분석이 필요한 고위험 항목은 확인되지 않았습니다."],
+                "items": ["분석 내용이 없습니다."],
+            }
+        ]
+
+    def _is_fallback_analysis_sections(
+        self,
+        analysis_sections: list[dict[str, Any]],
+    ) -> bool:
+        return analysis_sections == [
+            {
+                "title": "종합 분석",
+                "items": ["분석 내용이 없습니다."],
             }
         ]
 

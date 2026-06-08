@@ -424,6 +424,7 @@ class PostgresReportRepository:
                     ) THEN 1
                     ELSE 2
                 END,
+                ls.recorded_at DESC,
                 ls.waiting_time_hr DESC,
                 ls.utilization_rate DESC
             LIMIT 5
@@ -470,6 +471,7 @@ class PostgresReportRepository:
                     ) THEN 1
                     ELSE 2
                 END,
+                ms.recorded_at DESC,
                 ms.defect_quantity DESC,
                 ms.processed_quantity DESC
             LIMIT 5

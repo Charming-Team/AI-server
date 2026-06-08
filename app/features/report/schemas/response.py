@@ -48,6 +48,15 @@ class ReportGenerateResponse(BaseModel):
         populate_by_name = True
 
 
+class ReportIncludedItemsBackfillResponse(BaseModel):
+    report_id: int = Field(..., alias="reportId")
+    sections: dict[str, Any]
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
 class ReportListItemResponse(BaseModel):
     report_id: int = Field(..., alias="reportId")
     report_type: str = Field(..., alias="reportType")
