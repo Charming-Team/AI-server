@@ -383,7 +383,8 @@ def test_adjusted_dashboard_response_runs_db_langgraph_formatter_pipeline(
     response = generate_adjusted_production_plan_dashboard_response(adjustment)
 
     assert response["data_sources"] == {
-        "baseline": "DB_CURRENT_PLAN_AND_SIMULATION",
+        "baseline": "DB_CURRENT_PLAN",
+        "historical_simulation": "DB_SIMULATION_HISTORY_REFERENCE",
         "alternative": "CP_SAT_AND_SIMULATION",
     }
     assert response["planning_window"] == {

@@ -178,9 +178,21 @@ def _planning_result() -> ProductionPlanningResult:
     )
 
 
+def test_adjusted_plan_response_serializes_numeric_public_ids() -> None:
+    response = _planning_result().to_adjusted_plan_response()
+    row = response["adjusted_plan_candidates"][0]["plans"][0]
+
+    assert row["order_id"] == 1
+    assert row["product_id"] == 1
+    assert row["line_id"] == 1
+
+
 def test_dashboard_response_computes_deltas_and_filters_important_events() -> None:
+    result = _planning_result().model_copy(
+        update={"warnings": ["Skipped capacity for order PLAN-1."]}
+    )
     response = build_dashboard_response(
-        _planning_result(),
+        result,
         include_full_event_timeline=True,
         include_internal_debug_payloads=True,
         baseline_plans=[
@@ -191,6 +203,9 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
                 "line_id": 1,
                 "start_time": datetime(2026, 5, 1, 9, tzinfo=UTC),
                 "end_time": datetime(2026, 5, 1, 10, tzinfo=UTC),
+                "due_date": datetime(2026, 5, 1, 9, tzinfo=UTC),
+                "order_quantity": 100,
+                "late_penalty_amount": 1_000_000,
                 "plan_status": "SCHEDULED",
             }
         ],
@@ -209,9 +224,14 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
     alternative = response["alternatives"][0]
 
     assert response["baseline"]["plans"][0]["plan_id"] == 10
-    assert alternative["computed_deltas"]["delay_probability_reduction_percent"] == 50.0
-    assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == 3.0
-    assert alternative["computed_deltas"]["p95_tardiness_reduction_minutes"] == 600.0
+    assert response["warnings"] == ["Skipped capacity for order 1."]
+    assert alternative["plans"][0]["order_id"] == 1
+    assert alternative["plans"][0]["product_id"] == 1
+    assert alternative["plans"][0]["line_id"] == 1
+    assert response["baseline"]["source"] == "DB_CURRENT_PLAN"
+    assert alternative["computed_deltas"]["delay_probability_reduction_percent"] is None
+    assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == -1.0
+    assert alternative["computed_deltas"]["p95_tardiness_reduction_minutes"] == -340.0
     assert alternative["computed_deltas"]["risk_cost_saving_amount"] == "400000.00"
     assert alternative["computed_deltas"]["risk_cost_saving_percent"] == 40.0
     assert {event["event"] for event in alternative["important_events"]} == {
@@ -219,6 +239,7 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
     }
     assert alternative["full_event_timeline_included"] is True
     assert alternative["event_timeline"][0]["event_time"] == "2026-05-01T10:00:00+00:00"
+    assert alternative["event_timeline"][0]["order_id"] == 1
     assert "evaluation_draft" in alternative["llm_prompts"]
     assert "json_normalization_template" in alternative["llm_prompts"]
     json.dumps(response, ensure_ascii=False)
@@ -235,7 +256,11 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
                 "product_id": 1,
                 "line_id": 1,
                 "start_time": start,
-                "end_time": start + timedelta(hours=1),
+                "end_time": start + timedelta(days=2),
+                "due_date": start,
+                "order_quantity": 100,
+                "late_penalty_amount": Decimal("620000.00"),
+                "plan_sequence": 3,
                 "plan_status": "SCHEDULED",
             }
         ],
@@ -295,6 +320,8 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
         product_line_capabilities=[
             {"product_id": 1, "line_id": 1},
         ],
+        planning_start=start,
+        planning_end=start + timedelta(days=3),
     )
 
     baseline = response["baseline"]
@@ -303,8 +330,10 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
     assert baseline["current_state_summary"]["expected_delay_days"] == 2.0
     assert baseline["current_state_summary"]["delay_risk_order_count"] == 1
     assert baseline["current_state_summary"]["delivery_fulfillment_rate_percent"] == 0.0
-    assert baseline["current_state_summary"]["avg_line_utilization_percent"] == 72.0
-    assert baseline["provenance"]["historical_action_cost_change_amount"] == "620000.00"
+    assert baseline["current_state_summary"]["avg_line_utilization_percent"] == 66.67
+    assert baseline["provenance"]["source"] == (
+        "ai_planning.v_existing_schedules_for_planning"
+    )
     assert baseline["historical_applied_result"]["details"][0]["after_line_id"] == 2
     assert alternative["computed_deltas"]["expected_delay_days_reduction"] == 1.83
     assert "expected_delay_days" in {
@@ -316,6 +345,81 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
     assert alternative["selected_plan_change_schedule"][0]["order_id"] == 1
     assert alternative["selected_plan_change_schedule"][0]["sequence_change"] == "3 -> 1"
     assert alternative["application_conditions"]["target_products"][0]["product_id"] == 1
+
+
+def test_dashboard_response_matches_change_schedule_by_plan_id_when_order_id_differs() -> None:
+    start = datetime(2026, 5, 1, 9, tzinfo=UTC)
+    response = build_dashboard_response(
+        _planning_result(),
+        baseline_plans=[
+            {
+                "schedule_id": 1,
+                "order_id": 999,
+                "product_id": 1,
+                "line_id": 2,
+                "start_time": start + timedelta(hours=2),
+                "end_time": start + timedelta(hours=3),
+                "due_date": start,
+                "order_quantity": 100,
+                "plan_sequence": 4,
+                "plan_status": "SCHEDULED",
+            }
+        ],
+        baseline_simulation_rows=[
+            {
+                "simulation_id": 10,
+                "before_avg_line_utilization_rate": Decimal("0.72"),
+                "created_at": start - timedelta(days=1),
+            }
+        ],
+        baseline_simulation_detail_rows=[
+            {
+                "simulation_id": 10,
+                "order_id": 999,
+                "plan_id": 1,
+                "before_line_id": 2,
+                "before_sequence": 4,
+                "before_start_at": start + timedelta(hours=2),
+                "before_end_at": start + timedelta(hours=3),
+                "expected_completion_date": start.date(),
+                "before_quantity": 100,
+            }
+        ],
+        baseline_prediction_rows=[
+            {
+                "prediction_id": 99,
+                "order_id": 999,
+                "plan_id": 1,
+                "product_id": 1,
+                "delay_probability": Decimal("0.8"),
+                "predicted_delay_days": Decimal("2.0"),
+                "predicted_at": start - timedelta(hours=1),
+            }
+        ],
+        products=[
+            {
+                "product_id": 1,
+                "product_code": "P-1",
+                "product_name": "Product",
+                "unit": "KG",
+            }
+        ],
+        production_lines=[
+            {"line_id": 1, "line_code": "L-1", "line_name": "Line 1"},
+            {"line_id": 2, "line_code": "L-2", "line_name": "Line 2"},
+        ],
+        product_line_capabilities=[
+            {"product_id": 1, "line_id": 1},
+            {"product_id": 1, "line_id": 2},
+        ],
+    )
+
+    change_schedule = response["alternatives"][0]["selected_plan_change_schedule"]
+
+    assert len(change_schedule) == 1
+    assert change_schedule[0]["order_id"] == 1
+    assert change_schedule[0]["line_change"] == "2 -> 1"
+    assert change_schedule[0]["sequence_change"] == "4 -> 1"
 
 
 def test_dashboard_response_populates_ai_evaluation_with_configured_llm() -> None:
@@ -523,16 +627,39 @@ def test_dashboard_response_hides_missing_value_tokens_from_llm_evidence() -> No
 
 def test_ai_evaluation_returns_failed_evaluation_on_grounding_error() -> None:
     class FakeLlmClient:
+        def __init__(self) -> None:
+            self.prompts = []
+
         async def generate_completion(self, prompt):
-            payload = {
-                "risk_analysis_text": "근거에 없는 41.0 값을 생성했습니다.",
-                "risk_interpretation_text": "정보 없음",
-                "recommendation_summary_text": "정보 없음",
-                "recommendation_reasons": ["정보 없음"],
-                "recommendation_cautions": ["정보 없음"],
-                "final_action": "정보 없음",
-                "recommendation_level": "INFO_ONLY",
-            }
+            self.prompts.append(prompt)
+            if "Final Output JSON Schema" in prompt.user_prompt:
+                payload = {
+                    "current_state_summary": {
+                        "risk_analysis_text": "근거에 없는 41.0 값을 생성했습니다."
+                    },
+                    "risk_interpretation": {"text": "정보 없음"},
+                    "ai_recommendation": {
+                        "summary_text": "정보 없음",
+                        "reasons": ["정보 없음"],
+                        "cautions": ["정보 없음"],
+                        "final_action": "정보 없음",
+                    },
+                    "recommendation_level": "INFO_ONLY",
+                    "recommendation_grade_label": "보통",
+                    "recommendation_grade_basis": ["정보 없음"],
+                }
+            else:
+                payload = {
+                    "risk_analysis_text": "정보 없음",
+                    "risk_interpretation_text": "정보 없음",
+                    "recommendation_summary_text": "정보 없음",
+                    "recommendation_reasons": ["정보 없음"],
+                    "recommendation_cautions": ["정보 없음"],
+                    "final_action": "정보 없음",
+                    "recommendation_level": "INFO_ONLY",
+                    "recommendation_grade_label": "보통",
+                    "recommendation_grade_basis": ["정보 없음"],
+                }
             return SimpleNamespace(answer=json.dumps(payload, ensure_ascii=False))
 
     evaluation = asyncio.run(
@@ -566,11 +693,7 @@ def test_ai_evaluation_returns_failed_evaluation_on_grounding_error() -> None:
     assert "LLM output contains numbers" in evaluation.ai_recommendation.summary_text
 
 
-def test_llm_draft_validation_rejects_numbers_not_in_evidence() -> None:
-    evidence = {
-        "computed_deltas": {"risk_cost_saving_percent": 40.0},
-        "important_events": [{"event": "MACHINE_BREAKDOWN"}],
-    }
+def test_llm_draft_validation_defers_grounding_until_final_json() -> None:
     payload = {
         "risk_analysis_text": "위험 비용 절감률은 41.0입니다.",
         "risk_interpretation_text": "MACHINE_BREAKDOWN 영향이 있습니다.",
@@ -581,18 +704,12 @@ def test_llm_draft_validation_rejects_numbers_not_in_evidence() -> None:
         "recommendation_level": "RECOMMEND",
     }
 
-    with pytest.raises(PlanningValidationError):
-        validate_evaluation_draft(payload, evidence)
+    draft = validate_evaluation_draft(payload)
+
+    assert draft.recommendation_level == "RECOMMEND"
 
 
 def test_llm_draft_validation_allows_comma_formatted_evidence_numbers() -> None:
-    evidence = {
-        "computed_deltas": {
-            "risk_cost_saving_amount": "11034336.57",
-            "cost_per_order": 146881.44,
-        },
-        "important_events": [],
-    }
     payload = {
         "risk_analysis_text": "위험 비용은 11,034,336.57원, 건당 비용은 146,881.44원입니다.",
         "risk_interpretation_text": "근거 숫자만 사용했습니다.",
@@ -603,24 +720,75 @@ def test_llm_draft_validation_allows_comma_formatted_evidence_numbers() -> None:
         "recommendation_level": "RECOMMEND",
     }
 
-    draft = validate_evaluation_draft(payload, evidence)
+    draft = validate_evaluation_draft(payload)
 
     assert draft.recommendation_level == "RECOMMEND"
+
+
+def test_json_normalization_runs_after_draft_with_ungrounded_numbers() -> None:
+    class FakeLlmClient:
+        def __init__(self) -> None:
+            self.prompts = []
+
+        async def generate_completion(self, prompt):
+            self.prompts.append(prompt)
+            if "Final Output JSON Schema" in prompt.user_prompt:
+                payload = {
+                    "current_state_summary": {"risk_analysis_text": "정보 없음"},
+                    "risk_interpretation": {"text": "정보 없음"},
+                    "ai_recommendation": {
+                        "summary_text": "정보 없음",
+                        "reasons": ["정보 없음"],
+                        "cautions": ["정보 없음"],
+                        "final_action": "정보 없음",
+                    },
+                    "recommendation_level": "INFO_ONLY",
+                    "recommendation_grade_label": "보통",
+                    "recommendation_grade_basis": ["정보 없음"],
+                }
+            else:
+                payload = {
+                    "risk_analysis_text": "초안 숫자 9999는 최종 JSON에서 제거됩니다.",
+                    "risk_interpretation_text": "정보 없음",
+                    "recommendation_summary_text": "정보 없음",
+                    "recommendation_reasons": ["정보 없음"],
+                    "recommendation_cautions": ["정보 없음"],
+                    "final_action": "정보 없음",
+                    "recommendation_level": "INFO_ONLY",
+                    "recommendation_grade_label": "보통",
+                    "recommendation_grade_basis": ["정보 없음"],
+                }
+            return SimpleNamespace(answer=json.dumps(payload, ensure_ascii=False))
+
+    fake_client = FakeLlmClient()
+
+    evaluation = asyncio.run(
+        generate_ai_evaluation_from_evidence(
+            {
+                "baseline": {"metrics": {}},
+                "alternative": {"plan_variant_code": "DUE_DATE_OPTIMAL", "metrics": {}},
+                "computed_deltas": {},
+                "important_events": [],
+            },
+            settings=Settings(
+                llm_enabled=True,
+                llm_provider="openai_compatible",
+                llm_base_url="http://llm.test/v1",
+                llm_model="test-model",
+            ),
+            llm_client=fake_client,
+        )
+    )
+
+    assert evaluation.status == "COMPLETED"
+    assert len(fake_client.prompts) == 2
+    assert "Final Output JSON Schema" in fake_client.prompts[1].user_prompt
 
 
 def test_final_ai_evaluation_validation_rejects_unknown_event_tokens() -> None:
     evidence = {
         "computed_deltas": {"risk_cost_saving_percent": 40.0},
         "important_events": [{"event": "MACHINE_BREAKDOWN"}],
-    }
-    draft = {
-        "risk_analysis_text": "위험 비용 절감률은 40.0입니다.",
-        "risk_interpretation_text": "MACHINE_BREAKDOWN 영향이 있습니다.",
-        "recommendation_summary_text": "추천합니다.",
-        "recommendation_reasons": ["근거가 있습니다."],
-        "recommendation_cautions": [],
-        "final_action": "검토하세요.",
-        "recommendation_level": "RECOMMEND",
     }
     payload = {
         "current_state_summary": {
@@ -637,4 +805,4 @@ def test_final_ai_evaluation_validation_rejects_unknown_event_tokens() -> None:
     }
 
     with pytest.raises(PlanningValidationError):
-        validate_final_ai_evaluation(payload, evidence, draft)
+        validate_final_ai_evaluation(payload, evidence)
