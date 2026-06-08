@@ -86,7 +86,7 @@ class ScheduleSimulationRepository:
                 applied_by,
                 applied_at,
                 created_at
-            FROM schedule_simulation_results
+            FROM public.schedule_simulation_results
             WHERE created_at >= :start_date
               AND created_at < :end_date_exclusive
             ORDER BY created_at DESC, simulation_id DESC
@@ -157,7 +157,7 @@ class ScheduleSimulationRepository:
                     after_quantity,
                     change_reason,
                     created_at
-                FROM schedule_simulation_details
+                FROM public.schedule_simulation_details
                 WHERE simulation_id IN :simulation_ids
                 ORDER BY simulation_id, simulation_detail_id
                 """
