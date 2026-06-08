@@ -27,7 +27,11 @@ class DelayPredictionService:
         metadata = self._load_metadata()
         inference_row = self._build_inference_row(request)
         inference_frame = pd.DataFrame([inference_row])
-        predictions = predict_delay_hours(model, inference_frame)
+        predictions = predict_delay_hours(
+            model,
+            inference_frame,
+            target_transform=str(metadata.get("target_transform", "identity")),
+        )
 
         return DelayPredictionResponse(
             orderId=request.order_id,

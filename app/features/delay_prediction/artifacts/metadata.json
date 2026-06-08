@@ -1,23 +1,23 @@
 {
-  "model_name": "random_forest_regressor",
+  "model_name": "random_forest_regressor_log_target_weighted",
   "feature_columns": [
     "order_quantity",
     "due_gap_days",
     "product_id",
     "average_yield_rate",
-    "line_count",
     "estimated_duration_hr_sum",
-    "plan_sequence_max",
     "plan_overdue_days_max",
+    "overdue_plan_ratio",
     "waiting_time_hr_avg",
-    "utilization_rate_avg",
-    "shortage_ratio"
+    "utilization_rate_avg"
   ],
   "target_column": "actual_delay_hr_sum",
+  "target_transform": "log1p",
+  "weighting_strategy": "positive_delay_buckets_v1",
   "metrics": {
-    "mae": 6.178413919413918,
-    "rmse": 9.572527477948771,
-    "r2": -0.12413071366276429
+    "mae": 3.939568426705927,
+    "rmse": 13.22024364231538,
+    "r2": 0.9933501266428815
   },
   "random_state": 42,
   "test_size": 0.2
