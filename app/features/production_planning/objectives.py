@@ -1081,8 +1081,11 @@ def apply_amount_objective(
 
     Methodology:
         - Maximize protected contract amount by minimizing unscheduled contract amount.
+        - Minimize delayed order count as the primary due-date guard (weighted above changeover terms).
         - Minimize late penalties, cleaning/setup time, line change cost, and product changes.
         - Keep due dates soft through total tardiness penalties.
+        - Weight hierarchy: unscheduled(10^9·amount) > delayed_count(10^10) >
+          late_penalty(10^8·amount) > cleaning/sequence(10^6) > tardiness(10^4).
 
     Output:
         - None. Model objective updated in place.
@@ -1094,10 +1097,12 @@ def apply_amount_objective(
         data,
         amount_config,
     )
+    delayed_count = build_delayed_order_count_var(model, bundle, data)
 
     model.Minimize(
         amount_config.unscheduled_contract_amount_weight
         * terms.unscheduled_contract_amount
+        + amount_config.delayed_order_count_weight * delayed_count
         + amount_config.late_penalty_amount_weight * terms.late_penalty_amount
         + amount_config.total_cleaning_cost_weight * terms.total_cleaning_cost
         + amount_config.line_change_cost_weight * terms.line_change_cost

@@ -86,7 +86,7 @@ Rules:
 3. Do not assume any value that is not included in the input JSON.
 4. Do not perform new calculations. Use only values already present in metrics and computed_deltas.
 5. Do not invent order IDs, line IDs, product IDs, event causes, costs, dates, or durations.
-6. Explain why the alternative is recommended using delivery delay reduction, cost reduction, and schedule completion evidence.
+6. Explain why the alternative is recommended using delay probability reduction, cost reduction, and schedule completion evidence.
 7. For AMOUNT_OPTIMAL, emphasize quantitative money/cost evidence first when those values are present in evidence.
 8. Write in Korean.
 9. Return valid JSON only.
@@ -95,7 +95,11 @@ Rules:
 12. Keep every sentence suitable for a production planning dashboard.
 13. Do not criticize the generated plan. Write recommendation rationale and neutral execution checks.
 14. Do not mention internal calculation status values or missing-field key names.
-15. Choose recommendation_grade_label from exactly one of: 매우 낮음, 낮음, 보통, 높음, 매우 높음."""
+15. Choose recommendation_grade_label from exactly one of: 매우 낮음, 낮음, 보통, 높음, 매우 높음.
+16. For DUE_DATE_OPTIMAL, emphasize delivery probability improvement (딜레이 확률 감소, 납기 안정성) as the primary evidence. Do not include AMOUNT_OPTIMAL cost-first content.
+17. Write risk_analysis_text as a single continuous declarative paragraph (평서문). Do not use bullet points or lists.
+18. Write each item in recommendation_reasons as a complete sentence with a specific quantitative value and interpretation (e.g., "딜레이 확률이 12.50%p 낮아져 납기 안정성이 개선됩니다.").
+19. Write each item in recommendation_grade_basis as a complete sentence with quantitative values and improvement direction (e.g., "딜레이 확률이 12.50%p 감소해 일정 리스크가 낮아집니다.")."""
 
 EVALUATION_DRAFT_USER_PROMPT_TEMPLATE = """다음 Evidence JSON은 DB에서 조회한 기존 생산계획 평가값과 신규 대응안 시뮬레이션 결과를 비교한 데이터입니다.
 
@@ -105,10 +109,16 @@ EVALUATION_DRAFT_USER_PROMPT_TEMPLATE = """다음 Evidence JSON은 DB에서 조�
 - 이 문구는 대응안을 비판하는 글이 아니라 추천 이유를 설명하는 글입니다.
 - 숫자는 반드시 input JSON의 metrics 또는 computed_deltas 값을 그대로 사용하세요.
 - 변화량, 감소율, 절감률은 computed_deltas 값만 사용하세요.
+- alternative.plan_variant_code가 "DUE_DATE_OPTIMAL"이면 딜레이 확률 감소, 납기 충족률 개선, 일정 안정성을 최우선 근거로 사용하세요.
+- DUE_DATE_OPTIMAL의 recommendation_summary_text와 recommendation_reasons에는 delay_probability_delta_percent_points, delay_probability_reduction_percent, delivery_fulfillment_rate_delta_percent_points, delay_risk_order_reduction 수치를 우선 사용하세요.
+- DUE_DATE_OPTIMAL에서도 비용/리스크 수치는 보조 근거로만 사용하고, 납기 측면의 판단 축이 흐려지지 않게 하세요.
+- risk_analysis_text는 하나의 연속적인 평서문으로 작성하세요. 예: "baseline 대비 대안은 딜레이 확률 감소와 납기 충족률 개선을 통해 일정 안정성을 높이고, 총 위험 비용 감소를 통해 비용 리스크를 낮춥니다."
+- recommendation_reasons의 각 항목은 정량 수치를 포함한 완전한 문장으로 작성하세요. 예: "딜레이 확률이 12.50%p 낮아져 납기 안정성이 개선됩니다."
+- recommendation_grade_basis의 각 항목은 정량 수치와 함께 감소/단축 방향을 포함한 완전한 문장으로 작성하세요. 예: "딜레이 확률이 12.50%p 감소해 일정 리스크가 낮아집니다."
 - alternative.plan_variant_code가 "AMOUNT_OPTIMAL"이면 가격/비용 관점의 정량 수치를 가장 먼저 부각하세요.
 - AMOUNT_OPTIMAL의 recommendation_summary_text와 recommendation_reasons에는 가능한 경우 total_risk_cost, expected_late_penalty_amount, risk_cost_saving_amount, risk_cost_saving_percent, contract/value 보호 관련 수치를 우선 사용하세요.
 - AMOUNT_OPTIMAL에서도 납기/자재/일정 안정성은 보조 근거로만 설명하고, 가격 측면의 판단 축이 흐려지지 않게 하세요.
-- recommendation_grade_label은 아래 우선순위로 판단하세요: 1순위 지연 일수 감소, 2순위 비용 감소, 3순위 계획 종료 시각 단축.
+- recommendation_grade_label은 아래 우선순위로 판단하세요: 1순위 딜레이 확률 감소, 2순위 비용 감소, 3순위 계획 종료 시각 단축.
 - 비용 감소나 계획 종료 시각 단축 값이 없으면 사용하지 말고, 있는 근거만으로 추천도를 산정하세요.
 - 새로운 주문 ID, 라인 ID, 제품 ID, 비용, 기간, 이벤트 원인을 만들지 마세요.
 - 값이 없거나 계산 불가능하면 "정보 없음"이라고만 쓰고, 데이터 부족을 추천 반대 사유로 쓰지 마세요.
@@ -149,11 +159,19 @@ Rules:
 9. Preserve the draft's recommendation rationale tone. Do not turn it into criticism.
 10. For AMOUNT_OPTIMAL, preserve money/cost-focused quantitative wording from the draft when present.
 11. Do not mention internal calculation status values or missing-field key names.
-12. Preserve recommendation_grade_label from the draft or use 보통 when it is missing."""
+12. Preserve recommendation_grade_label from the draft or use 보통 when it is missing.
+13. For DUE_DATE_OPTIMAL, ensure ai_recommendation.summary_text and reasons emphasize delay probability improvement (딜레이 확률 감소, 납기 안정성) as the primary evidence. Do not include AMOUNT_OPTIMAL cost-first content.
+14. Preserve risk_analysis_text as a single continuous declarative paragraph (평서문). If the draft has bullet points, merge into one paragraph.
+15. Ensure each item in ai_recommendation.reasons is a complete sentence with a quantitative value and interpretation.
+16. Ensure each item in recommendation_grade_basis contains quantitative values and improvement direction."""
 
 JSON_NORMALIZATION_USER_PROMPT_TEMPLATE = """아래 Draft Evaluation JSON을 최종 프론트엔드 응답의 ai_evaluation schema로 변환하세요.
 
 주의사항:
+- alternative.plan_variant_code가 "DUE_DATE_OPTIMAL"이면, ai_recommendation의 summary_text와 reasons에는 딜레이 확률 감소/일정 개선 수치가 먼저 나와야 합니다. AMOUNT_OPTIMAL 비용 중심 내용이 포함되지 않도록 하세요.
+- risk_analysis_text는 하나의 연속적인 평서문으로 유지하세요.
+- recommendation_reasons의 각 항목은 정량 수치를 포함한 완전한 문장이어야 합니다.
+- recommendation_grade_basis의 각 항목은 정량 수치와 감소/단축 방향을 포함한 완전한 문장이어야 합니다.
 - schema key를 변경하지 마세요.
 - 값이 없으면 "정보 없음"을 사용하세요.
 - Evidence JSON에 없는 새로운 숫자나 원인을 추가하지 마세요.
@@ -162,7 +180,7 @@ JSON_NORMALIZATION_USER_PROMPT_TEMPLATE = """아래 Draft Evaluation JSON을 최
 - cautions는 비판이 아니라 실행 전 확인사항으로만 작성하세요.
 - 내부 계산 상태값이나 누락 필드명은 출력하지 마세요.
 - recommendation_grade_label은 매우 낮음, 낮음, 보통, 높음, 매우 높음 중 하나만 사용하세요.
-- recommendation_grade_basis에는 추천도 산정 기준을 지연 일수 감소, 비용 감소, 계획 종료 시각 단축 우선순위에 맞춰 짧게 작성하세요.
+- recommendation_grade_basis에는 추천도 산정 기준을 딜레이 확률 감소, 비용 감소, 계획 종료 시각 단축 우선순위에 맞춰 짧게 작성하세요.
 - 출력은 JSON만 반환하세요.
 
 Final Output JSON Schema:
@@ -249,9 +267,6 @@ def build_dashboard_response(
     result: ProductionPlanningResult,
     *,
     baseline_plans: list[dict[str, Any]] | None = None,
-    baseline_simulation_rows: list[dict[str, Any]] | None = None,
-    baseline_simulation_detail_rows: list[dict[str, Any]] | None = None,
-    baseline_prediction_rows: list[dict[str, Any]] | None = None,
     products: list[Any] | None = None,
     production_lines: list[Any] | None = None,
     product_line_capabilities: list[Any] | None = None,
@@ -269,9 +284,6 @@ def build_dashboard_response(
     Parameters:
         - result: Internal production planning result with adjusted plans and simulations.
         - baseline_plans: DB current production plan rows for the same planning window.
-        - baseline_simulation_rows: DB simulation result history retained for historical context.
-        - baseline_simulation_detail_rows: DB simulation detail rows retained for historical context.
-        - baseline_prediction_rows: DB prediction rows retained for historical context.
         - products: Product master rows used for unit-aware fulfillment-rate calculations.
         - production_lines: Production line master rows used for application conditions.
         - product_line_capabilities: Product-line capability rows used for target products.
@@ -297,12 +309,6 @@ def build_dashboard_response(
         - Front-end dashboard JSON comparing current plan baseline and adjusted alternatives.
     """
     response_generated_at = generated_at or datetime.now(UTC)
-    historical_simulation_context = build_baseline_simulation_context(
-        baseline_simulation_rows or [],
-        baseline_detail_rows=baseline_simulation_detail_rows or [],
-        baseline_prediction_rows=baseline_prediction_rows or [],
-        product_rows=products or [],
-    )
     baseline_context = build_baseline_plan_context(
         baseline_plans or [],
         product_rows=products or [],
@@ -330,6 +336,7 @@ def build_dashboard_response(
             simulation,
             candidate,
             plan_result,
+            baseline_plan_rows=baseline_plans or [],
             product_rows=products or [],
             completion_rank=completion_rank_by_code.get(candidate.plan_variant_code),
             risk_cost_rank=risk_cost_rank_by_code.get(candidate.plan_variant_code),
@@ -401,7 +408,6 @@ def build_dashboard_response(
         },
         "data_sources": {
             "baseline": "DB_CURRENT_PLAN",
-            "historical_simulation": "DB_SIMULATION_HISTORY_REFERENCE",
             "alternative": "CP_SAT_AND_SIMULATION",
         },
         "baseline": {
@@ -410,9 +416,6 @@ def build_dashboard_response(
             "simulation_metrics": baseline_metrics,
             "current_state_summary": baseline_context["current_state_summary"],
             "provenance": baseline_context["provenance"],
-            "historical_applied_result": (
-                historical_simulation_context["historical_applied_result"]
-            ),
         },
         "alternatives": alternatives,
         "warnings": result.warnings,
@@ -589,18 +592,8 @@ def build_baseline_plan_current_state_summary(
     Output:
         - Current-state summary derived from current production plans only.
     """
-    delayed_keys = {
-        key
-        for key, row in _current_plan_rows_by_key(baseline_plan_rows).items()
-        if _current_plan_tardiness_minutes(row) > 0
-    }
-    total_tardiness_minutes = sum(
-        _current_plan_tardiness_minutes(row)
-        for row in baseline_plan_rows
-    )
-    max_tardiness_minutes = max(
-        (_current_plan_tardiness_minutes(row) for row in baseline_plan_rows),
-        default=0,
+    delayed_keys, total_tardiness_minutes, max_tardiness_minutes = (
+        _order_level_delay_stats(baseline_plan_rows)
     )
     unit_basis = _delivery_rate_unit_basis(
         [_first_present(row, ["product_id"]) for row in baseline_plan_rows],
@@ -612,20 +605,28 @@ def build_baseline_plan_current_state_summary(
         unit_basis,
     )
     fulfillment_rate = _fulfillment_rate(total, delayed)
+    delay_probability_percent = _delay_probability_percent(
+        len(delayed_keys),
+        _current_plan_order_count(baseline_plan_rows),
+    )
     utilization = _current_plan_line_utilization(
         baseline_plan_rows,
         production_lines,
         planning_start,
         planning_end,
     )
-    late_penalty_amount = sum(
-        (
-            _to_decimal(_first_present(row, ["late_penalty_amount"])) or Decimal("0")
-            for row in baseline_plan_rows
-            if _current_plan_key(row) in delayed_keys
-        ),
-        Decimal("0"),
-    )
+    seen_penalty_keys: set[str] = set()
+    late_penalty_amount = Decimal("0")
+    for row in baseline_plan_rows:
+        order_key = _canonical_id(_first_present(row, ["order_id"])) or _canonical_id(
+            _first_present(row, ["plan_id", "schedule_id"])
+        )
+        if order_key in delayed_keys and order_key not in seen_penalty_keys:
+            late_penalty_amount += (
+                _to_decimal(_first_present(row, ["late_penalty_amount"]))
+                or Decimal("0")
+            )
+            seen_penalty_keys.add(order_key)
     return {
         "expected_delay_days": _decimal_to_float(
             Decimal(str(total_tardiness_minutes)) / Decimal("1440")
@@ -634,6 +635,8 @@ def build_baseline_plan_current_state_summary(
         "max_tardiness_minutes": max_tardiness_minutes,
         "delivery_fulfillment_rate_percent": fulfillment_rate,
         "delivery_miss_rate_percent": _miss_rate(fulfillment_rate),
+        "delay_probability_percent": delay_probability_percent,
+        "delay_probability_basis": "CURRENT_PLAN_DELAYED_ORDER_RATE",
         "delay_risk_order_count": len(delayed_keys),
         "expected_delayed_orders": len(delayed_keys),
         "avg_line_utilization_percent": utilization["avg_line_utilization_percent"],
@@ -644,8 +647,15 @@ def build_baseline_plan_current_state_summary(
         "total_late_penalty_amount": _money_string(late_penalty_amount),
         "total_risk_cost": _money_string(late_penalty_amount),
         "baseline_plan_count": len(baseline_plan_rows),
+        "baseline_plan_ids": _baseline_plan_ids(baseline_plan_rows),
+        "plan_completion_at": _baseline_plan_completion_at(baseline_plan_rows),
         "calculation_status": "OK" if baseline_plan_rows else "MISSING_VALUE",
     }
+
+
+_PLAN_BASELINE_STRUCTURALLY_ABSENT: frozenset[str] = frozenset({
+    "material_shortage_probability_percent",
+})
 
 
 def build_baseline_plan_metrics(
@@ -663,7 +673,12 @@ def build_baseline_plan_metrics(
         - Baseline metric dictionary derived from current production plans.
     """
     metrics = {
-        "delay_probability_percent": None,
+        "delay_probability_percent": current_state_summary.get(
+            "delay_probability_percent"
+        ),
+        "delay_probability_basis": current_state_summary.get(
+            "delay_probability_basis"
+        ),
         "expected_delayed_orders": current_state_summary.get("expected_delayed_orders"),
         "p95_tardiness_minutes": current_state_summary.get("max_tardiness_minutes"),
         "total_risk_cost": current_state_summary.get("total_risk_cost"),
@@ -686,11 +701,13 @@ def build_baseline_plan_metrics(
             "total_late_penalty_amount"
         ),
         "baseline_plan_count": current_state_summary.get("baseline_plan_count"),
+        "baseline_plan_ids": current_state_summary.get("baseline_plan_ids"),
+        "plan_completion_at": current_state_summary.get("plan_completion_at"),
     }
     missing = [
         key
         for key, value in metrics.items()
-        if value is None
+        if value is None and key not in _PLAN_BASELINE_STRUCTURALLY_ABSENT
     ]
     metrics["calculation_status"] = "OK" if not missing else "MISSING_VALUE"
     metrics["missing_fields"] = missing
@@ -1088,6 +1105,7 @@ def build_alternative_current_state_summary(
     candidate: AdjustedPlanCandidate,
     plan_result,
     *,
+    baseline_plan_rows: list[dict[str, Any]],
     product_rows: list[Any],
     completion_rank: int | None,
     risk_cost_rank: int | None,
@@ -1097,6 +1115,7 @@ def build_alternative_current_state_summary(
         - simulation: Simulation result for the adjusted candidate.
         - candidate: Adjusted plan candidate rows.
         - plan_result: CP-SAT plan result for deterministic order statuses.
+        - baseline_plan_rows: Current DB production plans used for PK-based matching.
         - product_rows: Product master rows used to validate quantity unit consistency.
         - completion_rank: Rank of this candidate by earliest planned completion.
         - risk_cost_rank: Rank of this candidate by lowest simulated risk cost.
@@ -1152,6 +1171,12 @@ def build_alternative_current_state_summary(
         "avg_line_utilization_percent": None,
         "bottleneck_line_id": None,
         "plan_completion_at": _candidate_completion_at(candidate),
+        "alternative_plan_count": len(candidate.plans),
+        "matched_baseline_plan_count": _matched_baseline_plan_count(
+            candidate,
+            baseline_plan_rows,
+        ),
+        "new_plan_count": _new_plan_count(candidate, baseline_plan_rows),
         "plan_completion_rank": completion_rank,
         "risk_cost_rank": risk_cost_rank,
         "unit_basis": unit_basis,
@@ -1181,14 +1206,6 @@ def build_comparison_metrics(
         alternative_metrics.get("total_risk_cost"),
     )
     computed_deltas = {
-        "expected_delay_days_reduction": _decimal_delta(
-            baseline_metrics.get("expected_delay_days"),
-            alternative_metrics.get("expected_delay_days"),
-        ),
-        "expected_delay_days_reduction_percent": _reduction_percent(
-            baseline_metrics.get("expected_delay_days"),
-            alternative_metrics.get("expected_delay_days"),
-        ),
         "delivery_fulfillment_rate_delta_percent_points": _decimal_delta(
             alternative_metrics.get("delivery_fulfillment_rate_percent"),
             baseline_metrics.get("delivery_fulfillment_rate_percent"),
@@ -1201,13 +1218,13 @@ def build_comparison_metrics(
             baseline_metrics.get("delay_probability_percent"),
             alternative_metrics.get("delay_probability_percent"),
         ),
+        "delay_probability_delta_percent_points": _decimal_delta(
+            baseline_metrics.get("delay_probability_percent"),
+            alternative_metrics.get("delay_probability_percent"),
+        ),
         "expected_delayed_order_reduction": _decimal_delta(
             baseline_metrics.get("expected_delayed_orders"),
             alternative_metrics.get("expected_delayed_orders"),
-        ),
-        "p95_tardiness_reduction_minutes": _decimal_delta(
-            baseline_metrics.get("p95_tardiness_minutes"),
-            alternative_metrics.get("p95_tardiness_minutes"),
         ),
         "risk_cost_saving_amount": _money_string(risk_cost_saving_amount),
         "risk_cost_saving_percent": _reduction_percent(
@@ -1218,13 +1235,20 @@ def build_comparison_metrics(
             baseline_metrics.get("material_shortage_probability_percent"),
             alternative_metrics.get("material_shortage_probability_percent"),
         ),
+        "plan_count_delta": _decimal_delta(
+            baseline_metrics.get("baseline_plan_count"),
+            alternative_metrics.get("alternative_plan_count"),
+        ),
+        "matched_baseline_plan_count": alternative_metrics.get(
+            "matched_baseline_plan_count"
+        ),
+        "new_plan_count": alternative_metrics.get("new_plan_count"),
+        "plan_completion_delta_hours": _datetime_delta_hours(
+            baseline_metrics.get("plan_completion_at"),
+            alternative_metrics.get("plan_completion_at"),
+        ),
     }
     metrics = {
-        "expected_delay_days": _comparison_entry(
-            baseline_metrics.get("expected_delay_days"),
-            alternative_metrics.get("expected_delay_days"),
-            "days",
-        ),
         "delivery_fulfillment_rate": _comparison_entry(
             baseline_metrics.get("delivery_fulfillment_rate_percent"),
             alternative_metrics.get("delivery_fulfillment_rate_percent"),
@@ -1245,11 +1269,6 @@ def build_comparison_metrics(
             alternative_metrics.get("expected_delayed_orders"),
             "orders",
         ),
-        "p95_tardiness": _comparison_entry(
-            baseline_metrics.get("p95_tardiness_minutes"),
-            alternative_metrics.get("p95_tardiness_minutes"),
-            "minutes",
-        ),
         "total_risk_cost": _comparison_entry(
             baseline_metrics.get("total_risk_cost"),
             alternative_metrics.get("total_risk_cost"),
@@ -1260,6 +1279,11 @@ def build_comparison_metrics(
             baseline_metrics.get("material_shortage_probability_percent"),
             alternative_metrics.get("material_shortage_probability_percent"),
             "percent",
+        ),
+        "plan_count": _comparison_entry(
+            baseline_metrics.get("baseline_plan_count"),
+            alternative_metrics.get("alternative_plan_count"),
+            "plans",
         ),
     }
     return {
@@ -1286,11 +1310,11 @@ def build_simulation_comparison_table(
     """
     return [
         _comparison_table_row(
-            "expected_delay_days",
-            "예상 지연일",
-            baseline_summary.get("expected_delay_days"),
-            alternative_summary.get("expected_delay_days"),
-            "days",
+            "delay_probability_percent",
+            "딜레이 확률",
+            baseline_summary.get("delay_probability_percent"),
+            alternative_summary.get("delay_probability_percent"),
+            "percent_point",
             improvement_direction="lower",
         ),
         _comparison_table_row(
@@ -1356,6 +1380,9 @@ def build_selected_plan_change_schedule(
         rows.append(
             {
                 "order_id": _id_or_none(plan.order_id),
+                "plan_id": _id_or_none(
+                    _first_present(detail, ["plan_id", "schedule_id"])
+                ),
                 "line_change": _line_change_text(before_line_id, after_line_id),
                 "before_schedule": _schedule_text(
                     _first_present(detail, ["before_start_at", "planned_start_at", "start_time"]),
@@ -1504,8 +1531,8 @@ def build_evidence_json(
         {
             key: comparison_metrics["computed_deltas"].get(key)
             for key in [
-                "expected_delay_days_reduction",
-                "expected_delay_days_reduction_percent",
+                "delay_probability_delta_percent_points",
+                "delay_probability_reduction_percent",
                 "delivery_fulfillment_rate_delta_percent_points",
                 "delay_risk_order_reduction",
             ]
@@ -1514,7 +1541,7 @@ def build_evidence_json(
     return {
         "recommendation_judge_criteria": {
             "priority_order": [
-                "지연 일수 감소",
+                "딜레이 확률 감소",
                 "비용 감소 또는 낮은 총 위험 비용",
                 "계획 종료 시각 단축",
             ],
@@ -1537,7 +1564,8 @@ def build_evidence_json(
 
 def _llm_dashboard_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     allowed_keys = [
-        "expected_delay_days",
+        "delay_probability_percent",
+        "delay_probability_basis",
         "delivery_fulfillment_rate_percent",
         "delivery_miss_rate_percent",
         "delay_risk_order_count",
@@ -2136,10 +2164,6 @@ def normalize_baseline_plan_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
                 "planned_end_at": _iso_or_none(
                     _first_present(row, ["planned_end_at", "end_time"])
                 ),
-                "estimated_duration_hr": _first_present(
-                    row,
-                    ["estimated_duration_hr", "actual_duration_hr"],
-                ),
                 "planned_quantity": _first_present(
                     row,
                     ["planned_quantity", "order_quantity"],
@@ -2155,7 +2179,10 @@ def normalize_baseline_plan_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
 def _serialize_adjusted_candidate_plans(
     candidate: AdjustedPlanCandidate,
 ) -> list[dict[str, Any]]:
-    return [row.model_dump(mode="json") for row in candidate.plans]
+    return [
+        row.model_dump(mode="json", exclude={"estimated_duration_hr"})
+        for row in candidate.plans
+    ]
 
 
 def _serialize_ai_evaluation(
@@ -2368,6 +2395,58 @@ def _current_plan_rows_by_key(rows: list[dict[str, Any]]) -> dict[str, dict[str,
     return {_current_plan_key(row): row for row in rows if _current_plan_key(row)}
 
 
+def _order_level_delay_stats(
+    plan_rows: list[dict[str, Any]],
+) -> tuple[set[str], int, int]:
+    """Group plan rows by order and compute delay at order level."""
+    orders: dict[str, list[dict[str, Any]]] = {}
+    for row in plan_rows:
+        order_id = _canonical_id(_first_present(row, ["order_id"]))
+        key = order_id or _canonical_id(_first_present(row, ["plan_id", "schedule_id"]))
+        if key:
+            orders.setdefault(key, []).append(row)
+
+    delayed_ids: set[str] = set()
+    total_minutes = 0
+    max_minutes = 0
+    for key, rows in orders.items():
+        due_at = None
+        for row in rows:
+            due_at = _due_at_datetime(
+                _first_present(row, ["due_date", "expected_completion_date"])
+            )
+            if due_at:
+                break
+        if due_at is None:
+            continue
+
+        latest_end: datetime | None = None
+        for row in rows:
+            end = _as_datetime(_first_present(row, ["planned_end_at", "end_time"]))
+            if end is not None and (latest_end is None or end > latest_end):
+                latest_end = end
+        if latest_end is None:
+            continue
+
+        tardiness = max(0, int((latest_end - due_at).total_seconds() // 60))
+        if tardiness > 0:
+            delayed_ids.add(key)
+        total_minutes += tardiness
+        max_minutes = max(max_minutes, tardiness)
+    return delayed_ids, total_minutes, max_minutes
+
+
+def _baseline_plan_ids(rows: list[dict[str, Any]]) -> list[int | str]:
+    return [
+        plan_id
+        for plan_id in (
+            _id_or_none(_first_present(row, ["plan_id", "schedule_id"]))
+            for row in rows
+        )
+        if plan_id is not None
+    ]
+
+
 def _current_plan_key(row: dict[str, Any]) -> str:
     plan_id = _canonical_id(_first_present(row, ["plan_id", "schedule_id"]))
     order_id = _canonical_id(_first_present(row, ["order_id"]))
@@ -2380,6 +2459,20 @@ def _current_plan_tardiness_minutes(row: dict[str, Any]) -> int:
     if planned_end is None or due_at is None:
         return 0
     return max(0, int((planned_end - due_at).total_seconds() // 60))
+
+
+def _baseline_plan_completion_at(rows: list[dict[str, Any]]) -> str | None:
+    end_times = [
+        value
+        for value in (
+            _as_datetime(_first_present(row, ["planned_end_at", "end_time"]))
+            for row in rows
+        )
+        if value is not None
+    ]
+    if not end_times:
+        return None
+    return _iso_or_none(max(end_times))
 
 
 def _due_at_datetime(value: Any) -> datetime | None:
@@ -2402,6 +2495,9 @@ def _current_plan_delivery_denominator(
     delayed_keys: set[str],
     unit_basis: str,
 ) -> tuple[Decimal, Decimal]:
+    def _row_order_key(row: dict[str, Any]) -> str:
+        return _canonical_id(_first_present(row, ["order_id"])) or _current_plan_key(row)
+
     if unit_basis == "QUANTITY" and _all_current_plan_quantities_present(plan_rows):
         total = sum(
             (
@@ -2426,12 +2522,30 @@ def _current_plan_delivery_denominator(
                 )
                 or Decimal("0")
                 for row in plan_rows
-                if _current_plan_key(row) in delayed_keys
+                if _row_order_key(row) in delayed_keys
             ),
             Decimal("0"),
         )
         return total, delayed
-    return Decimal(str(len(plan_rows))), Decimal(str(len(delayed_keys)))
+    unique_order_keys = {_row_order_key(row) for row in plan_rows if _row_order_key(row)}
+    return Decimal(str(len(unique_order_keys))), Decimal(str(len(delayed_keys)))
+
+
+def _current_plan_order_count(plan_rows: list[dict[str, Any]]) -> int:
+    order_keys = {
+        _canonical_id(_first_present(row, ["order_id"]))
+        or _current_plan_key(row)
+        for row in plan_rows
+    }
+    return len({key for key in order_keys if key})
+
+
+def _delay_probability_percent(delayed_count: int, total_count: int) -> float | None:
+    if total_count <= 0:
+        return None
+    return _round_decimal(
+        Decimal(str(delayed_count)) / Decimal(str(total_count)) * Decimal("100")
+    )
 
 
 def _all_current_plan_quantities_present(plan_rows: list[dict[str, Any]]) -> bool:
@@ -2683,6 +2797,39 @@ def _candidate_completion_at(candidate: AdjustedPlanCandidate) -> str | None:
     return _iso_or_none(max(row.planned_end_at for row in candidate.plans))
 
 
+def _matched_baseline_plan_count(
+    candidate: AdjustedPlanCandidate,
+    baseline_plan_rows: list[dict[str, Any]],
+) -> int:
+    baseline_keys = set(_detail_rows_by_order_or_plan_id(baseline_plan_rows))
+    return sum(
+        1
+        for row in candidate.plans
+        if _canonical_id(row.order_id) in baseline_keys
+    )
+
+
+def _new_plan_count(
+    candidate: AdjustedPlanCandidate,
+    baseline_plan_rows: list[dict[str, Any]],
+) -> int:
+    return max(
+        0,
+        len(candidate.plans)
+        - _matched_baseline_plan_count(candidate, baseline_plan_rows),
+    )
+
+
+def _datetime_delta_hours(baseline_value: Any, alternative_value: Any) -> float | None:
+    baseline = _as_datetime(baseline_value)
+    alternative = _as_datetime(alternative_value)
+    if baseline is None or alternative is None:
+        return None
+    return _decimal_to_float(
+        Decimal(str((baseline - alternative).total_seconds() / 3600))
+    )
+
+
 def _applicable_period(candidate: AdjustedPlanCandidate) -> dict[str, Any]:
     if not candidate.plans:
         return {"start_at": None, "end_at": None}
@@ -2788,7 +2935,7 @@ def _plain_row(value: Any) -> dict[str, Any]:
 
 def _as_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
