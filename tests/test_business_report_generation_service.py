@@ -31,12 +31,39 @@ class FakeBusinessReportTransformer:
                 "target_start_date": "2099-01-01",
                 "target_end_date": "2099-01-31",
                 "report_content": {
-                    "sections": [
-                        {
-                            "title": "경영진 요약",
-                            "content": "납기 위험과 자재 수급 현황을 우선 검토해야 합니다.",
-                        }
-                    ]
+                    "markdown": "경영진용 markdown",
+                    "sections": {
+                        "summaryRows": [
+                            {"label": "보고서 기간", "value": "2026-06-01 ~ 2026-06-14"}
+                        ],
+                        "lineRows": [
+                            {
+                                "line": "PP 범용 생산 Line",
+                                "utilization": "91%",
+                                "completed": "12,000",
+                                "defectRate": "1.2%",
+                                "note": "정상",
+                            }
+                        ],
+                        "equipmentRows": [
+                            {
+                                "name": "압출기",
+                                "utilization": "확인 필요",
+                                "downTime": "확인 필요",
+                                "status": "정상",
+                            }
+                        ],
+                        "analysis": {
+                            "overview": "경영진용 분석",
+                            "sections": [
+                                {
+                                    "title": "납기 위험 분석",
+                                    "items": ["납기 위험 주문을 우선 점검해야 합니다."],
+                                }
+                            ],
+                            "recommendation": "생산 순서 조정 검토가 필요합니다.",
+                        },
+                    },
                 },
                 "report_evidence": [],
                 "related_simulation_id": None,
@@ -81,12 +108,125 @@ def test_business_report_generation_builds_business_report_from_source_report() 
     assert response.report_evidence == source.report_evidence
     assert response.related_simulation_id == source.related_simulation_id
     assert response.report_content == {
-        "sections": [
-            {
-                "title": "경영진 요약",
-                "content": "납기 위험과 자재 수급 현황을 우선 검토해야 합니다.",
-            }
-        ]
+        "markdown": "경영진용 markdown",
+        "sections": {
+            "summaryRows": [{"label": "보고서 기간", "value": "2026-06-01 ~ 2026-06-14"}],
+            "lineRows": [
+                {
+                    "line": "PP 범용 생산 Line",
+                    "utilization": "91%",
+                    "completed": "12,000",
+                    "defectRate": "1.2%",
+                    "note": "정상",
+                }
+            ],
+            "equipmentRows": [
+                {
+                    "name": "압출기",
+                    "utilization": "확인 필요",
+                    "downTime": "확인 필요",
+                    "status": "정상",
+                }
+            ],
+            "analysis": {
+                "overview": "경영진용 분석",
+                "sections": [
+                    {
+                        "title": "납기 위험 분석",
+                        "items": ["납기 위험 주문을 우선 점검해야 합니다."],
+                    }
+                ],
+                "recommendation": "생산 순서 조정 검토가 필요합니다.",
+            },
+        },
     }
     assert response.created_at != source.created_at
     assert response.updated_at != source.updated_at
+
+
+def test_business_report_generation_prefers_source_report_request() -> None:
+    service = BusinessReportGenerationService(
+        repository=FailingBusinessReportRepository(),
+        llm_business_report_transformer=FallbackBusinessReportTransformer(),
+    )
+
+    response = asyncio.run(
+        service.generate_business_report(
+            BusinessReportGenerateRequest(
+                report_id=3,
+                source_report={
+                    "report_id": 3,
+                    "report_title": "자재 부족 및 입고 지연 리스크 분석 보고서",
+                    "report_type": "ON_DEMAND",
+                    "author_id": 4,
+                    "target_start_date": "2026-06-01",
+                    "target_end_date": "2026-06-14",
+                    "markdown": "일반 보고서 markdown",
+                    "sections": {
+                        "summaryRows": [
+                            {
+                                "label": "총 생산계획 수",
+                                "value": "29",
+                                "change": "-",
+                            }
+                        ],
+                        "lineRows": [],
+                        "equipmentRows": [],
+                        "analysis": {},
+                    },
+                    "report_content": {},
+                    "report_evidence": [{"source": "production_plans"}],
+                    "related_simulation_id": None,
+                },
+            )
+        )
+    )
+
+    assert response.report_id == 3
+    assert response.report_type == "ON_DEMAND_BUSINESS"
+    assert response.report_content["markdown"] == "일반 보고서 markdown"
+    assert response.report_content["sections"]["summaryRows"] == [
+        {
+            "label": "총 생산계획 수",
+            "value": "29",
+            "change": "-",
+        }
+    ]
+    assert response.report_content["sections"]["lineRows"] == [
+        {
+            "line": "확인 필요",
+            "utilization": "-",
+            "completed": "-",
+            "defectRate": "-",
+            "note": "확인 필요",
+        }
+    ]
+    assert response.report_content["sections"]["equipmentRows"] == [
+        {
+            "name": "확인 필요",
+            "utilization": "확인 필요",
+            "downTime": "확인 필요",
+            "status": "확인 필요",
+        }
+    ]
+    assert response.report_content["sections"]["analysis"] == {
+        "overview": "분석 내용이 없습니다.",
+        "sections": [{"title": "종합 분석", "items": ["분석 내용이 없습니다."]}],
+        "recommendation": "생성 필요",
+    }
+    assert response.report_evidence == [{"source": "production_plans"}]
+
+
+class FailingBusinessReportRepository:
+    def get_report_by_id(self, report_id: int) -> BusinessReportSource | None:
+        raise AssertionError("source_report request should not query repository")
+
+
+class FallbackBusinessReportTransformer:
+    def run(self, source: BusinessReportSource) -> str:
+        return json.dumps(
+            {
+                "report_content": {},
+            },
+            ensure_ascii=False,
+        )

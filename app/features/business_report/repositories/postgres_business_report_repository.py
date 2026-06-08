@@ -18,6 +18,7 @@ class PostgresBusinessReportRepository:
                 author_id,
                 target_start_date,
                 target_end_date,
+                included_items,
                 report_content,
                 report_evidence,
                 related_simulation_id,
