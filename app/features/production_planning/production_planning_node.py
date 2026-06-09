@@ -5,6 +5,7 @@ from app.features.production_planning.config import SimulationConfig, SolverConf
 from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.json_formatter import build_dashboard_response
 from app.features.production_planning.langgraph_workflow import run_production_planning_graph
+from app.features.production_planning.preprocessing import normalize_request
 from app.features.production_planning.repositories.planning_data_repository import (
     PlanningDataRepository,
     PlanningInputBundle,
@@ -125,7 +126,6 @@ def generate_adjusted_production_plan_dashboard_response(
     Methodology:
         - Generate adjusted CP-SAT and simulation alternatives through the existing workflow.
         - Load the DB current plan as the baseline comparison source.
-        - Load DB simulation history only as historical context.
         - Delegate final dashboard JSON assembly and delta calculations to the formatter.
 
     Output:
@@ -142,9 +142,7 @@ def generate_adjusted_production_plan_dashboard_response(
     dashboard_response = build_dashboard_response(
         result,
         baseline_plans=baseline.current_plan_rows,
-        baseline_simulation_rows=baseline.simulation_result_rows,
-        baseline_simulation_detail_rows=baseline.simulation_detail_rows,
-        baseline_prediction_rows=baseline.ai_prediction_result_rows,
+        normalized_data=normalize_request(planning_request),
         products=planning_request.products,
         production_lines=planning_request.production_lines,
         product_line_capabilities=planning_request.product_line_capabilities,
@@ -156,6 +154,31 @@ def generate_adjusted_production_plan_dashboard_response(
     )
     dashboard_response["warnings"].extend(baseline.warnings)
     return dashboard_response
+
+
+def generate_adjusted_production_plan_api_response(
+    request: ProductionPlanningAdjustmentRequest,
+) -> dict:
+    """
+    Parameters:
+        - request: Thin adjustment request containing planning window, edit_orders, and
+          add_orders.
+
+    Methodology:
+        - Execute the LangGraph planning workflow once.
+        - Return both front-end dashboard simulation data and DB-save planning data from the
+          same graph result so the two payloads stay consistent.
+
+    Output:
+        - Dictionary containing planning_response and simulation_response.
+    """
+    result = generate_adjusted_production_planning_result(request)
+    if result.dashboard_response is None:
+        raise PlanningValidationError("Planning dashboard response was not generated.")
+    return {
+        "planning_response": result.to_adjusted_plan_response(),
+        "simulation_response": result.dashboard_response,
+    }
 
 
 def generate_adjusted_production_planning_result(

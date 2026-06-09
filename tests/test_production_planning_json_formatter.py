@@ -16,15 +16,23 @@ from app.features.production_planning.json_formatter import (
     validate_evaluation_draft,
     validate_final_ai_evaluation,
 )
+from app.features.production_planning.preprocessing import normalize_request
 from app.features.production_planning.schemas import (
     AdjustedPlanCandidate,
     AdjustedPlanRow,
+    BomItemInput,
+    ChangeoverRuleInput,
+    OrderInput,
     PlanComparisonSummary,
     PlanMetrics,
     PlanRankingItem,
     PlanResult,
     PlanSimulationResult,
+    ProductInput,
+    ProductionLineInput,
+    ProductionPlanningRequest,
     ProductionPlanningResult,
+    ProductLineCapabilityInput,
     ScheduleItem,
 )
 
@@ -51,6 +59,7 @@ def _simulation_result() -> PlanSimulationResult:
         expected_yield_rate=0.97,
         expected_defect_quantity=3.0,
         top_delay_causes=[{"cause": "MACHINE_ABNORMAL", "count": 3}],
+        order_delay_probabilities={"PLAN-1": 0.10},
         order_duration_estimates=[],
         sampling_summary={},
         event_summary=[
@@ -88,6 +97,57 @@ def _simulation_result() -> PlanSimulationResult:
             }
         ],
         scenario_summary={},
+    )
+
+
+def _normalized_data():
+    start = datetime(2026, 5, 1, 9, tzinfo=UTC)
+    return normalize_request(
+        ProductionPlanningRequest(
+            planning_start=start,
+            planning_end=start + timedelta(days=3),
+            orders=[
+                OrderInput(
+                    order_id="PLAN-1",
+                    product_id="1",
+                    order_quantity=100,
+                    due_date=start + timedelta(days=1),
+                    contract_amount=1_000_000,
+                    late_penalty_amount=200_000,
+                )
+            ],
+            products=[
+                ProductInput(product_id="1", product_name="Product", unit="KG")
+            ],
+            production_lines=[
+                ProductionLineInput(line_id="1", line_name="Line 1", is_active=True)
+            ],
+            product_line_capabilities=[
+                ProductLineCapabilityInput(
+                    product_id="1",
+                    line_id="1",
+                    process_time_per_unit_minutes=1,
+                    standard_yield_rate=Decimal("0.9500"),
+                )
+            ],
+            bom_items=[
+                BomItemInput(
+                    product_id="1",
+                    material_id="M-1",
+                    required_quantity_per_unit=Decimal("2.0"),
+                    loss_rate=Decimal("0.10"),
+                )
+            ],
+            changeover_rules=[
+                ChangeoverRuleInput(
+                    from_product_id="1",
+                    to_product_id="2",
+                    line_id="1",
+                    changeover_cost=50_000,
+                    changeover_minutes=30,
+                )
+            ],
+        )
     )
 
 
@@ -195,6 +255,7 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
         result,
         include_full_event_timeline=True,
         include_internal_debug_payloads=True,
+        normalized_data=_normalized_data(),
         baseline_plans=[
             {
                 "schedule_id": 10,
@@ -209,16 +270,6 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
                 "plan_status": "SCHEDULED",
             }
         ],
-        baseline_simulation_rows=[
-            {
-                "created_at": datetime(2026, 4, 30, tzinfo=UTC),
-                "delay_probability": 0.20,
-                "expected_delayed_order_count": 5.0,
-                "p95_tardiness_minutes": 1000.0,
-                "expected_total_risk_cost": 1_000_000.0,
-                "material_shortage_probability": 0.50,
-            }
-        ],
     )
 
     alternative = response["alternatives"][0]
@@ -228,10 +279,26 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
     assert alternative["plans"][0]["order_id"] == 1
     assert alternative["plans"][0]["product_id"] == 1
     assert alternative["plans"][0]["line_id"] == 1
+    assert "estimated_duration_hr" not in alternative["plans"][0]
+    assert "estimated_duration_hr" not in response["baseline"]["plans"][0]
     assert response["baseline"]["source"] == "DB_CURRENT_PLAN"
-    assert alternative["computed_deltas"]["delay_probability_reduction_percent"] is None
+    assert response["baseline"]["plan_value_analysis"]["contract_total"] == 1_000_000
+    assert (
+        response["baseline"]["plan_value_analysis"]["plan_net_value_monetary"]
+        == 800_000
+    )
+    assert alternative["plan_value_analysis"]["expected_penalty_total"] == 200_000
+    assert alternative["plan_value_analysis"]["plan_net_value_monetary"] == 800_000
+    assert (
+        alternative["plan_value_analysis"]["plan_net_value_monetary"]
+        == alternative["plan_value_analysis"]["contract_total"]
+        - alternative["plan_value_analysis"]["expected_penalty_total"]
+        - alternative["plan_value_analysis"]["line_change_fee_total"]
+    )
+    assert alternative["plan_value_analysis"]["material_adj_quantity_total"] == 231.0
+    assert alternative["computed_deltas"]["delay_probability_reduction_percent"] == 90.0
+    assert alternative["computed_deltas"]["delay_probability_delta_percent_points"] == 90.0
     assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == -1.0
-    assert alternative["computed_deltas"]["p95_tardiness_reduction_minutes"] == -340.0
     assert alternative["computed_deltas"]["risk_cost_saving_amount"] == "400000.00"
     assert alternative["computed_deltas"]["risk_cost_saving_percent"] == 40.0
     assert {event["event"] for event in alternative["important_events"]} == {
@@ -265,58 +332,6 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
                 "plan_status": "SCHEDULED",
             }
         ],
-        baseline_simulation_rows=[
-            {
-                "simulation_id": 10,
-                "simulation_type": "DUE_DATE_OPTIMIZATION",
-                "simulation_name": "납기일 최적화 기준",
-                "simulation_group_id": "SIM-GROUP",
-                "before_total_delay_hr": Decimal("42.19"),
-                "after_total_delay_hr": Decimal("15.42"),
-                "delay_reduction_hr": Decimal("26.77"),
-                "before_avg_line_utilization_rate": Decimal("0.72"),
-                "after_avg_line_utilization_rate": Decimal("0.8291"),
-                "before_total_production_quantity": 120,
-                "after_total_production_quantity": 100,
-                "before_bottleneck_line_id": 1,
-                "after_bottleneck_line_id": 2,
-                "cost_change_amount": Decimal("620000.00"),
-                "recommendation_grade": "MEDIUM",
-                "created_at": start - timedelta(days=1),
-                "applied_at": start,
-            }
-        ],
-        baseline_simulation_detail_rows=[
-            {
-                "simulation_id": 10,
-                "order_id": 1,
-                "plan_id": 10,
-                "before_line_id": 1,
-                "before_sequence": 3,
-                "before_start_at": start,
-                "before_end_at": start + timedelta(days=2),
-                "expected_completion_date": start.date(),
-                "before_quantity": 100,
-                "after_line_id": 2,
-                "after_sequence": 1,
-                "after_start_at": start - timedelta(hours=1),
-                "after_end_at": start + timedelta(hours=1),
-                "after_quantity": 100,
-                "after_is_delayed": False,
-                "change_reason": "과거 대응안",
-            }
-        ],
-        baseline_prediction_rows=[
-            {
-                "prediction_id": 99,
-                "order_id": 1,
-                "plan_id": 10,
-                "product_id": 1,
-                "delay_probability": Decimal("0.8"),
-                "predicted_delay_days": Decimal("2.0"),
-                "predicted_at": start - timedelta(hours=1),
-            }
-        ],
         products=[
             {
                 "product_id": 1,
@@ -340,94 +355,48 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
 
     assert baseline["current_state_summary"]["expected_delay_days"] == 2.0
     assert baseline["current_state_summary"]["delay_risk_order_count"] == 1
+    assert baseline["current_state_summary"]["delay_probability_percent"] == 100.0
+    assert (
+        baseline["current_state_summary"]["delay_probability_basis"]
+        == "CURRENT_PLAN_DELAYED_ORDER_RATE"
+    )
     assert baseline["current_state_summary"]["delivery_fulfillment_rate_percent"] == 0.0
     assert baseline["current_state_summary"]["avg_line_utilization_percent"] == 66.67
+    assert baseline["current_state_summary"]["baseline_plan_ids"] == [10]
+    assert baseline["current_state_summary"]["plan_completion_at"] == (
+        start + timedelta(days=2)
+    ).isoformat()
     assert baseline["provenance"]["source"] == (
         "ai_planning.v_existing_schedules_for_planning"
     )
-    historical_result = baseline["historical_applied_result"]["simulation_result"]
-    assert {
-        "simulation_id",
-        "simulation_group_id",
-        "simulation_name",
-        "simulation_type",
-        "before_total_delay_hr",
-        "after_total_delay_hr",
-        "delay_reduction_hr",
-        "before_avg_line_utilization_rate",
-        "after_avg_line_utilization_rate",
-        "before_total_production_quantity",
-        "after_total_production_quantity",
-        "before_bottleneck_line_id",
-        "after_bottleneck_line_id",
-        "cost_change_amount",
-        "recommendation_grade",
-        "created_at",
-        "applied_at",
-    }.issubset(historical_result)
-    assert historical_result["simulation_id"] == 10
-    assert historical_result["simulation_group_id"] == "SIM-GROUP"
-    assert historical_result["simulation_name"] == "납기일 최적화 기준"
-    assert historical_result["simulation_type"] == "DUE_DATE_OPTIMIZATION"
-    assert historical_result["before_total_delay_hr"] == 42.19
-    assert historical_result["after_total_delay_hr"] == 15.42
-    assert historical_result["delay_reduction_hr"] == 26.77
-    assert historical_result["before_avg_line_utilization_rate"] == 0.72
-    assert historical_result["after_avg_line_utilization_rate"] == 0.8291
-    assert historical_result["before_total_production_quantity"] == 120
-    assert historical_result["after_total_production_quantity"] == 100
-    assert historical_result["before_bottleneck_line_id"] == 1
-    assert historical_result["after_bottleneck_line_id"] == 2
-    assert historical_result["cost_change_amount"] == "620000.00"
-    assert historical_result["recommendation_grade"] == "MEDIUM"
-    assert historical_result["created_at"] == (start - timedelta(days=1)).isoformat()
-    assert historical_result["applied_at"] == start.isoformat()
-    historical_detail = baseline["historical_applied_result"]["details"][0]
-    assert {
-        "simulation_id",
-        "order_id",
-        "plan_id",
-        "before_line_id",
-        "after_line_id",
-        "before_sequence",
-        "after_sequence",
-        "before_start_at",
-        "before_end_at",
-        "after_start_at",
-        "after_end_at",
-        "expected_completion_date",
-        "before_quantity",
-        "after_quantity",
-        "after_is_delayed",
-        "change_reason",
-    }.issubset(historical_detail)
-    assert historical_detail["simulation_id"] == 10
-    assert historical_detail["order_id"] == 1
-    assert historical_detail["plan_id"] == 10
-    assert historical_detail["after_line_id"] == 2
-    assert historical_detail["before_line_id"] == 1
-    assert historical_detail["before_sequence"] == 3
-    assert historical_detail["after_sequence"] == 1
-    assert historical_detail["before_start_at"] == start.isoformat()
-    assert historical_detail["before_end_at"] == (start + timedelta(days=2)).isoformat()
-    assert historical_detail["after_start_at"] == (
-        start - timedelta(hours=1)
-    ).isoformat()
-    assert historical_detail["after_end_at"] == (start + timedelta(hours=1)).isoformat()
-    assert historical_detail["expected_completion_date"] == start.date().isoformat()
-    assert historical_detail["before_quantity"] == 100
-    assert historical_detail["after_quantity"] == 100
-    assert historical_detail["after_is_delayed"] is False
-    assert historical_detail["change_reason"] == "과거 대응안"
-    assert alternative["computed_deltas"]["expected_delay_days_reduction"] == 1.83
-    assert "expected_delay_days" in {
+    assert "historical_applied_result" not in baseline
+    assert "historical_simulation" not in response["data_sources"]
+    assert alternative["computed_deltas"]["delay_probability_reduction_percent"] == 90.0
+    assert alternative["computed_deltas"]["delay_probability_delta_percent_points"] == 90.0
+    assert alternative["computed_deltas"]["plan_count_delta"] == 0.0
+    assert alternative["computed_deltas"]["matched_baseline_plan_count"] == 1
+    assert alternative["computed_deltas"]["new_plan_count"] == 0
+    assert alternative["computed_deltas"]["plan_completion_delta_hours"] == 47.0
+    assert alternative["simulation_metrics"]["alternative_plan_count"] == 1
+    assert alternative["simulation_metrics"]["matched_baseline_plan_count"] == 1
+    assert "delay_probability_percent" in {
+        row["metric_code"] for row in alternative["simulation_comparison_table"]
+    }
+    assert "expected_delay_days" not in {
         row["metric_code"] for row in alternative["simulation_comparison_table"]
     }
     assert "material_shortage_quantity" not in {
         row["metric_code"] for row in alternative["simulation_comparison_table"]
     }
     assert alternative["selected_plan_change_schedule"][0]["order_id"] == 1
+    assert alternative["selected_plan_change_schedule"][0]["plan_id"] == 10
     assert alternative["selected_plan_change_schedule"][0]["sequence_change"] == "3 -> 1"
+    assert "before_estimated_duration_hr" not in alternative[
+        "selected_plan_change_schedule"
+    ][0]
+    assert "after_estimated_duration_hr" not in alternative[
+        "selected_plan_change_schedule"
+    ][0]
     assert alternative["application_conditions"]["target_products"][0]["product_id"] == 1
 
 
@@ -447,37 +416,6 @@ def test_dashboard_response_matches_change_schedule_by_plan_id_when_order_id_dif
                 "order_quantity": 100,
                 "plan_sequence": 4,
                 "plan_status": "SCHEDULED",
-            }
-        ],
-        baseline_simulation_rows=[
-            {
-                "simulation_id": 10,
-                "before_avg_line_utilization_rate": Decimal("0.72"),
-                "created_at": start - timedelta(days=1),
-            }
-        ],
-        baseline_simulation_detail_rows=[
-            {
-                "simulation_id": 10,
-                "order_id": 999,
-                "plan_id": 1,
-                "before_line_id": 2,
-                "before_sequence": 4,
-                "before_start_at": start + timedelta(hours=2),
-                "before_end_at": start + timedelta(hours=3),
-                "expected_completion_date": start.date(),
-                "before_quantity": 100,
-            }
-        ],
-        baseline_prediction_rows=[
-            {
-                "prediction_id": 99,
-                "order_id": 999,
-                "plan_id": 1,
-                "product_id": 1,
-                "delay_probability": Decimal("0.8"),
-                "predicted_delay_days": Decimal("2.0"),
-                "predicted_at": start - timedelta(hours=1),
             }
         ],
         products=[
@@ -695,7 +633,6 @@ def test_dashboard_response_hides_missing_value_tokens_from_llm_evidence() -> No
     response = build_dashboard_response(
         _planning_result(),
         include_internal_debug_payloads=True,
-        baseline_simulation_rows=[{"delay_probability": 0.20}],
     )
 
     evidence = response["alternatives"][0]["llm_evidence"]

@@ -170,6 +170,7 @@ def _aggregate_plan_simulation(
             {"cause": cause, "count": count}
             for cause, count in delay_causes.most_common(5)
         ],
+        order_delay_probabilities=_build_order_delay_probabilities(plan, scenarios),
         order_duration_estimates=_build_order_duration_estimates(plan, scenarios),
         sampling_summary=_build_sampling_summary(distributions),
         event_summary=_build_event_summary(scenarios),
@@ -213,6 +214,7 @@ def _disabled_result(plan: PlanResult) -> PlanSimulationResult:
         expected_yield_rate=None,
         expected_defect_quantity=None,
         top_delay_causes=[],
+        order_delay_probabilities={},
         order_duration_estimates=[],
         sampling_summary={},
         event_summary=[],
@@ -300,6 +302,35 @@ def _build_order_duration_estimates(
             }
         )
     return rows
+
+
+def _build_order_delay_probabilities(
+    plan: PlanResult,
+    scenarios: list[ScenarioResult],
+) -> dict[str, float]:
+    """
+    Parameters:
+        - plan: Plan candidate whose scheduled orders are simulated.
+        - scenarios: Monte Carlo DES scenario results for that plan.
+
+    Methodology:
+        - Count how often each scheduled order appears in ScenarioResult.delayed_order_ids.
+        - Divide by scenario count to get an order-level delay probability.
+
+    Output:
+        - Mapping of order_id to Monte Carlo delay probability in the 0.0-1.0 range.
+    """
+    if not scenarios:
+        return {}
+    total = len(scenarios)
+    order_ids = {item.order_id for item in plan.schedule_items}
+    return {
+        order_id: sum(
+            1 for scenario in scenarios if order_id in scenario.delayed_order_ids
+        )
+        / total
+        for order_id in order_ids
+    }
 
 
 def _build_event_summary(scenarios: list[ScenarioResult]) -> list[dict]:

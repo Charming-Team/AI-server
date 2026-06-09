@@ -8,6 +8,10 @@ import numpy as np
 import pandas as pd
 
 from app.features.delay_prediction.features import FEATURE_COLUMNS
+from app.features.delay_prediction.metrics import clip_predictions
+
+IDENTITY_TARGET_TRANSFORM = "identity"
+LOG1P_TARGET_TRANSFORM = "log1p"
 
 
 def prepare_inference_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -17,10 +21,17 @@ def prepare_inference_frame(df: pd.DataFrame) -> pd.DataFrame:
     return df[FEATURE_COLUMNS].copy()
 
 
-def predict_delay_hours(model, df: pd.DataFrame):
+def predict_delay_hours(
+    model,
+    df: pd.DataFrame,
+    *,
+    target_transform: str = IDENTITY_TARGET_TRANSFORM,
+):
     inference_frame = prepare_inference_frame(df)
     predictions = model.predict(inference_frame)
-    return np.clip(predictions, a_min=0.0, a_max=None)
+    if target_transform == LOG1P_TARGET_TRANSFORM:
+        predictions = np.expm1(np.asarray(predictions, dtype=float))
+    return clip_predictions(predictions)
 
 
 def save_model_artifacts(model, artifact_dir: Path, metadata: dict[str, object]) -> None:
