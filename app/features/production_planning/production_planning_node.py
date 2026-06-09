@@ -5,6 +5,7 @@ from app.features.production_planning.config import SimulationConfig, SolverConf
 from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.json_formatter import build_dashboard_response
 from app.features.production_planning.langgraph_workflow import run_production_planning_graph
+from app.features.production_planning.preprocessing import normalize_request
 from app.features.production_planning.repositories.planning_data_repository import (
     PlanningDataRepository,
     PlanningInputBundle,
@@ -141,6 +142,7 @@ def generate_adjusted_production_plan_dashboard_response(
     dashboard_response = build_dashboard_response(
         result,
         baseline_plans=baseline.current_plan_rows,
+        normalized_data=normalize_request(planning_request),
         products=planning_request.products,
         production_lines=planning_request.production_lines,
         product_line_capabilities=planning_request.product_line_capabilities,

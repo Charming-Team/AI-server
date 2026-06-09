@@ -20,6 +20,7 @@ from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.schemas import (
     PLAN_VARIANT_NAMES,
     AdjustedPlanCandidate,
+    NormalizedPlanningData,
     PlanSimulationResult,
     ProductionPlanningResult,
 )
@@ -267,6 +268,7 @@ def build_dashboard_response(
     result: ProductionPlanningResult,
     *,
     baseline_plans: list[dict[str, Any]] | None = None,
+    normalized_data: NormalizedPlanningData | None = None,
     products: list[Any] | None = None,
     production_lines: list[Any] | None = None,
     product_line_capabilities: list[Any] | None = None,
@@ -284,6 +286,7 @@ def build_dashboard_response(
     Parameters:
         - result: Internal production planning result with adjusted plans and simulations.
         - baseline_plans: DB current production plan rows for the same planning window.
+        - normalized_data: Normalized planning data used for plan value analysis.
         - products: Product master rows used for unit-aware fulfillment-rate calculations.
         - production_lines: Production line master rows used for application conditions.
         - product_line_capabilities: Product-line capability rows used for target products.
@@ -316,6 +319,11 @@ def build_dashboard_response(
         planning_start=planning_start,
         planning_end=planning_end,
     )
+    baseline_value_analysis = build_plan_value_analysis(
+        baseline_plans or [],
+        _baseline_order_delay_probabilities(baseline_plans or []),
+        normalized_data,
+    )
     baseline_metrics = baseline_context["metrics"]
     plan_results_by_code = {
         plan.plan_variant_code: plan for plan in result.plan_results
@@ -346,6 +354,11 @@ def build_dashboard_response(
         simulation_comparison_table = build_simulation_comparison_table(
             baseline_context["current_state_summary"],
             alternative_current_state,
+        )
+        alternative_value_analysis = build_plan_value_analysis(
+            candidate.plans,
+            simulation.order_delay_probabilities if simulation else {},
+            normalized_data,
         )
         selected_plan_change_schedule = build_selected_plan_change_schedule(
             candidate,
@@ -385,6 +398,7 @@ def build_dashboard_response(
                 "comparison_metrics": comparison["metrics"],
                 "computed_deltas": comparison["computed_deltas"],
                 "simulation_comparison_table": simulation_comparison_table,
+                "plan_value_analysis": alternative_value_analysis,
                 "application_conditions": application_conditions,
                 "selected_plan_change_schedule": selected_plan_change_schedule,
                 "important_events": important_events,
@@ -415,6 +429,7 @@ def build_dashboard_response(
             "plans": normalize_baseline_plan_rows(baseline_plans or []),
             "simulation_metrics": baseline_metrics,
             "current_state_summary": baseline_context["current_state_summary"],
+            "plan_value_analysis": baseline_value_analysis,
             "provenance": baseline_context["provenance"],
         },
         "alternatives": alternatives,
@@ -1500,6 +1515,261 @@ def select_important_events(
             selected.append({"source": "TIMELINE", **row})
 
     return selected[:limit]
+
+
+def build_plan_value_analysis(
+    plan_items: list[Any],
+    order_delay_probabilities: dict[str, float],
+    data: NormalizedPlanningData | None,
+    *,
+    delay_threshold: float = 0.10,
+) -> dict[str, Any] | None:
+    """
+    Parameters:
+        - plan_items: Baseline DB plan rows or adjusted plan rows to evaluate.
+        - order_delay_probabilities: Order-level delay probabilities keyed by order ID.
+        - data: Normalized planning data containing orders, BOM, capabilities, and rules.
+        - delay_threshold: Probability threshold that turns delay probability into a flag.
+
+    Methodology:
+        - Recalculate a plan-level monetary value from contract amount, expected delay penalty,
+          and line change fee.
+        - Keep material adjustment as a separate quantity-only term because the DB input does
+          not include material unit prices.
+        - Resolve order IDs through exact, canonical, and PLAN-prefixed keys so DB baseline
+          rows and internal CP-SAT rows can use the same calculation.
+
+    Output:
+        - Plan value analysis block, or None when normalized planning data is unavailable.
+    """
+    if data is None:
+        return None
+
+    total_contract = 0
+    total_penalty = 0
+    total_material_adjustment = Decimal("0")
+    total_line_change_fee = 0
+    delay_flag_count = 0
+
+    for line_id, line_items in _plan_items_by_line(plan_items).items():
+        previous_product_id: str | None = None
+        for item in line_items:
+            normalized_order = _lookup_normalized_order(item, data)
+            product_id = _plan_item_product_id(item, normalized_order)
+            planned_quantity = _plan_item_planned_quantity(item, normalized_order)
+            contract_amount = _plan_item_contract_amount(item, normalized_order)
+            late_penalty_amount = _plan_item_late_penalty_amount(item, normalized_order)
+            delay_probability = _plan_item_delay_probability(
+                item,
+                order_delay_probabilities,
+            )
+            delay_flag = delay_probability >= delay_threshold
+
+            if delay_flag:
+                delay_flag_count += 1
+                total_penalty += late_penalty_amount
+
+            total_contract += contract_amount
+            total_material_adjustment += _material_adjustment_quantity(
+                product_id,
+                str(line_id),
+                planned_quantity,
+                data,
+            )
+            if previous_product_id is not None and previous_product_id != product_id:
+                total_line_change_fee += _line_change_fee(
+                    previous_product_id,
+                    product_id,
+                    str(line_id),
+                    data,
+                )
+            previous_product_id = product_id
+
+    return {
+        "contract_total": total_contract,
+        "expected_penalty_total": total_penalty,
+        "material_adj_quantity_total": _decimal_to_float(
+            total_material_adjustment.quantize(Decimal("0.01"))
+        ),
+        "line_change_fee_total": total_line_change_fee,
+        "plan_net_value_monetary": (
+            total_contract - total_penalty - total_line_change_fee
+        ),
+        "delay_threshold_percent": delay_threshold * 100,
+        "delay_flag_order_count": delay_flag_count,
+        "note": "material_adj_quantity_total은 수량 단위입니다 (자재 단가 미존재).",
+    }
+
+
+def _baseline_order_delay_probabilities(
+    baseline_plan_rows: list[dict[str, Any]],
+) -> dict[str, float]:
+    probabilities: dict[str, float] = {}
+    for row in baseline_plan_rows:
+        delayed = _plan_row_status_is_delayed(row) or _current_plan_tardiness_minutes(row) > 0
+        value = 1.0 if delayed else 0.0
+        for key in _plan_item_identity_keys(row):
+            probabilities[key] = value
+    return probabilities
+
+
+def _plan_items_by_line(plan_items: list[Any]) -> dict[str, list[Any]]:
+    result: dict[str, list[Any]] = {}
+    for item in plan_items:
+        line_id = _get_plan_item_field(item, "line_id")
+        if line_id is None:
+            continue
+        result.setdefault(str(line_id), []).append(item)
+    for line_items in result.values():
+        line_items.sort(
+            key=lambda item: (
+                _plan_item_datetime_sort_key(
+                    _get_plan_item_field(item, "planned_start_at")
+                    or _get_plan_item_field(item, "start_time")
+                ),
+                str(_get_plan_item_field(item, "order_id") or ""),
+            )
+        )
+    return result
+
+
+def _lookup_normalized_order(item: Any, data: NormalizedPlanningData):
+    for key in _plan_item_identity_keys(item):
+        normalized_order = data.orders.get(key)
+        if normalized_order is not None:
+            return normalized_order
+    return None
+
+
+def _plan_item_identity_keys(item: Any) -> list[str]:
+    keys: list[str] = []
+    for field_name in ("order_id", "plan_id", "schedule_id"):
+        value = _get_plan_item_field(item, field_name)
+        if value is None:
+            continue
+        text = str(value)
+        canonical = _canonical_id(text)
+        for candidate in (text, canonical, f"PLAN-{canonical}" if canonical else None):
+            if candidate and candidate not in keys:
+                keys.append(candidate)
+    return keys
+
+
+def _plan_item_delay_probability(
+    item: Any,
+    order_delay_probabilities: dict[str, float],
+) -> float:
+    for key in _plan_item_identity_keys(item):
+        if key in order_delay_probabilities:
+            return float(order_delay_probabilities[key])
+    return 0.0
+
+
+def _plan_item_product_id(item: Any, normalized_order) -> str:
+    value = _get_plan_item_field(item, "product_id")
+    if value is None and normalized_order is not None:
+        value = normalized_order.order.product_id
+    return str(value or "")
+
+
+def _plan_item_planned_quantity(item: Any, normalized_order) -> int:
+    value = _first_non_none_plan_item_field(
+        item,
+        ("planned_quantity", "quantity", "order_quantity", "before_quantity"),
+    )
+    if value is None and normalized_order is not None:
+        value = normalized_order.order.order_quantity
+    return int(_to_decimal(value) or Decimal("0"))
+
+
+def _plan_item_contract_amount(item: Any, normalized_order) -> int:
+    if normalized_order is not None:
+        return int(normalized_order.order.order_amount or 0)
+    value = _first_non_none_plan_item_field(
+        item,
+        ("contract_amount", "order_amount"),
+    )
+    return int(_to_decimal(value) or Decimal("0"))
+
+
+def _plan_item_late_penalty_amount(item: Any, normalized_order) -> int:
+    if normalized_order is not None:
+        return int(normalized_order.order.late_penalty_amount or 0)
+    value = _get_plan_item_field(item, "late_penalty_amount")
+    return int(_to_decimal(value) or Decimal("0"))
+
+
+def _material_adjustment_quantity(
+    product_id: str,
+    line_id: str,
+    planned_quantity: int,
+    data: NormalizedPlanningData,
+) -> Decimal:
+    if not product_id or planned_quantity <= 0:
+        return Decimal("0")
+    required_quantity = sum(
+        (
+            bom_item.required_quantity_per_unit
+            * Decimal(str(planned_quantity))
+            * (Decimal("1") + bom_item.loss_rate)
+            for bom_item in data.bom_items_by_product_id.get(product_id, [])
+        ),
+        Decimal("0"),
+    )
+    return required_quantity * (Decimal("2") - _yield_rate(product_id, line_id, data))
+
+
+def _yield_rate(
+    product_id: str,
+    line_id: str,
+    data: NormalizedPlanningData,
+) -> Decimal:
+    capability = data.capabilities.get((product_id, line_id))
+    if capability is None:
+        return Decimal("1")
+    if capability.standard_yield_rate is not None:
+        return capability.standard_yield_rate
+    if capability.yield_rate_scaled is not None:
+        return Decimal(str(capability.yield_rate_scaled)) / Decimal("10000")
+    return Decimal("1")
+
+
+def _line_change_fee(
+    from_product_id: str,
+    to_product_id: str,
+    line_id: str,
+    data: NormalizedPlanningData,
+) -> int:
+    rule = data.changeover_rules.get((from_product_id, to_product_id, line_id))
+    if rule is None:
+        rule = data.changeover_rules.get((from_product_id, to_product_id, None))
+    return int(rule.changeover_cost or 0) if rule is not None else 0
+
+
+def _plan_row_status_is_delayed(row: dict[str, Any]) -> bool:
+    status = _first_present(row, ["plan_status", "status", "order_status"])
+    return str(status or "").strip().upper() == "DELAYED"
+
+
+def _get_plan_item_field(item: Any, key: str) -> Any:
+    if isinstance(item, dict):
+        return item.get(key)
+    return getattr(item, key, None)
+
+
+def _first_non_none_plan_item_field(item: Any, keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        value = _get_plan_item_field(item, key)
+        if value is not None:
+            return value
+    return None
+
+
+def _plan_item_datetime_sort_key(value: Any) -> str:
+    parsed = _as_datetime(value)
+    if parsed is None:
+        return ""
+    return parsed.isoformat()
 
 
 def build_evidence_json(

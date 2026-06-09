@@ -352,6 +352,7 @@ class PlanSimulationResult(BaseModel):
     expected_yield_rate: float | None
     expected_defect_quantity: float | None
     top_delay_causes: list[dict[str, Any]]
+    order_delay_probabilities: dict[str, float] = Field(default_factory=dict)
     order_duration_estimates: list[dict[str, Any]] = Field(default_factory=list)
     sampling_summary: dict[str, Any] = Field(default_factory=dict)
     event_summary: list[dict[str, Any]] = Field(default_factory=list)

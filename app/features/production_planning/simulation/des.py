@@ -69,6 +69,7 @@ class ScenarioResult:
     event_counts: dict[str, int] = field(default_factory=dict)
     event_log: list[dict] = field(default_factory=list)
     order_duration_minutes_by_order_id: dict[str, int] = field(default_factory=dict)
+    delayed_order_ids: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -290,6 +291,7 @@ def run_discrete_event_simulation(
         event_counts=totals["event_counts"],
         event_log=sorted(totals["event_log"], key=lambda event: event["event_time"]),
         order_duration_minutes_by_order_id=totals["order_duration_minutes_by_order_id"],
+        delayed_order_ids=frozenset(totals.get("delayed_order_id_set", set())),
     )
 
 
@@ -375,6 +377,7 @@ def _initial_unscheduled_metrics(plan: PlanResult, data: NormalizedPlanningData)
         else {},
         "event_log": event_log,
         "order_duration_minutes_by_order_id": {},
+        "delayed_order_id_set": set(),
     }
 
 
@@ -515,6 +518,7 @@ def _finalize_item(
         round((actual_end - normalized_order.order.due_date).total_seconds() / 60),
     )
     if tardiness:
+        totals["delayed_order_id_set"].add(item.order_id)
         totals["delayed_order_count"] += 1
         totals["late_penalty_amount"] += normalized_order.order.late_penalty_amount
         _increment_counter(totals["event_counts"], EVENT_LATE_COMPLETION)

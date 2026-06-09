@@ -16,15 +16,23 @@ from app.features.production_planning.json_formatter import (
     validate_evaluation_draft,
     validate_final_ai_evaluation,
 )
+from app.features.production_planning.preprocessing import normalize_request
 from app.features.production_planning.schemas import (
     AdjustedPlanCandidate,
     AdjustedPlanRow,
+    BomItemInput,
+    ChangeoverRuleInput,
+    OrderInput,
     PlanComparisonSummary,
     PlanMetrics,
     PlanRankingItem,
     PlanResult,
     PlanSimulationResult,
+    ProductInput,
+    ProductionLineInput,
+    ProductionPlanningRequest,
     ProductionPlanningResult,
+    ProductLineCapabilityInput,
     ScheduleItem,
 )
 
@@ -51,6 +59,7 @@ def _simulation_result() -> PlanSimulationResult:
         expected_yield_rate=0.97,
         expected_defect_quantity=3.0,
         top_delay_causes=[{"cause": "MACHINE_ABNORMAL", "count": 3}],
+        order_delay_probabilities={"PLAN-1": 0.10},
         order_duration_estimates=[],
         sampling_summary={},
         event_summary=[
@@ -88,6 +97,57 @@ def _simulation_result() -> PlanSimulationResult:
             }
         ],
         scenario_summary={},
+    )
+
+
+def _normalized_data():
+    start = datetime(2026, 5, 1, 9, tzinfo=UTC)
+    return normalize_request(
+        ProductionPlanningRequest(
+            planning_start=start,
+            planning_end=start + timedelta(days=3),
+            orders=[
+                OrderInput(
+                    order_id="PLAN-1",
+                    product_id="1",
+                    order_quantity=100,
+                    due_date=start + timedelta(days=1),
+                    contract_amount=1_000_000,
+                    late_penalty_amount=200_000,
+                )
+            ],
+            products=[
+                ProductInput(product_id="1", product_name="Product", unit="KG")
+            ],
+            production_lines=[
+                ProductionLineInput(line_id="1", line_name="Line 1", is_active=True)
+            ],
+            product_line_capabilities=[
+                ProductLineCapabilityInput(
+                    product_id="1",
+                    line_id="1",
+                    process_time_per_unit_minutes=1,
+                    standard_yield_rate=Decimal("0.9500"),
+                )
+            ],
+            bom_items=[
+                BomItemInput(
+                    product_id="1",
+                    material_id="M-1",
+                    required_quantity_per_unit=Decimal("2.0"),
+                    loss_rate=Decimal("0.10"),
+                )
+            ],
+            changeover_rules=[
+                ChangeoverRuleInput(
+                    from_product_id="1",
+                    to_product_id="2",
+                    line_id="1",
+                    changeover_cost=50_000,
+                    changeover_minutes=30,
+                )
+            ],
+        )
     )
 
 
@@ -195,6 +255,7 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
         result,
         include_full_event_timeline=True,
         include_internal_debug_payloads=True,
+        normalized_data=_normalized_data(),
         baseline_plans=[
             {
                 "schedule_id": 10,
@@ -221,6 +282,20 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
     assert "estimated_duration_hr" not in alternative["plans"][0]
     assert "estimated_duration_hr" not in response["baseline"]["plans"][0]
     assert response["baseline"]["source"] == "DB_CURRENT_PLAN"
+    assert response["baseline"]["plan_value_analysis"]["contract_total"] == 1_000_000
+    assert (
+        response["baseline"]["plan_value_analysis"]["plan_net_value_monetary"]
+        == 800_000
+    )
+    assert alternative["plan_value_analysis"]["expected_penalty_total"] == 200_000
+    assert alternative["plan_value_analysis"]["plan_net_value_monetary"] == 800_000
+    assert (
+        alternative["plan_value_analysis"]["plan_net_value_monetary"]
+        == alternative["plan_value_analysis"]["contract_total"]
+        - alternative["plan_value_analysis"]["expected_penalty_total"]
+        - alternative["plan_value_analysis"]["line_change_fee_total"]
+    )
+    assert alternative["plan_value_analysis"]["material_adj_quantity_total"] == 231.0
     assert alternative["computed_deltas"]["delay_probability_reduction_percent"] == 90.0
     assert alternative["computed_deltas"]["delay_probability_delta_percent_points"] == 90.0
     assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == -1.0
