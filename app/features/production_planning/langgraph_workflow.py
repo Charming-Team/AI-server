@@ -477,6 +477,7 @@ def format_dashboard_response_node(
     dashboard_response = build_dashboard_response(
         state["result"],
         baseline_plans=baseline_inputs["baseline_plans"],
+        normalized_data=state["normalized_data"],
         products=validated.products,
         production_lines=validated.production_lines,
         product_line_capabilities=validated.product_line_capabilities,
