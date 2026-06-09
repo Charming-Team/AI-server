@@ -284,6 +284,55 @@ class BaselineProvenance(BaseModel):
     )
 
 
+class PlanValueAnalysis(BaseModel):
+    contract_total: int = Field(
+        ...,
+        description="계획에 포함된 주문의 총 수주 금액입니다. 단위는 KRW입니다.",
+    )
+    expected_penalty_total: int = Field(
+        ...,
+        description=(
+            "지연 확률이 threshold 이상인 주문에 대해 반영한 예상 지연 패널티 합계입니다. "
+            "단위는 KRW입니다."
+        ),
+    )
+    material_adj_quantity_total: float = Field(
+        ...,
+        description=(
+            "BOM 소요량, loss_rate, line yield를 반영한 자재 조정 수량 합계입니다. "
+            "자재 단가가 없으므로 금액이 아니라 수량 단위입니다."
+        ),
+    )
+    line_change_fee_total: int = Field(
+        ...,
+        description=(
+            "같은 라인에서 이전 제품과 다음 제품이 달라질 때 발생하는 changeover_cost 합계입니다. "
+            "from_product_id와 to_product_id가 같으면 0으로 계산됩니다."
+        ),
+    )
+    plan_net_value_monetary: int = Field(
+        ...,
+        description=(
+            "금액 기준 계획 순가치입니다. "
+            "contract_total - expected_penalty_total - line_change_fee_total로 계산합니다."
+        ),
+    )
+    delay_threshold_percent: float = Field(
+        ...,
+        description="예상 지연 패널티를 반영할 order-level 지연 확률 기준값입니다. 단위는 %입니다.",
+    )
+    delay_flag_order_count: int = Field(
+        ...,
+        description="지연 확률이 delay_threshold_percent 이상이라 패널티가 반영된 주문 수입니다.",
+    )
+    note: str = Field(
+        ...,
+        description=(
+            "material_adj_quantity_total이 금액이 아니라 수량 단위임을 설명하는 메모입니다."
+        ),
+    )
+
+
 class BaselineBlock(BaseModel):
     source: str = Field(
         ..., description="기준 데이터 출처 식별자. 항상 DB_CURRENT_PLAN입니다."
@@ -304,6 +353,13 @@ class BaselineBlock(BaseModel):
         description=(
             "납기·지연·가동률 등 현재 상태 요약. "
             "simulation_metrics의 원본 산출 데이터입니다."
+        ),
+    )
+    plan_value_analysis: PlanValueAnalysis | None = Field(
+        None,
+        description=(
+            "현재 DB 생산 계획의 계획 순가치 분석입니다. "
+            "수주 금액, 예상 지연 패널티, 자재 조정 수량, 라인 전환 비용을 포함합니다."
         ),
     )
     provenance: BaselineProvenance = Field(
@@ -668,6 +724,13 @@ class AlternativeBlock(BaseModel):
         description=(
             "주요 지표별 비교 테이블. "
             "딜레이 확률, 납기 충족률, 지연 위험 주문 수, 라인 가동률 항목을 포함합니다."
+        ),
+    )
+    plan_value_analysis: PlanValueAnalysis | None = Field(
+        None,
+        description=(
+            "대안 계획의 계획 순가치 분석입니다. "
+            "order별 Monte Carlo 지연 확률을 기준으로 예상 패널티를 반영합니다."
         ),
     )
     application_conditions: ApplicationConditions = Field(
