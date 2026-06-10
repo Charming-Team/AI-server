@@ -32,6 +32,7 @@ from app.features.production_planning.schemas import (
     LockedPlanInput,
     LockedPlanPatchInput,
     MaterialInput,
+    OperatorInput,
     OrderInput,
     PlanMetrics,
     PlanningOrderPatchInput,
@@ -116,6 +117,10 @@ def _planning_bundle_for_adjustment() -> PlanningInputBundle:
         bom_items=request.bom_items,
         line_statuses=[],
         machine_statuses=[],
+        operators=[
+            OperatorInput(operator_id=101),
+            OperatorInput(operator_id=102),
+        ],
     )
 
 
@@ -153,7 +158,7 @@ def test_adjusted_plan_candidates_use_production_plan_response_columns() -> None
 
     assert "plan_id" not in row
     assert row["plan_status"] == "SCHEDULED"
-    assert row["operator_id"] in {6, 7, 8, 9, 10, 11, 13, 14, 15}
+    assert row["operator_id"] is None
     assert row["plan_sequence"] >= 1
     assert row["estimated_duration_hr"] > 0
     assert row["updated_at"] is not None
@@ -164,7 +169,7 @@ def test_adjusted_plan_candidates_use_production_plan_response_columns() -> None
     assert set(response) == {"adjusted_plan_candidates"}
     assert "plan_id" not in response_row
     assert response_row["plan_status"] == "SCHEDULED"
-    assert response_row["operator_id"] in {6, 7, 8, 9, 10, 11, 13, 14, 15}
+    assert response_row["operator_id"] is None
 
 
 def test_planning_exceptions_return_compact_error_response() -> None:
@@ -237,6 +242,7 @@ def test_adjustment_request_merges_edit_and_add_orders() -> None:
     assert order_by_id["PLAN-1"].order_amount == 200
     assert order_by_id["900000001"].is_locked is False
     assert order_by_id["PLAN-2"].is_locked is False
+    assert {operator.operator_id for operator in request.operators} == {101, 102}
 
 
 def test_adjustment_request_requires_db_numeric_field_types() -> None:
@@ -430,6 +436,9 @@ def test_adjusted_api_response_returns_planning_and_simulation_payloads(
     assert "adjusted_plan_candidates" in response["planning_response"]
     assert response["simulation_response"]["baseline"]["source"] == "DB_CURRENT_PLAN"
     assert len(response["simulation_response"]["alternatives"]) == 2
+    plan_rows = response["planning_response"]["adjusted_plan_candidates"][0]["plans"]
+    assert plan_rows
+    assert plan_rows[0]["operator_id"] in {101, 102}
 
 
 def test_adjustment_duplicate_add_orders_fail_validation() -> None:
