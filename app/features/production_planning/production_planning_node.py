@@ -84,6 +84,7 @@ def generate_production_plans_from_db(
         changeover_rules=bundle.changeover_rules,
         materials=bundle.material_inventories,
         bom_items=bundle.bom_items,
+        operators=bundle.operators,
         solver_config=effective_config,
     )
 
@@ -270,6 +271,7 @@ def build_adjusted_planning_request_from_bundle(
         changeover_rules=bundle.changeover_rules,
         materials=bundle.material_inventories,
         bom_items=bundle.bom_items,
+        operators=bundle.operators,
         solver_config=effective_solver_config,
         simulation_config=effective_simulation_config,
     )
