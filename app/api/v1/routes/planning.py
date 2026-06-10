@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body
@@ -17,6 +18,7 @@ from app.features.production_planning.production_planning_node import (
 from app.features.production_planning.schemas import ProductionPlanningAdjustmentRequest
 
 router = APIRouter(prefix="/planning", tags=["Production Planning"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,17 @@ class AdjustedPlanCandidateItem(BaseModel):
     )
     plans: list[AdjustedPlanRowItem] = Field(
         ..., description="해당 변형의 조정된 생산 계획 row 목록 (라인 × 시퀀스 순 정렬)"
+    )
+    unscheduled_orders: list[str] = Field(
+        default_factory=list,
+        description=(
+            "해당 변형에서 스케줄에 배정되지 못한 내부 order ID 목록. "
+            "기존 생산계획 기반 항목은 PLAN-{planId} 형식입니다."
+        ),
+    )
+    unscheduled_plan_ids: list[int] = Field(
+        default_factory=list,
+        description="unscheduled_orders 중 PLAN-{planId} 형식에서 추출한 생산계획 ID 목록",
     )
 
 
@@ -980,9 +993,16 @@ def generate_planning(
         - Combined planning and simulation response, or a compact planning error response.
     """
     try:
-        return PlanningGenerateResponse(
-            **generate_adjusted_production_plan_api_response(request)
+        logger.info(
+            "[Planning] generate requested planning_start=%s planning_end=%s edit_orders=%s add_orders=%s",
+            request.planning_start,
+            request.planning_end,
+            len(request.edit_orders),
+            len(request.add_orders),
         )
+        response = generate_adjusted_production_plan_api_response(request)
+        _log_planning_response_summary(response)
+        return PlanningGenerateResponse(**response)
     except (
         PlanningValidationError,
         PlanningInfeasibleError,
@@ -990,6 +1010,12 @@ def generate_planning(
         SolutionExtractionError,
         PlanningDataAccessError,
     ) as exc:
+        logger.warning(
+            "[Planning] generate failed error_type=%s status=%s message=%s",
+            type(exc).__name__,
+            exc.response_status,
+            str(exc),
+        )
         return JSONResponse(
             status_code=_http_status_code(exc.response_status),
             content=exc.to_response_error(),
@@ -1021,3 +1047,26 @@ def planning_health() -> PlanningHealthResponse:
 
 def _http_status_code(response_status: str) -> int:
     return int(response_status.split(" ", maxsplit=1)[0])
+
+
+def _log_planning_response_summary(response: dict[str, Any]) -> None:
+    planning_response = response.get("planning_response") or {}
+    simulation_response = response.get("simulation_response") or {}
+    candidates = planning_response.get("adjusted_plan_candidates") or []
+    baseline = simulation_response.get("baseline") or {}
+    provenance = baseline.get("provenance") or {}
+    summary = [
+        {
+            "variant": candidate.get("plan_variant_code"),
+            "plan_count": len(candidate.get("plans") or []),
+            "unscheduled_plan_ids": candidate.get("unscheduled_plan_ids") or [],
+            "unscheduled_orders": candidate.get("unscheduled_orders") or [],
+        }
+        for candidate in candidates
+    ]
+
+    logger.info(
+        "[Planning] generate completed baseline_plan_count=%s candidate_summary=%s",
+        provenance.get("plan_count"),
+        summary,
+    )

@@ -10,6 +10,9 @@ from app.features.production_planning.exceptions import (
     PlanningValidationError,
     SolverExecutionError,
 )
+from app.features.production_planning.langgraph_workflow import (
+    _build_adjusted_plan_candidates,
+)
 from app.features.production_planning.plan_comparator import compare_plans
 from app.features.production_planning.production_planning_node import (
     build_adjusted_planning_request_from_bundle,
@@ -170,6 +173,22 @@ def test_adjusted_plan_candidates_use_production_plan_response_columns() -> None
     assert "plan_id" not in response_row
     assert response_row["plan_status"] == "SCHEDULED"
     assert response_row["operator_id"] is None
+
+
+def test_adjusted_plan_candidates_expose_unscheduled_plan_ids() -> None:
+    plan = _plan_result(
+        "DUE_DATE_OPTIMAL",
+        "DUE_DATE_OPTIMAL",
+        delayed_order_count=0,
+        estimated_total_cost=0,
+    ).model_copy(
+        update={"unscheduled_orders": ["PLAN-421", "NEW-ORDER", "PLAN-422"]}
+    )
+
+    candidate = _build_adjusted_plan_candidates([plan], [], [])[0]
+
+    assert candidate.unscheduled_orders == ["PLAN-421", "NEW-ORDER", "PLAN-422"]
+    assert candidate.unscheduled_plan_ids == [421, 422]
 
 
 def test_planning_exceptions_return_compact_error_response() -> None:
@@ -500,6 +519,62 @@ def test_locked_order_keeps_line_start_and_end_in_cpsat_result() -> None:
         assert item.line_id == "L-1"
         assert item.start_time == start + timedelta(hours=1, seconds=31)
         assert item.end_time == start + timedelta(hours=2, minutes=30, seconds=31)
+
+
+def test_next_order_starts_after_locked_order_actual_end_seconds() -> None:
+    start = datetime(2026, 5, 22, 9, tzinfo=UTC)
+    locked_end = start + timedelta(hours=1, seconds=31)
+    request = ProductionPlanningRequest(
+        planning_start=start,
+        planning_end=start + timedelta(hours=3),
+        orders=[
+            OrderInput(
+                order_id="O-1",
+                product_id="P-1",
+                quantity=1,
+                due_date=start + timedelta(hours=2),
+                order_amount=100,
+                is_locked=True,
+                locked_plan=LockedPlanInput(
+                    line_id="L-1",
+                    planned_start_at=start,
+                    planned_end_at=locked_end,
+                ),
+            ),
+            OrderInput(
+                order_id="O-2",
+                product_id="P-1",
+                quantity=1,
+                due_date=start + timedelta(hours=3),
+                order_amount=100,
+            ),
+        ],
+        products=[
+            ProductInput(
+                product_id="P-1",
+                product_name="Product",
+                default_process_time_minutes=30,
+            )
+        ],
+        production_lines=[
+            ProductionLineInput(line_id="L-1", line_name="Line 1", is_active=True),
+        ],
+        product_line_capabilities=[
+            ProductLineCapabilityInput(product_id="P-1", line_id="L-1"),
+        ],
+        solver_config=SolverConfig(
+            time_limit_seconds=5,
+            num_search_workers=1,
+            allow_unscheduled_orders=False,
+        ),
+    )
+
+    result = generate_production_plans(request)
+
+    for plan in result.plan_results:
+        second_item = next(item for item in plan.schedule_items if item.order_id == "O-2")
+        assert second_item.start_time >= start + timedelta(hours=1, minutes=1)
+        assert second_item.start_time >= locked_end
 
 
 def test_material_shortage_is_soft_and_tracked_without_penalty_cost() -> None:

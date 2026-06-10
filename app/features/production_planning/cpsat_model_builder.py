@@ -16,6 +16,7 @@ from app.features.production_planning.preprocessing import (
     get_inbound_material_time,
     get_initial_available_material_quantity_scaled,
     to_minute_offset,
+    to_minute_offset_ceil,
 )
 from app.features.production_planning.schemas import NormalizedPlanningData, ProcessingCandidate
 
@@ -173,7 +174,7 @@ def _add_locked_order_constraints(
                 f"Locked order {order_id} has no assignment variable on line {locked_line_id}."
             )
         locked_start = to_minute_offset(order.locked_plan.planned_start_at, data.planning_start)
-        locked_end = to_minute_offset(order.locked_plan.planned_end_at, data.planning_start)
+        locked_end = to_minute_offset_ceil(order.locked_plan.planned_end_at, data.planning_start)
 
         bundle.model.Add(order_vars["scheduled"] == 1)
         bundle.model.Add(order_vars["unscheduled"] == 0)

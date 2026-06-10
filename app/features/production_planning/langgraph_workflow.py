@@ -18,7 +18,11 @@ from app.features.production_planning.exceptions import PlanningDataAccessError
 from app.features.production_planning.json_formatter import build_dashboard_response
 from app.features.production_planning.objectives import apply_objective_by_variant
 from app.features.production_planning.plan_comparator import compare_plans
-from app.features.production_planning.preprocessing import normalize_request, to_minute_offset
+from app.features.production_planning.preprocessing import (
+    normalize_request,
+    to_minute_offset,
+    to_minute_offset_ceil,
+)
 from app.features.production_planning.recommendation import (
     compare_simulation_results,
     recommend_final_plans,
@@ -567,9 +571,20 @@ def _build_adjusted_plan_candidates(
                     operator_ids,
                     updated_at,
                 ),
+                unscheduled_orders=list(plan.unscheduled_orders),
+                unscheduled_plan_ids=_unscheduled_plan_ids(plan.unscheduled_orders),
             )
         )
     return candidates
+
+
+def _unscheduled_plan_ids(unscheduled_orders: list[str]) -> list[int]:
+    plan_ids = []
+    for order_id in unscheduled_orders:
+        text = str(order_id)
+        if text.startswith("PLAN-") and text.removeprefix("PLAN-").isdigit():
+            plan_ids.append(int(text.removeprefix("PLAN-")))
+    return plan_ids
 
 
 def _duration_estimates_by_variant(
@@ -908,7 +923,7 @@ def _add_plan_solution_hint(
             continue
 
         start_offset = to_minute_offset(item.start_time, normalized.planning_start)
-        end_offset = to_minute_offset(item.end_time, normalized.planning_start)
+        end_offset = to_minute_offset_ceil(item.end_time, normalized.planning_start)
         bundle.model.AddHint(order_vars["scheduled"], 1)
         bundle.model.AddHint(order_vars["completion"], end_offset)
         if order_id in bundle.unscheduled_vars:

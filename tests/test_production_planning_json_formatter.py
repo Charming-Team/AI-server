@@ -247,6 +247,23 @@ def test_adjusted_plan_response_serializes_numeric_public_ids() -> None:
     assert row["line_id"] == 1
 
 
+def test_adjusted_plan_response_keeps_unscheduled_plan_ids() -> None:
+    result = _planning_result()
+    candidate = result.adjusted_plan_candidates[0].model_copy(
+        update={
+            "unscheduled_orders": ["PLAN-421", "NEW-ORDER"],
+            "unscheduled_plan_ids": [421],
+        }
+    )
+    result = result.model_copy(update={"adjusted_plan_candidates": [candidate]})
+
+    response = result.to_adjusted_plan_response()
+    response_candidate = response["adjusted_plan_candidates"][0]
+
+    assert response_candidate["unscheduled_orders"] == ["PLAN-421", "NEW-ORDER"]
+    assert response_candidate["unscheduled_plan_ids"] == [421]
+
+
 def test_dashboard_response_computes_deltas_and_filters_important_events() -> None:
     result = _planning_result().model_copy(
         update={"warnings": ["Skipped capacity for order PLAN-1."]}

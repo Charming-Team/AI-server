@@ -413,6 +413,8 @@ class AdjustedPlanCandidate(BaseModel):
     plan_variant_name: str
     status: str
     plans: list[AdjustedPlanRow]
+    unscheduled_orders: list[str] = Field(default_factory=list)
+    unscheduled_plan_ids: list[int] = Field(default_factory=list)
 
 
 class ProductionPlanningResult(BaseModel):
