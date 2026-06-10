@@ -166,6 +166,12 @@ class ProductionPlanningAdjustmentRequest(BaseModel):
         return parse_db_datetime(value)
 
 
+class OperatorInput(BaseModel):
+    operator_id: DbBigInt
+    operator_name: str | None = None
+    is_active: bool = True
+
+
 class ProductInput(BaseModel):
     product_id: str
     product_name: str
@@ -260,6 +266,7 @@ class ProductionPlanningRequest(BaseModel):
     materials: list[MaterialInput] = Field(default_factory=list)
     bom_items: list[BomItemInput] = Field(default_factory=list)
     changeover_rules: list[ChangeoverRuleInput] = Field(default_factory=list)
+    operators: list[OperatorInput] = Field(default_factory=list)
     solver_config: SolverConfig = Field(default_factory=SolverConfig)
     simulation_config: SimulationConfig = Field(default_factory=SimulationConfig)
 

@@ -10,7 +10,7 @@ All queries target ai_planning.v_* views only — no direct access to public bas
 from __future__ import annotations
 
 import datetime as _dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
@@ -24,6 +24,7 @@ from app.features.production_planning.schemas import (
     ChangeoverRuleInput,
     ExistingScheduleInput,
     MaterialInput,
+    OperatorInput,
     OrderInput,
     ProductInput,
     ProductionLineInput,
@@ -57,6 +58,7 @@ class PlanningInputBundle:
     bom_items: list[BomItemInput]
     line_statuses: list[dict[str, Any]]
     machine_statuses: list[dict[str, Any]]
+    operators: list[OperatorInput] = field(default_factory=list)
 
 
 class PlanningDataRepository:
@@ -130,6 +132,7 @@ class PlanningDataRepository:
                     bom_items=self.get_bom_items_for_planning(conn),
                     line_statuses=self.get_latest_line_statuses_for_planning(conn),
                     machine_statuses=self.get_latest_machine_statuses_for_planning(conn),
+                    operators=self.get_operators_for_planning(conn),
                 )
         except PlanningDataAccessError:
             raise
@@ -899,6 +902,73 @@ class PlanningDataRepository:
 
         return [dict(row) for row in rows]
 
+    def get_operators_for_planning(
+        self,
+        conn: Connection,
+    ) -> list[OperatorInput]:
+        """
+        Parameters:
+            - conn: Active SQLAlchemy connection.
+
+        Methodology:
+            - Inspect ai_planning.v_operators_for_planning columns before querying.
+            - Support either operator_id or id as the source identifier column.
+            - Use only active operators when an is_active column exists.
+
+        Output:
+            - List of OperatorInput objects used for random operator assignment.
+        """
+        view = "ai_planning.v_operators_for_planning"
+        columns = _get_view_columns(conn, "ai_planning", "v_operators_for_planning")
+        if not columns:
+            raise PlanningDataAccessError(
+                "v_operators_for_planning view is missing or not visible.",
+                view=view,
+            )
+
+        id_column = _first_existing_column(columns, ("operator_id", "id"))
+        if id_column is None:
+            raise PlanningDataAccessError(
+                "v_operators_for_planning requires operator_id or id column.",
+                view=view,
+            )
+
+        name_column = _first_existing_column(
+            columns,
+            ("operator_name", "name", "nickname"),
+        )
+        name_expr = f"{name_column} AS operator_name" if name_column else "NULL AS operator_name"
+        active_filter = "WHERE is_active = true" if "is_active" in columns else ""
+        query = text(
+            f"""
+            SELECT
+                {id_column} AS operator_id,
+                {name_expr}
+            FROM {view}
+            {active_filter}
+            ORDER BY {id_column}
+            """
+        )
+
+        try:
+            rows = conn.execute(query).mappings().all()
+        except Exception as exc:
+            raise PlanningDataAccessError(
+                f"Failed to query v_operators_for_planning: {exc}",
+                view=view,
+            ) from exc
+
+        return [
+            OperatorInput(
+                operator_id=int(row["operator_id"]),
+                operator_name=(
+                    str(row["operator_name"]) if row["operator_name"] is not None else None
+                ),
+            )
+            for row in rows
+            if row["operator_id"] is not None
+        ]
+
 
 # ---------------------------------------------------------------------------
 # Private helper functions
@@ -922,6 +992,32 @@ def _to_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def _get_view_columns(
+    conn: Connection,
+    schema_name: str,
+    view_name: str,
+) -> set[str]:
+    rows = conn.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = :schema_name
+              AND table_name = :view_name
+            """
+        ),
+        {"schema_name": schema_name, "view_name": view_name},
+    ).mappings().all()
+    return {str(row["column_name"]) for row in rows}
+
+
+def _first_existing_column(columns: set[str], candidates: tuple[str, ...]) -> str | None:
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+    return None
 
 
 def _build_status_exclusion_clause(
