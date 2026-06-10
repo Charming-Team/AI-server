@@ -28,7 +28,13 @@ class AdjustedPlanRowItem(BaseModel):
     order_id: int = Field(..., description="수주 ID (DB 정수 키)")
     product_id: int = Field(..., description="제품 ID")
     line_id: int = Field(..., description="배정된 생산 라인 ID")
-    operator_id: int | None = Field(None, description="작업자 ID (미배정 시 null)")
+    operator_id: int | None = Field(
+        None,
+        description=(
+            "작업자 ID. ai_planning.v_operators_for_planning에서 조회한 operator id 중 "
+            "하나를 랜덤 배정하며, 사용 가능한 작업자가 없으면 null입니다."
+        ),
+    )
     planned_start_at: str = Field(..., description="계획 시작 시각 (ISO 8601, timezone-aware)")
     planned_end_at: str = Field(..., description="계획 종료 시각 (ISO 8601, timezone-aware)")
     estimated_duration_hr: float = Field(

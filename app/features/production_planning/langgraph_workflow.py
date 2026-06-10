@@ -33,6 +33,7 @@ from app.features.production_planning.schemas import (
     AdjustedPlanRow,
     FinalPlanRecommendation,
     NormalizedPlanningData,
+    OperatorInput,
     PlanComparisonSummary,
     PlanResult,
     PlanSimulationResult,
@@ -50,8 +51,6 @@ from app.features.production_planning.solver import solve_model
 from app.features.production_planning.validators import validate_request
 
 logger = logging.getLogger(__name__)
-
-OPERATOR_ID_POOL = (6, 7, 8, 9, 10, 11, 13, 14, 15)
 
 
 class ProductionPlanningGraphState(TypedDict, total=False):
@@ -437,6 +436,7 @@ def finalize_result_node(
             adjusted_plan_candidates=_build_adjusted_plan_candidates(
                 plan_results,
                 state["simulation_results"],
+                state["validated_request"].operators,
             ),
             plan_results=plan_results,
             recommended_plan_variant_code=comparison_summary.recommended_plan_variant_code,
@@ -535,11 +535,13 @@ def _load_dashboard_baseline_inputs(
 def _build_adjusted_plan_candidates(
     plan_results: list[PlanResult],
     simulation_results: list[PlanSimulationResult],
+    operators: list[OperatorInput],
 ) -> list[AdjustedPlanCandidate]:
     """
     Parameters:
         - plan_results: Solved CP-SAT plan variants.
         - simulation_results: Simulation metrics containing order-level duration estimates.
+        - operators: DB-loaded operators available for random assignment.
 
     Methodology:
         - Convert internal ScheduleItem rows into production_plans-compatible response rows.
@@ -551,6 +553,7 @@ def _build_adjusted_plan_candidates(
     """
     updated_at = datetime.now(UTC)
     estimates_by_variant = _duration_estimates_by_variant(simulation_results)
+    operator_ids = _operator_id_pool(operators)
     candidates = []
     for plan in plan_results:
         candidates.append(
@@ -561,6 +564,7 @@ def _build_adjusted_plan_candidates(
                 plans=_build_adjusted_plan_rows(
                     plan,
                     estimates_by_variant.get(plan.plan_variant_code, {}),
+                    operator_ids,
                     updated_at,
                 ),
             )
@@ -584,6 +588,7 @@ def _duration_estimates_by_variant(
 def _build_adjusted_plan_rows(
     plan: PlanResult,
     duration_estimates_by_order_id: dict[str, float],
+    operator_ids: tuple[int, ...],
     updated_at: datetime,
 ) -> list[AdjustedPlanRow]:
     line_sequence_by_order_id = _line_sequence_by_order_id(plan)
@@ -594,7 +599,7 @@ def _build_adjusted_plan_rows(
                 order_id=item.order_id,
                 product_id=item.product_id,
                 line_id=item.line_id,
-                operator_id=choice(OPERATOR_ID_POOL),
+                operator_id=_choose_operator_id(operator_ids),
                 planned_start_at=item.start_time,
                 planned_end_at=item.end_time,
                 estimated_duration_hr=duration_estimates_by_order_id.get(
@@ -608,6 +613,16 @@ def _build_adjusted_plan_rows(
             )
         )
     return rows
+
+
+def _operator_id_pool(operators: list[OperatorInput]) -> tuple[int, ...]:
+    return tuple(sorted({operator.operator_id for operator in operators if operator.is_active}))
+
+
+def _choose_operator_id(operator_ids: tuple[int, ...]) -> int | None:
+    if not operator_ids:
+        return None
+    return choice(operator_ids)
 
 
 def _line_sequence_by_order_id(plan: PlanResult) -> dict[str, int]:
