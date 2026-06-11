@@ -10,6 +10,7 @@ from app.features.production_planning.preprocessing import (
     get_inbound_material_time,
     get_initial_available_material_quantity_scaled,
     to_minute_offset,
+    to_minute_offset_ceil,
 )
 from app.features.production_planning.schemas import (
     NormalizedPlanningData,
@@ -125,7 +126,7 @@ def verify_metrics(
             order = data.orders.get(item.order_id)
             if order is None:
                 continue
-            end_offset = to_minute_offset(item.end_time, data.planning_start)
+            end_offset = to_minute_offset_ceil(item.end_time, data.planning_start)
             tardiness = max(0, end_offset - order.due_date_offset)
             recalculated_tardiness += tardiness
             if tardiness > 0:
@@ -190,7 +191,7 @@ def _verify_no_overlap(
     by_line: dict[str, list[tuple[int, int, str]]] = {}
     for item in schedule_items:
         start = to_minute_offset(item.start_time, data.planning_start)
-        end = to_minute_offset(item.end_time, data.planning_start)
+        end = to_minute_offset_ceil(item.end_time, data.planning_start)
         if start >= end:
             violations.append(
                 f"[{tag}] order {item.order_id} has invalid interval: start={start}, end={end}"
@@ -223,7 +224,7 @@ def _verify_line_availability(
             violations.append(f"[{tag}] order {item.order_id} uses unknown line {item.line_id}")
             continue
         start = to_minute_offset(item.start_time, data.planning_start)
-        end = to_minute_offset(item.end_time, data.planning_start)
+        end = to_minute_offset_ceil(item.end_time, data.planning_start)
         if start < line.available_from_offset:
             violations.append(
                 f"[{tag}] order {item.order_id} starts before line {item.line_id} available"
@@ -305,7 +306,7 @@ def _verify_daily_capacity(
     line_bucket_usage: dict[tuple[str, int], int] = {}
     capability_bucket_usage: dict[tuple[str, str, int], int] = {}
     for item in schedule_items:
-        end_offset = to_minute_offset(item.end_time, data.planning_start)
+        end_offset = to_minute_offset_ceil(item.end_time, data.planning_start)
         bucket_index = end_offset // (24 * 60)
         planned_quantity = item.planned_production_quantity
         line = data.lines.get(item.line_id)
@@ -406,7 +407,7 @@ def _verify_hard_due_dates(
         order = data.orders.get(item.order_id)
         if order is None:
             continue
-        end_offset = to_minute_offset(item.end_time, data.planning_start)
+        end_offset = to_minute_offset_ceil(item.end_time, data.planning_start)
         if end_offset > order.due_date_offset:
             violations.append(
                 f"[{tag}] HARD due date violated: order {item.order_id} "

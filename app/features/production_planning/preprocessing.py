@@ -220,7 +220,7 @@ def build_existing_schedule_blocks(
         start_offset = max(0, to_minute_offset(schedule.start_time, request.planning_start))
         end_offset = min(
             horizon_minutes,
-            to_minute_offset(schedule.end_time, request.planning_start),
+            to_minute_offset_ceil(schedule.end_time, request.planning_start),
         )
         if start_offset >= end_offset:
             continue
@@ -297,6 +297,23 @@ def to_minute_offset(dt: datetime, planning_start: datetime) -> int:
     return int((dt - planning_start).total_seconds() // 60)
 
 
+def to_minute_offset_ceil(dt: datetime, planning_start: datetime) -> int:
+    """
+    Parameters:
+        - dt: Datetime to convert.
+        - planning_start: Planning window start used as zero offset.
+
+    Methodology:
+        - Convert elapsed seconds to whole minutes using ceiling division.
+        - This keeps existing schedule blockers conservative when DB timestamps include
+          seconds but CP-SAT operates in whole-minute buckets.
+
+    Output:
+        - Integer minute offset from planning_start.
+    """
+    return ceil((dt - planning_start).total_seconds() / 60)
+
+
 def from_minute_offset(offset: int, planning_start: datetime) -> datetime:
     """
     Parameters:
@@ -351,7 +368,7 @@ def calculate_candidate_duration_minutes(
     """
     if order.is_locked and order.locked_plan is not None and order.locked_plan.line_id == line_id:
         start = to_minute_offset(order.locked_plan.planned_start_at, planning_start)
-        end = to_minute_offset(order.locked_plan.planned_end_at, planning_start)
+        end = to_minute_offset_ceil(order.locked_plan.planned_end_at, planning_start)
         duration = end - start
         if duration <= 0:
             raise PlanningValidationError(f"Locked order {order.order_id} duration is invalid.")

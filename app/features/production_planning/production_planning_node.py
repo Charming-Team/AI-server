@@ -14,7 +14,9 @@ from app.features.production_planning.repositories.simulation_data_repository im
     SimulationDataRepository,
 )
 from app.features.production_planning.schemas import (
+    ExistingScheduleInput,
     LockedPlanInput,
+    LockedPlanPatchInput,
     OrderInput,
     PlanningOrderPatchInput,
     ProductionPlanningAdjustmentRequest,
@@ -217,6 +219,7 @@ def _generate_adjusted_production_planning_result_with_request(
     """
     solver_config = _default_adjustment_solver_config()
     simulation_config = _default_adjustment_simulation_config()
+    is_full_db_replan = _is_full_db_replan_request(request)
     bundle = PlanningDataRepository().load_planning_input_bundle(
         request.planning_start,
         request.planning_end,
@@ -224,6 +227,8 @@ def _generate_adjusted_production_planning_result_with_request(
         use_existing_plans_as_orders=True,
         excluded_rescheduling_plan_statuses=(
             solver_config.excluded_rescheduling_plan_statuses
+            if is_full_db_replan
+            else None
         ),
     )
     planning_request = build_adjusted_planning_request_from_bundle(
@@ -240,6 +245,7 @@ def build_adjusted_planning_request_from_bundle(
     bundle: PlanningInputBundle,
     solver_config: SolverConfig | None = None,
     simulation_config: SimulationConfig | None = None,
+    include_unpatched_db_orders: bool | None = None,
 ) -> ProductionPlanningRequest:
     """
     Parameters:
@@ -247,11 +253,15 @@ def build_adjusted_planning_request_from_bundle(
         - bundle: DB-loaded planning input bundle.
         - solver_config: Optional internal solver config override for tests.
         - simulation_config: Optional internal simulation config override for tests.
+        - include_unpatched_db_orders: Whether DB orders absent from the thin request are
+          movable planning targets.
 
     Methodology:
-        - Start from DB rescheduling target orders.
+        - Treat an empty edit/add request as full DB replanning.
+        - Treat a non-empty edit/add request as local adjustment and only move requested rows.
         - Override matching DB orders with edit_orders and mark them locked.
         - Append add_orders as movable new work.
+        - Keep non-requested DB schedules as fixed blockers during local adjustment.
         - Keep all master data from DB views.
 
     Output:
@@ -259,7 +269,35 @@ def build_adjusted_planning_request_from_bundle(
     """
     effective_solver_config = solver_config or _default_adjustment_solver_config()
     effective_simulation_config = simulation_config or _default_adjustment_simulation_config()
-    orders = merge_adjustment_orders(bundle.orders, request.edit_orders, request.add_orders)
+    if include_unpatched_db_orders is None:
+        include_unpatched_db_orders = _is_full_db_replan_request(request)
+    extra_movable_db_order_ids = (
+        set()
+        if include_unpatched_db_orders
+        else _resolve_conflicting_movable_schedule_order_ids(
+            bundle.orders,
+            bundle.existing_schedules,
+            request.edit_orders,
+        )
+    )
+    orders = merge_adjustment_orders(
+        bundle.orders,
+        request.edit_orders,
+        request.add_orders,
+        include_unpatched_db_orders=include_unpatched_db_orders,
+        extra_movable_db_order_ids=extra_movable_db_order_ids,
+    )
+    existing_schedules = (
+        bundle.existing_schedules
+        if include_unpatched_db_orders
+        else _filter_requested_schedules_from_blockers(
+            bundle.existing_schedules,
+            bundle.orders,
+            request.edit_orders,
+            request.add_orders,
+            extra_movable_db_order_ids,
+        )
+    )
     return ProductionPlanningRequest(
         planning_start=request.planning_start,
         planning_end=request.planning_end,
@@ -267,7 +305,7 @@ def build_adjusted_planning_request_from_bundle(
         products=bundle.products,
         production_lines=bundle.production_lines,
         product_line_capabilities=bundle.product_line_capabilities,
-        existing_schedules=bundle.existing_schedules,
+        existing_schedules=existing_schedules,
         changeover_rules=bundle.changeover_rules,
         materials=bundle.material_inventories,
         bom_items=bundle.bom_items,
@@ -281,17 +319,25 @@ def merge_adjustment_orders(
     db_orders: list[OrderInput],
     edit_orders: list[PlanningOrderPatchInput],
     add_orders: list[PlanningOrderPatchInput],
+    *,
+    include_unpatched_db_orders: bool = True,
+    extra_movable_db_order_ids: set[str] | None = None,
 ) -> list[OrderInput]:
     """
     Parameters:
         - db_orders: DB view orders currently eligible for rescheduling.
         - edit_orders: Front-end locked order state.
         - add_orders: Front-end newly added movable orders.
+        - include_unpatched_db_orders: Whether unmentioned DB orders stay movable.
+        - extra_movable_db_order_ids: Additional DB orders that must move because they
+          conflict with locked front-end edits.
 
     Methodology:
         - Resolve edit order IDs against DB orders.
         - Replace matching DB orders with locked request values.
         - Replace matching DB orders with add_orders too, but keep them movable.
+        - For local adjustment, start from only conflict neighbors so unrelated DB plans
+          remain fixed blockers.
         - Reject duplicates inside the same request section to keep the merge deterministic.
 
     Output:
@@ -299,7 +345,16 @@ def merge_adjustment_orders(
     """
     db_order_by_id = {order.order_id: order for order in db_orders}
     identity_lookup = _build_order_identity_lookup(db_order_by_id)
-    merged_orders = dict(db_order_by_id)
+    extra_movable_db_order_ids = extra_movable_db_order_ids or set()
+    merged_orders = (
+        dict(db_order_by_id)
+        if include_unpatched_db_orders
+        else {
+            order_id: db_order_by_id[order_id]
+            for order_id in extra_movable_db_order_ids
+            if order_id in db_order_by_id
+        }
+    )
     resolved_edit_ids: set[str] = set()
 
     for patch in edit_orders:
@@ -336,6 +391,97 @@ def merge_adjustment_orders(
         )
 
     return [merged_orders[order_id] for order_id in sorted(merged_orders)]
+
+
+def _is_full_db_replan_request(request: ProductionPlanningAdjustmentRequest) -> bool:
+    return not request.edit_orders and not request.add_orders
+
+
+def _filter_requested_schedules_from_blockers(
+    existing_schedules: list[ExistingScheduleInput],
+    db_orders: list[OrderInput],
+    edit_orders: list[PlanningOrderPatchInput],
+    add_orders: list[PlanningOrderPatchInput],
+    extra_movable_db_order_ids: set[str] | None = None,
+) -> list[ExistingScheduleInput]:
+    requested_order_ids = _resolve_requested_adjustment_order_ids(
+        db_orders,
+        edit_orders,
+        add_orders,
+    )
+    requested_order_ids.update(extra_movable_db_order_ids or set())
+    if not requested_order_ids:
+        return existing_schedules
+    return [
+        schedule
+        for schedule in existing_schedules
+        if requested_order_ids.isdisjoint(_schedule_identity_keys(schedule))
+    ]
+
+
+def _resolve_requested_adjustment_order_ids(
+    db_orders: list[OrderInput],
+    edit_orders: list[PlanningOrderPatchInput],
+    add_orders: list[PlanningOrderPatchInput],
+) -> set[str]:
+    db_order_by_id = {order.order_id: order for order in db_orders}
+    identity_lookup = _build_order_identity_lookup(db_order_by_id)
+    requested_order_ids: set[str] = set()
+
+    for patch in edit_orders:
+        requested_order_ids.add(_resolve_existing_order_id(patch.order_id, identity_lookup))
+    for patch in add_orders:
+        requested_order_ids.add(_resolve_add_order_id(patch.order_id, identity_lookup))
+
+    return requested_order_ids
+
+
+def _resolve_conflicting_movable_schedule_order_ids(
+    db_orders: list[OrderInput],
+    existing_schedules: list[ExistingScheduleInput],
+    edit_orders: list[PlanningOrderPatchInput],
+) -> set[str]:
+    db_order_by_id = {order.order_id: order for order in db_orders}
+    identity_lookup = _build_order_identity_lookup(db_order_by_id)
+    locked_intervals: list[LockedPlanPatchInput] = [
+        edit_order.locked_plan
+        for edit_order in edit_orders
+        if edit_order.locked_plan is not None
+    ]
+    if not locked_intervals:
+        return set()
+
+    movable_order_ids: set[str] = set()
+    for schedule in existing_schedules:
+        if not _schedule_overlaps_any_locked_interval(schedule, locked_intervals):
+            continue
+        for key in _schedule_identity_keys(schedule):
+            resolved_order_id = identity_lookup.get(key)
+            if resolved_order_id is not None:
+                movable_order_ids.add(resolved_order_id)
+                break
+    return movable_order_ids
+
+
+def _schedule_overlaps_any_locked_interval(
+    schedule: ExistingScheduleInput,
+    locked_intervals: list[LockedPlanPatchInput],
+) -> bool:
+    for locked_plan in locked_intervals:
+        if str(schedule.line_id) != str(locked_plan.line_id):
+            continue
+        if schedule.end_time > locked_plan.planned_start_at and schedule.start_time < (
+            locked_plan.planned_end_at
+        ):
+            return True
+    return False
+
+
+def _schedule_identity_keys(schedule: ExistingScheduleInput) -> set[str]:
+    keys = set(_order_identity_keys(schedule.schedule_id))
+    if schedule.order_id is not None:
+        keys.update(_order_identity_keys(schedule.order_id))
+    return keys
 
 
 def _patch_to_order_input(

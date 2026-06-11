@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body
@@ -17,6 +18,7 @@ from app.features.production_planning.production_planning_node import (
 from app.features.production_planning.schemas import ProductionPlanningAdjustmentRequest
 
 router = APIRouter(prefix="/planning", tags=["Production Planning"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,17 @@ class AdjustedPlanCandidateItem(BaseModel):
     )
     plans: list[AdjustedPlanRowItem] = Field(
         ..., description="해당 변형의 조정된 생산 계획 row 목록 (라인 × 시퀀스 순 정렬)"
+    )
+    unscheduled_orders: list[str] = Field(
+        default_factory=list,
+        description=(
+            "해당 변형에서 스케줄에 배정되지 못한 내부 order ID 목록. "
+            "기존 생산계획 기반 항목은 PLAN-{planId} 형식입니다."
+        ),
+    )
+    unscheduled_plan_ids: list[int] = Field(
+        default_factory=list,
+        description="unscheduled_orders 중 PLAN-{planId} 형식에서 추출한 생산계획 ID 목록",
     )
 
 
@@ -125,6 +138,10 @@ class BaselineMetrics(BaseModel):
             "평균 예상 지연 일수. 전체 주문의 total_tardiness_minutes ÷ 1440으로 "
             "산출됩니다."
         ),
+    )
+    delayed_orders_days: float | None = Field(
+        None,
+        description="expected_delay_days와 동일한 납기 지연일 alias입니다.",
     )
     delivery_fulfillment_rate_percent: float | None = Field(
         None,
@@ -208,6 +225,9 @@ class BaselinePlanRow(BaseModel):
 class CurrentStateSummary(BaseModel):
     expected_delay_days: float | None = Field(
         None, description="평균 예상 지연 일수 (total_tardiness_minutes ÷ 1440)"
+    )
+    delayed_orders_days: float | None = Field(
+        None, description="expected_delay_days와 동일한 납기 지연일 alias"
     )
     total_tardiness_minutes: int | None = Field(
         None, description="총 지연 시간 합계 (분)"
@@ -388,7 +408,10 @@ class AlternativeSimulationMetrics(BaseModel):
     )
     expected_delayed_orders: float | None = Field(
         None,
-        description="시뮬레이션 기반 평균 지연 주문 수",
+        description=(
+            "대안 계획 기준 지연 주문 수. planned_end_at > due_date 인 "
+            "고유 order_id 수로 산출합니다."
+        ),
     )
     p95_tardiness_minutes: float | None = Field(
         None, description="시뮬레이션 95분위 지연 시간 (분). 최악 시나리오 수준의 지표입니다."
@@ -406,7 +429,20 @@ class AlternativeSimulationMetrics(BaseModel):
     )
     expected_delay_days: float | None = Field(
         None,
-        description="시뮬레이션 기반 평균 예상 지연 일수 (expected_tardiness_minutes ÷ 1440)",
+        description=(
+            "대안 계획 기준 납기 지연일. baseline과 동일하게 "
+            "total_tardiness_minutes ÷ 1440으로 산출합니다."
+        ),
+    )
+    delayed_orders_days: float | None = Field(
+        None,
+        description="expected_delay_days와 동일한 납기 지연일 alias입니다.",
+    )
+    total_tardiness_minutes: int | None = Field(
+        None, description="대안 계획의 총 지연 시간 합계 (분)"
+    )
+    max_tardiness_minutes: int | None = Field(
+        None, description="대안 계획의 단일 주문 최대 지연 시간 (분)"
     )
     delivery_fulfillment_rate_percent: float | None = Field(
         None, description="납기 충족률 (%)"
@@ -415,7 +451,11 @@ class AlternativeSimulationMetrics(BaseModel):
         None, description="납기 미달율 (%)"
     )
     delay_risk_order_count: float | None = Field(
-        None, description="시뮬레이션 기반 평균 지연 위험 주문 수"
+        None,
+        description=(
+            "대안 계획 기준 지연 위험 주문 수. planned_end_at > due_date 인 "
+            "고유 order_id 수입니다."
+        ),
     )
     avg_line_utilization_percent: None = Field(
         None,
@@ -538,6 +578,13 @@ class ComputedDeltas(BaseModel):
         None,
         description=(
             "예상 지연 일수 감소량. "
+            "baseline - alternative. 양수: 개선, 음수: 악화"
+        ),
+    )
+    delayed_orders_days_reduction: float | None = Field(
+        None,
+        description=(
+            "납기 지연일 감소량 alias. "
             "baseline - alternative. 양수: 개선, 음수: 악화"
         ),
     )
@@ -980,9 +1027,17 @@ def generate_planning(
         - Combined planning and simulation response, or a compact planning error response.
     """
     try:
-        return PlanningGenerateResponse(
-            **generate_adjusted_production_plan_api_response(request)
+        logger.info(
+            "[Planning] generate requested planning_start=%s planning_end=%s "
+            "edit_orders=%s add_orders=%s",
+            request.planning_start,
+            request.planning_end,
+            len(request.edit_orders),
+            len(request.add_orders),
         )
+        response = generate_adjusted_production_plan_api_response(request)
+        _log_planning_response_summary(response)
+        return PlanningGenerateResponse(**response)
     except (
         PlanningValidationError,
         PlanningInfeasibleError,
@@ -990,6 +1045,12 @@ def generate_planning(
         SolutionExtractionError,
         PlanningDataAccessError,
     ) as exc:
+        logger.warning(
+            "[Planning] generate failed error_type=%s status=%s message=%s",
+            type(exc).__name__,
+            exc.response_status,
+            str(exc),
+        )
         return JSONResponse(
             status_code=_http_status_code(exc.response_status),
             content=exc.to_response_error(),
@@ -1021,3 +1082,26 @@ def planning_health() -> PlanningHealthResponse:
 
 def _http_status_code(response_status: str) -> int:
     return int(response_status.split(" ", maxsplit=1)[0])
+
+
+def _log_planning_response_summary(response: dict[str, Any]) -> None:
+    planning_response = response.get("planning_response") or {}
+    simulation_response = response.get("simulation_response") or {}
+    candidates = planning_response.get("adjusted_plan_candidates") or []
+    baseline = simulation_response.get("baseline") or {}
+    provenance = baseline.get("provenance") or {}
+    summary = [
+        {
+            "variant": candidate.get("plan_variant_code"),
+            "plan_count": len(candidate.get("plans") or []),
+            "unscheduled_plan_ids": candidate.get("unscheduled_plan_ids") or [],
+            "unscheduled_orders": candidate.get("unscheduled_orders") or [],
+        }
+        for candidate in candidates
+    ]
+
+    logger.info(
+        "[Planning] generate completed baseline_plan_count=%s candidate_summary=%s",
+        provenance.get("plan_count"),
+        summary,
+    )

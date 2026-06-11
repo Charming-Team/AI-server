@@ -6,6 +6,7 @@ import pytest
 from app.features.production_planning.config import AmountOptimizationConfig
 from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.preprocessing import (
+    build_existing_schedule_blocks,
     calculate_changeover_minutes,
     calculate_horizon_minutes,
     calculate_planned_production_quantity,
@@ -25,10 +26,12 @@ from app.features.production_planning.repositories.planning_data_repository impo
 )
 from app.features.production_planning.schemas import (
     ChangeoverRuleInput,
+    ExistingScheduleInput,
     NormalizedLine,
     OrderInput,
     ProductInput,
     ProductionLineInput,
+    ProductionPlanningRequest,
     ProductLineCapabilityInput,
 )
 
@@ -39,6 +42,52 @@ def test_datetime_minute_offset_conversion() -> None:
 
     assert to_minute_offset(target, start) == 75
     assert from_minute_offset(75, start) == target
+
+
+def test_existing_schedule_block_end_offset_ceil_seconds() -> None:
+    planning_start = datetime(2026, 6, 1, 0, 0, tzinfo=UTC)
+    line = ProductionLineInput(line_id="1", line_name="Line 1", is_active=True)
+    request = ProductionPlanningRequest(
+        planning_start=planning_start,
+        planning_end=planning_start + timedelta(hours=2),
+        orders=[
+            OrderInput(
+                order_id="O-1",
+                product_id="P-1",
+                quantity=1,
+                due_date=planning_start + timedelta(hours=1),
+                order_amount=1,
+            )
+        ],
+        products=[ProductInput(product_id="P-1", product_name="Product 1")],
+        production_lines=[line],
+        product_line_capabilities=[
+            ProductLineCapabilityInput(product_id="P-1", line_id="1")
+        ],
+        existing_schedules=[
+            ExistingScheduleInput(
+                schedule_id="S-1",
+                line_id="1",
+                product_id="P-1",
+                start_time=planning_start + timedelta(minutes=10, seconds=49),
+                end_time=planning_start + timedelta(minutes=20, seconds=49),
+                plan_status="IN_PROGRESS",
+                is_locked=True,
+            )
+        ],
+    )
+    warnings: list[str] = []
+
+    blocks = build_existing_schedule_blocks(
+        request,
+        {"1": NormalizedLine(line=line, available_from_offset=0, available_to_offset=120)},
+        horizon_minutes=120,
+        warnings=warnings,
+    )
+
+    assert blocks["1"][0].start_offset == 10
+    assert blocks["1"][0].end_offset == 21
+    assert blocks["1"][0].duration_minutes == 11
 
 
 def test_horizon_calculation() -> None:

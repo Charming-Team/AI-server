@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Literal
 
@@ -42,6 +42,19 @@ logger = logging.getLogger(__name__)
 
 INFO_UNAVAILABLE = "정보 없음"
 LLM_DISABLED_REASON = "LLM 평가 생성 기능이 비활성화되어 있습니다."
+PUBLIC_AI_EVALUATION_FALLBACK_REASON = (
+    "AI 평가 문구를 생성하지 못했습니다. 정량 지표를 기준으로 확인해주세요."
+)
+INTERNAL_AI_EVALUATION_ERROR_PATTERNS = (
+    "LLM output contains",
+    "not present in evidence",
+    "PlanningValidationError",
+    "Evaluation draft JSON schema is invalid",
+    "Final evaluation JSON schema is invalid",
+    "validation error for",
+    "Input should be",
+    "pydantic.dev",
+)
 
 RecommendationLevel = Literal[
     "STRONG_RECOMMEND",
@@ -348,6 +361,7 @@ def build_dashboard_response(
             product_rows=products or [],
             completion_rank=completion_rank_by_code.get(candidate.plan_variant_code),
             risk_cost_rank=risk_cost_rank_by_code.get(candidate.plan_variant_code),
+            normalized_data=normalized_data,
         )
         alternative_metrics.update(alternative_current_state)
         comparison = build_comparison_metrics(baseline_metrics, alternative_metrics)
@@ -642,10 +656,12 @@ def build_baseline_plan_current_state_summary(
                 or Decimal("0")
             )
             seen_penalty_keys.add(order_key)
+    expected_delay_days = _decimal_to_float(
+        Decimal(str(total_tardiness_minutes)) / Decimal("1440")
+    )
     return {
-        "expected_delay_days": _decimal_to_float(
-            Decimal(str(total_tardiness_minutes)) / Decimal("1440")
-        ),
+        "expected_delay_days": expected_delay_days,
+        "delayed_orders_days": expected_delay_days,
         "total_tardiness_minutes": total_tardiness_minutes,
         "max_tardiness_minutes": max_tardiness_minutes,
         "delivery_fulfillment_rate_percent": fulfillment_rate,
@@ -699,6 +715,7 @@ def build_baseline_plan_metrics(
         "total_risk_cost": current_state_summary.get("total_risk_cost"),
         "material_shortage_probability_percent": None,
         "expected_delay_days": current_state_summary.get("expected_delay_days"),
+        "delayed_orders_days": current_state_summary.get("delayed_orders_days"),
         "delivery_fulfillment_rate_percent": current_state_summary.get(
             "delivery_fulfillment_rate_percent"
         ),
@@ -1124,6 +1141,7 @@ def build_alternative_current_state_summary(
     product_rows: list[Any],
     completion_rank: int | None,
     risk_cost_rank: int | None,
+    normalized_data: NormalizedPlanningData | None = None,
 ) -> dict[str, Any]:
     """
     Parameters:
@@ -1131,13 +1149,14 @@ def build_alternative_current_state_summary(
         - candidate: Adjusted plan candidate rows.
         - plan_result: CP-SAT plan result for deterministic order statuses.
         - baseline_plan_rows: Current DB production plans used for PK-based matching.
+        - normalized_data: Normalized planning input used to resolve due dates for new rows.
         - product_rows: Product master rows used to validate quantity unit consistency.
         - completion_rank: Rank of this candidate by earliest planned completion.
         - risk_cost_rank: Rank of this candidate by lowest simulated risk cost.
 
     Methodology:
-        - Convert expected tardiness minutes to expected delay days.
-        - Use simulated expected delayed order count for order-level risk.
+        - Calculate tardiness from adjusted planned end time against order due date.
+        - Use the same order-level delayed-key count as the DB current-plan baseline.
         - Use deterministic delayed planned quantities only when product units are compatible.
 
     Output:
@@ -1147,7 +1166,19 @@ def build_alternative_current_state_summary(
         [row.product_id for row in candidate.plans],
         product_rows,
     )
-    delayed_order_ids = _delayed_order_ids_from_plan(plan_result)
+    delay_stat_rows = _candidate_delay_stat_rows(
+        candidate,
+        baseline_plan_rows,
+        normalized_data,
+        plan_result,
+    )
+    delayed_keys, total_tardiness_minutes, max_tardiness_minutes = _order_level_delay_stats(
+        delay_stat_rows
+    )
+    delayed_candidate_order_ids = _delayed_candidate_order_ids(
+        delay_stat_rows,
+        delayed_keys,
+    )
     if unit_basis == "QUANTITY":
         total = sum(
             (Decimal(str(row.planned_quantity)) for row in candidate.plans),
@@ -1157,32 +1188,29 @@ def build_alternative_current_state_summary(
             (
                 Decimal(str(row.planned_quantity))
                 for row in candidate.plans
-                if _canonical_id(row.order_id) in delayed_order_ids
+                if _canonical_id(row.order_id) in delayed_candidate_order_ids
             ),
             Decimal("0"),
         )
     else:
         total = Decimal(str(len(candidate.plans)))
-        delayed = _to_decimal(
-            None if simulation is None else simulation.expected_delayed_order_count
-        ) or Decimal("0")
+        delayed = Decimal(str(len(delayed_keys)))
 
-    expected_delay_days = None
-    delay_risk_order_count = None
-    if simulation is not None:
-        expected_delay_days = _decimal_to_float(
-            Decimal(str(simulation.expected_tardiness_minutes)) / Decimal("1440")
-        )
-        delay_risk_order_count = _round_decimal(
-            Decimal(str(simulation.expected_delayed_order_count))
-        )
+    expected_delay_days = _decimal_to_float(
+        Decimal(str(total_tardiness_minutes)) / Decimal("1440")
+    )
+    delay_risk_order_count = len(delayed_keys)
 
     fulfillment_rate = _fulfillment_rate(total, delayed)
     return {
         "expected_delay_days": expected_delay_days,
+        "delayed_orders_days": expected_delay_days,
+        "total_tardiness_minutes": total_tardiness_minutes,
+        "max_tardiness_minutes": max_tardiness_minutes,
         "delivery_fulfillment_rate_percent": fulfillment_rate,
         "delivery_miss_rate_percent": _miss_rate(fulfillment_rate),
         "delay_risk_order_count": delay_risk_order_count,
+        "expected_delayed_orders": delay_risk_order_count,
         "avg_line_utilization_percent": None,
         "bottleneck_line_id": None,
         "plan_completion_at": _candidate_completion_at(candidate),
@@ -1240,6 +1268,14 @@ def build_comparison_metrics(
         "expected_delayed_order_reduction": _decimal_delta(
             baseline_metrics.get("expected_delayed_orders"),
             alternative_metrics.get("expected_delayed_orders"),
+        ),
+        "expected_delay_days_reduction": _decimal_delta(
+            baseline_metrics.get("expected_delay_days"),
+            alternative_metrics.get("expected_delay_days"),
+        ),
+        "delayed_orders_days_reduction": _decimal_delta(
+            baseline_metrics.get("delayed_orders_days"),
+            alternative_metrics.get("delayed_orders_days"),
         ),
         "risk_cost_saving_amount": _money_string(risk_cost_saving_amount),
         "risk_cost_saving_percent": _reduction_percent(
@@ -1345,6 +1381,14 @@ def build_simulation_comparison_table(
             "지연 위험 주문수",
             baseline_summary.get("delay_risk_order_count"),
             alternative_summary.get("delay_risk_order_count"),
+            "orders",
+            improvement_direction="lower",
+        ),
+        _comparison_table_row(
+            "expected_delayed_orders",
+            "예상 지연 주문수",
+            baseline_summary.get("expected_delayed_orders"),
+            alternative_summary.get("expected_delayed_orders"),
             "orders",
             improvement_direction="lower",
         ),
@@ -2207,6 +2251,8 @@ def validate_evaluation_draft(
     Output:
         - Validated DashboardEvaluationDraft.
     """
+    if payload.get("recommendation_level") == "STRONG_RECOMM":
+        payload = {**payload, "recommendation_level": "STRONG_RECOMMEND"}
     try:
         draft = DashboardEvaluationDraft.model_validate(payload)
     except ValidationError as exc:
@@ -2322,20 +2368,31 @@ def build_fallback_ai_evaluation(
     Output:
         - DashboardAiEvaluation marked as FAILED.
     """
+    public_reason = _public_ai_evaluation_fallback_reason(reason)
     return DashboardAiEvaluation(
         status="FAILED",
-        current_state_summary=DashboardCurrentStateSummary(risk_analysis_text=reason),
-        risk_interpretation=DashboardRiskInterpretation(text=reason),
+        current_state_summary=DashboardCurrentStateSummary(
+            risk_analysis_text=public_reason
+        ),
+        risk_interpretation=DashboardRiskInterpretation(text=public_reason),
         ai_recommendation=DashboardAiRecommendation(
-            summary_text=reason,
-            reasons=[reason],
-            cautions=[reason],
-            final_action=reason,
+            summary_text=public_reason,
+            reasons=[public_reason],
+            cautions=[public_reason],
+            final_action=public_reason,
         ),
         recommendation_level="INFO_ONLY",
         recommendation_grade_label="보통",
-        recommendation_grade_basis=[reason],
+        recommendation_grade_basis=[public_reason],
     )
+
+
+def _public_ai_evaluation_fallback_reason(reason: str | None) -> str:
+    if not reason:
+        return INFO_UNAVAILABLE
+    if any(pattern in reason for pattern in INTERNAL_AI_EVALUATION_ERROR_PATTERNS):
+        return PUBLIC_AI_EVALUATION_FALLBACK_REASON
+    return reason
 
 
 def _set_all_ai_evaluations_to_fallback(
@@ -2704,6 +2761,91 @@ def _order_level_delay_stats(
         total_minutes += tardiness
         max_minutes = max(max_minutes, tardiness)
     return delayed_ids, total_minutes, max_minutes
+
+
+def _candidate_delay_stat_rows(
+    candidate: AdjustedPlanCandidate,
+    baseline_plan_rows: list[dict[str, Any]],
+    normalized_data: NormalizedPlanningData | None,
+    plan_result,
+) -> list[dict[str, Any]]:
+    baseline_by_order_or_plan_id = _detail_rows_by_order_or_plan_id(baseline_plan_rows)
+    schedule_items_by_identity = _schedule_items_by_order_identity(plan_result)
+    rows: list[dict[str, Any]] = []
+    for plan in candidate.plans:
+        plan_key = _canonical_id(plan.order_id)
+        baseline_row = baseline_by_order_or_plan_id.get(plan_key, {})
+        normalized_order = (
+            _lookup_normalized_order(plan, normalized_data)
+            if normalized_data is not None
+            else None
+        )
+        due_date = _first_present(baseline_row, ["due_date", "expected_completion_date"])
+        if due_date is None and normalized_order is not None:
+            due_date = normalized_order.order.due_date
+        if due_date is None:
+            due_date = _fallback_due_date_from_schedule_item(
+                plan,
+                schedule_items_by_identity,
+            )
+
+        rows.append(
+            {
+                "candidate_order_id": plan.order_id,
+                "order_id": _first_present(baseline_row, ["order_id"]) or plan.order_id,
+                "plan_id": _first_present(baseline_row, ["plan_id", "schedule_id"])
+                or plan.order_id,
+                "product_id": plan.product_id,
+                "planned_start_at": plan.planned_start_at,
+                "planned_end_at": plan.planned_end_at,
+                "planned_quantity": plan.planned_quantity,
+                "due_date": due_date,
+            }
+        )
+    return rows
+
+
+def _schedule_items_by_order_identity(plan_result) -> dict[str, Any]:
+    if plan_result is None:
+        return {}
+    result: dict[str, Any] = {}
+    for item in plan_result.schedule_items:
+        for key in _plan_item_identity_keys(item):
+            result[key] = item
+    return result
+
+
+def _fallback_due_date_from_schedule_item(
+    plan: Any,
+    schedule_items_by_identity: dict[str, Any],
+) -> datetime | None:
+    schedule_item = None
+    for key in _plan_item_identity_keys(plan):
+        schedule_item = schedule_items_by_identity.get(key)
+        if schedule_item is not None:
+            break
+    if schedule_item is None:
+        return None
+    planned_end = _as_datetime(_get_plan_item_field(plan, "planned_end_at"))
+    tardiness = _to_decimal(_get_plan_item_field(schedule_item, "tardiness_minutes"))
+    if planned_end is None or tardiness is None:
+        return None
+    return planned_end - timedelta(minutes=int(tardiness))
+
+
+def _delayed_candidate_order_ids(
+    delay_stat_rows: list[dict[str, Any]],
+    delayed_keys: set[str],
+) -> set[str]:
+    result: set[str] = set()
+    for row in delay_stat_rows:
+        group_key = _canonical_id(_first_present(row, ["order_id"])) or _canonical_id(
+            _first_present(row, ["plan_id", "schedule_id"])
+        )
+        candidate_key = _canonical_id(_first_present(row, ["candidate_order_id"]))
+        if group_key in delayed_keys and candidate_key is not None:
+            result.add(candidate_key)
+    return result
 
 
 def _baseline_plan_ids(rows: list[dict[str, Any]]) -> list[int | str]:

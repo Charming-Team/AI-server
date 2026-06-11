@@ -10,6 +10,9 @@ from app.features.production_planning.exceptions import (
     PlanningValidationError,
     SolverExecutionError,
 )
+from app.features.production_planning.langgraph_workflow import (
+    _build_adjusted_plan_candidates,
+)
 from app.features.production_planning.plan_comparator import compare_plans
 from app.features.production_planning.production_planning_node import (
     build_adjusted_planning_request_from_bundle,
@@ -172,6 +175,22 @@ def test_adjusted_plan_candidates_use_production_plan_response_columns() -> None
     assert response_row["operator_id"] is None
 
 
+def test_adjusted_plan_candidates_expose_unscheduled_plan_ids() -> None:
+    plan = _plan_result(
+        "DUE_DATE_OPTIMAL",
+        "DUE_DATE_OPTIMAL",
+        delayed_order_count=0,
+        estimated_total_cost=0,
+    ).model_copy(
+        update={"unscheduled_orders": ["PLAN-421", "NEW-ORDER", "PLAN-422"]}
+    )
+
+    candidate = _build_adjusted_plan_candidates([plan], [], [])[0]
+
+    assert candidate.unscheduled_orders == ["PLAN-421", "NEW-ORDER", "PLAN-422"]
+    assert candidate.unscheduled_plan_ids == [421, 422]
+
+
 def test_planning_exceptions_return_compact_error_response() -> None:
     assert PlanningValidationError("계획 대상 주문이 없습니다.").to_response_error() == {
         "status": "400 BAD_REQUEST",
@@ -241,8 +260,63 @@ def test_adjustment_request_merges_edit_and_add_orders() -> None:
     assert order_by_id["PLAN-1"].locked_plan is not None
     assert order_by_id["PLAN-1"].order_amount == 200
     assert order_by_id["900000001"].is_locked is False
-    assert order_by_id["PLAN-2"].is_locked is False
+    assert "PLAN-2" not in order_by_id
     assert {operator.operator_id for operator in request.operators} == {101, 102}
+
+
+def test_adjustment_request_keeps_unpatched_db_schedules_as_blockers() -> None:
+    start = datetime(2026, 5, 22, 9, tzinfo=UTC)
+    bundle = _planning_bundle_for_adjustment()
+    bundle.existing_schedules = [
+        ExistingScheduleInput(
+            schedule_id="1",
+            line_id="1",
+            product_id="1",
+            order_id="100",
+            start_time=start,
+            end_time=start + timedelta(hours=1),
+            plan_status="SCHEDULED",
+        ),
+        ExistingScheduleInput(
+            schedule_id="2",
+            line_id="1",
+            product_id="1",
+            order_id="200",
+            start_time=start + timedelta(hours=1),
+            end_time=start + timedelta(hours=2),
+            plan_status="SCHEDULED",
+        ),
+    ]
+    adjustment = ProductionPlanningAdjustmentRequest(
+        planning_start=start,
+        planning_end=start + timedelta(hours=8),
+        edit_orders=[
+            PlanningOrderPatchInput(
+                order_id=1,
+                product_id=1,
+                order_quantity=1,
+                due_date=start + timedelta(hours=3),
+                contract_amount=Decimal("200.00"),
+                late_penalty_amount=Decimal("30.00"),
+                order_status="SCHEDULED",
+                locked_plan=LockedPlanPatchInput(
+                    line_id=1,
+                    planned_start_at=start + timedelta(hours=2),
+                    planned_end_at=start + timedelta(hours=3),
+                ),
+            )
+        ],
+    )
+
+    request = build_adjusted_planning_request_from_bundle(
+        adjustment,
+        bundle,
+        SolverConfig(time_limit_seconds=5, num_search_workers=1),
+        simulation_config=None,
+    )
+
+    assert {order.order_id for order in request.orders} == {"PLAN-1"}
+    assert {schedule.schedule_id for schedule in request.existing_schedules} == {"2"}
 
 
 def test_adjustment_request_requires_db_numeric_field_types() -> None:
@@ -500,6 +574,62 @@ def test_locked_order_keeps_line_start_and_end_in_cpsat_result() -> None:
         assert item.line_id == "L-1"
         assert item.start_time == start + timedelta(hours=1, seconds=31)
         assert item.end_time == start + timedelta(hours=2, minutes=30, seconds=31)
+
+
+def test_next_order_starts_after_locked_order_actual_end_seconds() -> None:
+    start = datetime(2026, 5, 22, 9, tzinfo=UTC)
+    locked_end = start + timedelta(hours=1, seconds=31)
+    request = ProductionPlanningRequest(
+        planning_start=start,
+        planning_end=start + timedelta(hours=3),
+        orders=[
+            OrderInput(
+                order_id="O-1",
+                product_id="P-1",
+                quantity=1,
+                due_date=start + timedelta(hours=2),
+                order_amount=100,
+                is_locked=True,
+                locked_plan=LockedPlanInput(
+                    line_id="L-1",
+                    planned_start_at=start,
+                    planned_end_at=locked_end,
+                ),
+            ),
+            OrderInput(
+                order_id="O-2",
+                product_id="P-1",
+                quantity=1,
+                due_date=start + timedelta(hours=3),
+                order_amount=100,
+            ),
+        ],
+        products=[
+            ProductInput(
+                product_id="P-1",
+                product_name="Product",
+                default_process_time_minutes=30,
+            )
+        ],
+        production_lines=[
+            ProductionLineInput(line_id="L-1", line_name="Line 1", is_active=True),
+        ],
+        product_line_capabilities=[
+            ProductLineCapabilityInput(product_id="P-1", line_id="L-1"),
+        ],
+        solver_config=SolverConfig(
+            time_limit_seconds=5,
+            num_search_workers=1,
+            allow_unscheduled_orders=False,
+        ),
+    )
+
+    result = generate_production_plans(request)
+
+    for plan in result.plan_results:
+        second_item = next(item for item in plan.schedule_items if item.order_id == "O-2")
+        assert second_item.start_time >= start + timedelta(hours=1, minutes=1)
+        assert second_item.start_time >= locked_end
 
 
 def test_material_shortage_is_soft_and_tracked_without_penalty_cost() -> None:

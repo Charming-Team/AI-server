@@ -11,6 +11,7 @@ from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.json_formatter import (
     build_dashboard_response,
     build_evaluation_draft_prompt,
+    build_fallback_ai_evaluation,
     build_json_normalization_prompt,
     generate_ai_evaluation_from_evidence,
     validate_evaluation_draft,
@@ -247,6 +248,23 @@ def test_adjusted_plan_response_serializes_numeric_public_ids() -> None:
     assert row["line_id"] == 1
 
 
+def test_adjusted_plan_response_keeps_unscheduled_plan_ids() -> None:
+    result = _planning_result()
+    candidate = result.adjusted_plan_candidates[0].model_copy(
+        update={
+            "unscheduled_orders": ["PLAN-421", "NEW-ORDER"],
+            "unscheduled_plan_ids": [421],
+        }
+    )
+    result = result.model_copy(update={"adjusted_plan_candidates": [candidate]})
+
+    response = result.to_adjusted_plan_response()
+    response_candidate = response["adjusted_plan_candidates"][0]
+
+    assert response_candidate["unscheduled_orders"] == ["PLAN-421", "NEW-ORDER"]
+    assert response_candidate["unscheduled_plan_ids"] == [421]
+
+
 def test_dashboard_response_computes_deltas_and_filters_important_events() -> None:
     result = _planning_result().model_copy(
         update={"warnings": ["Skipped capacity for order PLAN-1."]}
@@ -298,7 +316,9 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
     assert alternative["plan_value_analysis"]["material_adj_quantity_total"] == 231.0
     assert alternative["computed_deltas"]["delay_probability_reduction_percent"] == 90.0
     assert alternative["computed_deltas"]["delay_probability_delta_percent_points"] == 90.0
-    assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == -1.0
+    assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == 0.0
+    assert alternative["computed_deltas"]["expected_delay_days_reduction"] == 0.0
+    assert alternative["computed_deltas"]["delayed_orders_days_reduction"] == 0.0
     assert alternative["computed_deltas"]["risk_cost_saving_amount"] == "400000.00"
     assert alternative["computed_deltas"]["risk_cost_saving_percent"] == 40.0
     assert {event["event"] for event in alternative["important_events"]} == {
@@ -379,7 +399,16 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
     assert alternative["computed_deltas"]["plan_completion_delta_hours"] == 47.0
     assert alternative["simulation_metrics"]["alternative_plan_count"] == 1
     assert alternative["simulation_metrics"]["matched_baseline_plan_count"] == 1
+    assert alternative["simulation_metrics"]["expected_delay_days"] == 0.04
+    assert alternative["simulation_metrics"]["delayed_orders_days"] == 0.04
+    assert alternative["simulation_metrics"]["delay_risk_order_count"] == 1
+    assert alternative["simulation_metrics"]["expected_delayed_orders"] == 1
+    assert alternative["computed_deltas"]["expected_delay_days_reduction"] == 1.96
+    assert alternative["computed_deltas"]["delayed_orders_days_reduction"] == 1.96
     assert "delay_probability_percent" in {
+        row["metric_code"] for row in alternative["simulation_comparison_table"]
+    }
+    assert "expected_delayed_orders" in {
         row["metric_code"] for row in alternative["simulation_comparison_table"]
     }
     assert "expected_delay_days" not in {
@@ -711,7 +740,27 @@ def test_ai_evaluation_returns_failed_evaluation_on_grounding_error() -> None:
     )
 
     assert evaluation.status == "FAILED"
-    assert "LLM output contains numbers" in evaluation.ai_recommendation.summary_text
+    assert "LLM output contains numbers" not in evaluation.ai_recommendation.summary_text
+    assert "AI 평가 문구를 생성하지 못했습니다" in evaluation.ai_recommendation.summary_text
+    assert "LLM output contains numbers" not in evaluation.recommendation_grade_basis[0]
+
+
+def test_fallback_ai_evaluation_hides_schema_validation_error() -> None:
+    evaluation = build_fallback_ai_evaluation(
+        "Evaluation draft JSON schema is invalid: 1 validation error for "
+        "DashboardEvaluationDraft recommendation_level Input should be "
+        "'STRONG_RECOMMEND', 'RECOMMEND', 'CAUTION', 'NOT_RECOMMENDED' or "
+        "'INFO_ONLY' [type=literal_error, input_value='STRONG_RECOMM'] "
+        "https://errors.pydantic.dev/2.13/v/literal_error"
+    )
+
+    assert evaluation.status == "FAILED"
+    assert (
+        "Evaluation draft JSON schema is invalid"
+        not in evaluation.ai_recommendation.summary_text
+    )
+    assert "pydantic.dev" not in evaluation.ai_recommendation.summary_text
+    assert "AI 평가 문구를 생성하지 못했습니다" in evaluation.ai_recommendation.summary_text
 
 
 def test_llm_draft_validation_defers_grounding_until_final_json() -> None:
@@ -728,6 +777,22 @@ def test_llm_draft_validation_defers_grounding_until_final_json() -> None:
     draft = validate_evaluation_draft(payload)
 
     assert draft.recommendation_level == "RECOMMEND"
+
+
+def test_llm_draft_validation_accepts_legacy_strong_recommend_alias() -> None:
+    payload = {
+        "risk_analysis_text": "정보 없음",
+        "risk_interpretation_text": "정보 없음",
+        "recommendation_summary_text": "정보 없음",
+        "recommendation_reasons": ["정보 없음"],
+        "recommendation_cautions": [],
+        "final_action": "정보 없음",
+        "recommendation_level": "STRONG_RECOMM",
+    }
+
+    draft = validate_evaluation_draft(payload)
+
+    assert draft.recommendation_level == "STRONG_RECOMMEND"
 
 
 def test_llm_draft_validation_allows_comma_formatted_evidence_numbers() -> None:
