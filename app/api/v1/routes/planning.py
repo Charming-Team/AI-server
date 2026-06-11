@@ -139,6 +139,10 @@ class BaselineMetrics(BaseModel):
             "산출됩니다."
         ),
     )
+    delayed_orders_days: float | None = Field(
+        None,
+        description="expected_delay_days와 동일한 납기 지연일 alias입니다.",
+    )
     delivery_fulfillment_rate_percent: float | None = Field(
         None,
         description=(
@@ -221,6 +225,9 @@ class BaselinePlanRow(BaseModel):
 class CurrentStateSummary(BaseModel):
     expected_delay_days: float | None = Field(
         None, description="평균 예상 지연 일수 (total_tardiness_minutes ÷ 1440)"
+    )
+    delayed_orders_days: float | None = Field(
+        None, description="expected_delay_days와 동일한 납기 지연일 alias"
     )
     total_tardiness_minutes: int | None = Field(
         None, description="총 지연 시간 합계 (분)"
@@ -401,7 +408,10 @@ class AlternativeSimulationMetrics(BaseModel):
     )
     expected_delayed_orders: float | None = Field(
         None,
-        description="시뮬레이션 기반 평균 지연 주문 수",
+        description=(
+            "대안 계획 기준 지연 주문 수. planned_end_at > due_date 인 "
+            "고유 order_id 수로 산출합니다."
+        ),
     )
     p95_tardiness_minutes: float | None = Field(
         None, description="시뮬레이션 95분위 지연 시간 (분). 최악 시나리오 수준의 지표입니다."
@@ -419,7 +429,20 @@ class AlternativeSimulationMetrics(BaseModel):
     )
     expected_delay_days: float | None = Field(
         None,
-        description="시뮬레이션 기반 평균 예상 지연 일수 (expected_tardiness_minutes ÷ 1440)",
+        description=(
+            "대안 계획 기준 납기 지연일. baseline과 동일하게 "
+            "total_tardiness_minutes ÷ 1440으로 산출합니다."
+        ),
+    )
+    delayed_orders_days: float | None = Field(
+        None,
+        description="expected_delay_days와 동일한 납기 지연일 alias입니다.",
+    )
+    total_tardiness_minutes: int | None = Field(
+        None, description="대안 계획의 총 지연 시간 합계 (분)"
+    )
+    max_tardiness_minutes: int | None = Field(
+        None, description="대안 계획의 단일 주문 최대 지연 시간 (분)"
     )
     delivery_fulfillment_rate_percent: float | None = Field(
         None, description="납기 충족률 (%)"
@@ -428,7 +451,11 @@ class AlternativeSimulationMetrics(BaseModel):
         None, description="납기 미달율 (%)"
     )
     delay_risk_order_count: float | None = Field(
-        None, description="시뮬레이션 기반 평균 지연 위험 주문 수"
+        None,
+        description=(
+            "대안 계획 기준 지연 위험 주문 수. planned_end_at > due_date 인 "
+            "고유 order_id 수입니다."
+        ),
     )
     avg_line_utilization_percent: None = Field(
         None,
@@ -551,6 +578,13 @@ class ComputedDeltas(BaseModel):
         None,
         description=(
             "예상 지연 일수 감소량. "
+            "baseline - alternative. 양수: 개선, 음수: 악화"
+        ),
+    )
+    delayed_orders_days_reduction: float | None = Field(
+        None,
+        description=(
+            "납기 지연일 감소량 alias. "
             "baseline - alternative. 양수: 개선, 음수: 악화"
         ),
     )

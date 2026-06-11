@@ -21,6 +21,7 @@ from app.features.chat.llm_client import (
     validate_llm_settings,
 )
 from app.features.chat.schemas import ChatErrorCode
+from scripts.settings_loader import build_settings_from_env_file
 
 DEFAULT_SYSTEM_PROMPT = (
     "너는 사내 챗봇 LLM 연결 점검용 assistant다. "
@@ -58,9 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_settings(args: argparse.Namespace) -> Settings:
-    if args.env_file:
-        return Settings(_env_file=args.env_file)
-    return Settings()
+    return build_settings_from_env_file(args.env_file)
 
 
 def build_smoke_prompt() -> GroundedPrompt:

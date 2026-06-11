@@ -316,7 +316,9 @@ def test_dashboard_response_computes_deltas_and_filters_important_events() -> No
     assert alternative["plan_value_analysis"]["material_adj_quantity_total"] == 231.0
     assert alternative["computed_deltas"]["delay_probability_reduction_percent"] == 90.0
     assert alternative["computed_deltas"]["delay_probability_delta_percent_points"] == 90.0
-    assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == -1.0
+    assert alternative["computed_deltas"]["expected_delayed_order_reduction"] == 0.0
+    assert alternative["computed_deltas"]["expected_delay_days_reduction"] == 0.0
+    assert alternative["computed_deltas"]["delayed_orders_days_reduction"] == 0.0
     assert alternative["computed_deltas"]["risk_cost_saving_amount"] == "400000.00"
     assert alternative["computed_deltas"]["risk_cost_saving_percent"] == 40.0
     assert {event["event"] for event in alternative["important_events"]} == {
@@ -397,7 +399,16 @@ def test_dashboard_response_builds_baseline_comparison_from_prediction_and_detai
     assert alternative["computed_deltas"]["plan_completion_delta_hours"] == 47.0
     assert alternative["simulation_metrics"]["alternative_plan_count"] == 1
     assert alternative["simulation_metrics"]["matched_baseline_plan_count"] == 1
+    assert alternative["simulation_metrics"]["expected_delay_days"] == 0.04
+    assert alternative["simulation_metrics"]["delayed_orders_days"] == 0.04
+    assert alternative["simulation_metrics"]["delay_risk_order_count"] == 1
+    assert alternative["simulation_metrics"]["expected_delayed_orders"] == 1
+    assert alternative["computed_deltas"]["expected_delay_days_reduction"] == 1.96
+    assert alternative["computed_deltas"]["delayed_orders_days_reduction"] == 1.96
     assert "delay_probability_percent" in {
+        row["metric_code"] for row in alternative["simulation_comparison_table"]
+    }
+    assert "expected_delayed_orders" in {
         row["metric_code"] for row in alternative["simulation_comparison_table"]
     }
     assert "expected_delay_days" not in {

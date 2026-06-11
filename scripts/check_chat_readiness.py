@@ -7,6 +7,7 @@ from app.api.v1.routes.health import build_readiness_components
 from app.core.config import Settings
 from app.features.chat.runtime_mode import build_chat_runtime_mode
 from app.features.chat.schemas import ChatErrorCode
+from scripts.settings_loader import build_settings_from_env_file
 
 REQUIRED_COMPONENT_OPTIONS = {
     "rdbEvidence": {
@@ -60,9 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_settings(args: argparse.Namespace) -> Settings:
-    if args.env_file:
-        return Settings(_env_file=args.env_file)
-    return Settings()
+    return build_settings_from_env_file(args.env_file)
 
 
 def build_readiness_result(
