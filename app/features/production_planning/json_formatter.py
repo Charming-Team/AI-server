@@ -42,6 +42,19 @@ logger = logging.getLogger(__name__)
 
 INFO_UNAVAILABLE = "정보 없음"
 LLM_DISABLED_REASON = "LLM 평가 생성 기능이 비활성화되어 있습니다."
+PUBLIC_AI_EVALUATION_FALLBACK_REASON = (
+    "AI 평가 문구를 생성하지 못했습니다. 정량 지표를 기준으로 확인해주세요."
+)
+INTERNAL_AI_EVALUATION_ERROR_PATTERNS = (
+    "LLM output contains",
+    "not present in evidence",
+    "PlanningValidationError",
+    "Evaluation draft JSON schema is invalid",
+    "Final evaluation JSON schema is invalid",
+    "validation error for",
+    "Input should be",
+    "pydantic.dev",
+)
 
 RecommendationLevel = Literal[
     "STRONG_RECOMMEND",
@@ -2207,6 +2220,8 @@ def validate_evaluation_draft(
     Output:
         - Validated DashboardEvaluationDraft.
     """
+    if payload.get("recommendation_level") == "STRONG_RECOMM":
+        payload = {**payload, "recommendation_level": "STRONG_RECOMMEND"}
     try:
         draft = DashboardEvaluationDraft.model_validate(payload)
     except ValidationError as exc:
@@ -2322,20 +2337,31 @@ def build_fallback_ai_evaluation(
     Output:
         - DashboardAiEvaluation marked as FAILED.
     """
+    public_reason = _public_ai_evaluation_fallback_reason(reason)
     return DashboardAiEvaluation(
         status="FAILED",
-        current_state_summary=DashboardCurrentStateSummary(risk_analysis_text=reason),
-        risk_interpretation=DashboardRiskInterpretation(text=reason),
+        current_state_summary=DashboardCurrentStateSummary(
+            risk_analysis_text=public_reason
+        ),
+        risk_interpretation=DashboardRiskInterpretation(text=public_reason),
         ai_recommendation=DashboardAiRecommendation(
-            summary_text=reason,
-            reasons=[reason],
-            cautions=[reason],
-            final_action=reason,
+            summary_text=public_reason,
+            reasons=[public_reason],
+            cautions=[public_reason],
+            final_action=public_reason,
         ),
         recommendation_level="INFO_ONLY",
         recommendation_grade_label="보통",
-        recommendation_grade_basis=[reason],
+        recommendation_grade_basis=[public_reason],
     )
+
+
+def _public_ai_evaluation_fallback_reason(reason: str | None) -> str:
+    if not reason:
+        return INFO_UNAVAILABLE
+    if any(pattern in reason for pattern in INTERNAL_AI_EVALUATION_ERROR_PATTERNS):
+        return PUBLIC_AI_EVALUATION_FALLBACK_REASON
+    return reason
 
 
 def _set_all_ai_evaluations_to_fallback(

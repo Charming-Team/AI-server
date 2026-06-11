@@ -101,6 +101,7 @@ class PlanningDataRepository:
                     self.get_reschedulable_orders_from_existing_plans(
                         conn,
                         planning_start,
+                        planning_end,
                         excluded_rescheduling_plan_statuses,
                     )
                     if use_existing_plans_as_orders
@@ -145,16 +146,18 @@ class PlanningDataRepository:
         self,
         conn: Connection,
         planning_start: _dt.datetime | None,
+        planning_end: _dt.datetime | None,
         excluded_plan_statuses: list[str] | None = None,
     ) -> list[OrderInput]:
         """
         Parameters:
             - conn: Active SQLAlchemy connection to the planning database.
             - planning_start: Inclusive lower bound for existing plan start times.
+            - planning_end: Exclusive upper bound for existing plan start times.
             - excluded_plan_statuses: Plan statuses that must not be rescheduled.
 
         Methodology:
-            - Read existing production plans that start at or after planning_start.
+            - Read existing production plans that start inside the requested planning window.
             - Exclude completed and in-progress plans from the rescheduling target set.
             - Join order attributes from the planning order view first, then the historical
               order view because completed source orders can still have future open plans.
@@ -179,6 +182,9 @@ class PlanningDataRepository:
             key_prefix="excluded_plan_status",
         )
         where_clauses = ["start_time >= :planning_start"]
+        if planning_end is not None:
+            where_clauses.append("start_time < :planning_end")
+            params["planning_end"] = planning_end
         if excluded_status_clause:
             where_clauses.append(excluded_status_clause)
 

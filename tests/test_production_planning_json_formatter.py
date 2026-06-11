@@ -11,6 +11,7 @@ from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.json_formatter import (
     build_dashboard_response,
     build_evaluation_draft_prompt,
+    build_fallback_ai_evaluation,
     build_json_normalization_prompt,
     generate_ai_evaluation_from_evidence,
     validate_evaluation_draft,
@@ -728,7 +729,24 @@ def test_ai_evaluation_returns_failed_evaluation_on_grounding_error() -> None:
     )
 
     assert evaluation.status == "FAILED"
-    assert "LLM output contains numbers" in evaluation.ai_recommendation.summary_text
+    assert "LLM output contains numbers" not in evaluation.ai_recommendation.summary_text
+    assert "AI 평가 문구를 생성하지 못했습니다" in evaluation.ai_recommendation.summary_text
+    assert "LLM output contains numbers" not in evaluation.recommendation_grade_basis[0]
+
+
+def test_fallback_ai_evaluation_hides_schema_validation_error() -> None:
+    evaluation = build_fallback_ai_evaluation(
+        "Evaluation draft JSON schema is invalid: 1 validation error for "
+        "DashboardEvaluationDraft recommendation_level Input should be "
+        "'STRONG_RECOMMEND', 'RECOMMEND', 'CAUTION', 'NOT_RECOMMENDED' or "
+        "'INFO_ONLY' [type=literal_error, input_value='STRONG_RECOMM'] "
+        "https://errors.pydantic.dev/2.13/v/literal_error"
+    )
+
+    assert evaluation.status == "FAILED"
+    assert "Evaluation draft JSON schema is invalid" not in evaluation.ai_recommendation.summary_text
+    assert "pydantic.dev" not in evaluation.ai_recommendation.summary_text
+    assert "AI 평가 문구를 생성하지 못했습니다" in evaluation.ai_recommendation.summary_text
 
 
 def test_llm_draft_validation_defers_grounding_until_final_json() -> None:
@@ -745,6 +763,22 @@ def test_llm_draft_validation_defers_grounding_until_final_json() -> None:
     draft = validate_evaluation_draft(payload)
 
     assert draft.recommendation_level == "RECOMMEND"
+
+
+def test_llm_draft_validation_accepts_legacy_strong_recommend_alias() -> None:
+    payload = {
+        "risk_analysis_text": "정보 없음",
+        "risk_interpretation_text": "정보 없음",
+        "recommendation_summary_text": "정보 없음",
+        "recommendation_reasons": ["정보 없음"],
+        "recommendation_cautions": [],
+        "final_action": "정보 없음",
+        "recommendation_level": "STRONG_RECOMM",
+    }
+
+    draft = validate_evaluation_draft(payload)
+
+    assert draft.recommendation_level == "STRONG_RECOMMEND"
 
 
 def test_llm_draft_validation_allows_comma_formatted_evidence_numbers() -> None:

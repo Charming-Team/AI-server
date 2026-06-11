@@ -260,8 +260,63 @@ def test_adjustment_request_merges_edit_and_add_orders() -> None:
     assert order_by_id["PLAN-1"].locked_plan is not None
     assert order_by_id["PLAN-1"].order_amount == 200
     assert order_by_id["900000001"].is_locked is False
-    assert order_by_id["PLAN-2"].is_locked is False
+    assert "PLAN-2" not in order_by_id
     assert {operator.operator_id for operator in request.operators} == {101, 102}
+
+
+def test_adjustment_request_keeps_unpatched_db_schedules_as_blockers() -> None:
+    start = datetime(2026, 5, 22, 9, tzinfo=UTC)
+    bundle = _planning_bundle_for_adjustment()
+    bundle.existing_schedules = [
+        ExistingScheduleInput(
+            schedule_id="1",
+            line_id="1",
+            product_id="1",
+            order_id="100",
+            start_time=start,
+            end_time=start + timedelta(hours=1),
+            plan_status="SCHEDULED",
+        ),
+        ExistingScheduleInput(
+            schedule_id="2",
+            line_id="1",
+            product_id="1",
+            order_id="200",
+            start_time=start + timedelta(hours=1),
+            end_time=start + timedelta(hours=2),
+            plan_status="SCHEDULED",
+        ),
+    ]
+    adjustment = ProductionPlanningAdjustmentRequest(
+        planning_start=start,
+        planning_end=start + timedelta(hours=8),
+        edit_orders=[
+            PlanningOrderPatchInput(
+                order_id=1,
+                product_id=1,
+                order_quantity=1,
+                due_date=start + timedelta(hours=3),
+                contract_amount=Decimal("200.00"),
+                late_penalty_amount=Decimal("30.00"),
+                order_status="SCHEDULED",
+                locked_plan=LockedPlanPatchInput(
+                    line_id=1,
+                    planned_start_at=start + timedelta(hours=2),
+                    planned_end_at=start + timedelta(hours=3),
+                ),
+            )
+        ],
+    )
+
+    request = build_adjusted_planning_request_from_bundle(
+        adjustment,
+        bundle,
+        SolverConfig(time_limit_seconds=5, num_search_workers=1),
+        simulation_config=None,
+    )
+
+    assert {order.order_id for order in request.orders} == {"PLAN-1"}
+    assert {schedule.schedule_id for schedule in request.existing_schedules} == {"2"}
 
 
 def test_adjustment_request_requires_db_numeric_field_types() -> None:
