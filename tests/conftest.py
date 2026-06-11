@@ -2,7 +2,6 @@ import os
 
 import pytest
 
-
 ALLOW_LIVE_LLM_ENV = "PYTEST_ALLOW_LIVE_LLM"
 SAFE_LLM_ENV = {
     "LLM_ENABLED": "false",

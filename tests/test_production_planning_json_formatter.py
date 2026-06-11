@@ -744,7 +744,10 @@ def test_fallback_ai_evaluation_hides_schema_validation_error() -> None:
     )
 
     assert evaluation.status == "FAILED"
-    assert "Evaluation draft JSON schema is invalid" not in evaluation.ai_recommendation.summary_text
+    assert (
+        "Evaluation draft JSON schema is invalid"
+        not in evaluation.ai_recommendation.summary_text
+    )
     assert "pydantic.dev" not in evaluation.ai_recommendation.summary_text
     assert "AI 평가 문구를 생성하지 못했습니다" in evaluation.ai_recommendation.summary_text
 

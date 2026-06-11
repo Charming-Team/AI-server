@@ -994,7 +994,8 @@ def generate_planning(
     """
     try:
         logger.info(
-            "[Planning] generate requested planning_start=%s planning_end=%s edit_orders=%s add_orders=%s",
+            "[Planning] generate requested planning_start=%s planning_end=%s "
+            "edit_orders=%s add_orders=%s",
             request.planning_start,
             request.planning_end,
             len(request.edit_orders),

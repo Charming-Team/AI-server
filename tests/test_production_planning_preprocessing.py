@@ -30,8 +30,8 @@ from app.features.production_planning.schemas import (
     NormalizedLine,
     OrderInput,
     ProductInput,
-    ProductionPlanningRequest,
     ProductionLineInput,
+    ProductionPlanningRequest,
     ProductLineCapabilityInput,
 )
 

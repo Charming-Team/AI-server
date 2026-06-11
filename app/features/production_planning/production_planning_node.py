@@ -14,8 +14,8 @@ from app.features.production_planning.repositories.simulation_data_repository im
     SimulationDataRepository,
 )
 from app.features.production_planning.schemas import (
-    LockedPlanInput,
     ExistingScheduleInput,
+    LockedPlanInput,
     OrderInput,
     PlanningOrderPatchInput,
     ProductionPlanningAdjustmentRequest,
