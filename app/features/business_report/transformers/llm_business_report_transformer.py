@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -17,10 +18,11 @@ class LlmBusinessReportTransformer:
         self.enabled = os.getenv("BUSINESS_REPORT_LLM_ENABLED", "").lower() == "true"
         self.model = os.getenv("LLM_MODEL", "")
         self.api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        self.timeout_seconds = self._resolve_timeout_seconds()
         self.client: OpenAI | None = None
 
         if self.enabled and self.api_key:
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI(api_key=self.api_key, timeout=self.timeout_seconds)
 
     def run(
         self,
@@ -41,10 +43,9 @@ class LlmBusinessReportTransformer:
         user_prompt = build_business_report_writing_user_prompt(source)
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                temperature=0.1,
-                messages=[
+            request_options: dict[str, Any] = {
+                "model": self.model,
+                "messages": [
                     {
                         "role": "system",
                         "content": BUSINESS_REPORT_WRITING_SYSTEM_PROMPT,
@@ -54,8 +55,12 @@ class LlmBusinessReportTransformer:
                         "content": user_prompt,
                     },
                 ],
-                response_format={"type": "json_object"},
-            )
+                "response_format": {"type": "json_object"},
+            }
+            if self._supports_custom_temperature():
+                request_options["temperature"] = 0.1
+
+            response = self.client.chat.completions.create(**request_options)
         except Exception as error:
             raise RuntimeError(f"Business report LLM 호출에 실패했습니다: {error}") from error
 
@@ -64,3 +69,20 @@ class LlmBusinessReportTransformer:
             raise RuntimeError("Business report LLM 응답이 비어 있습니다.")
 
         return content.strip()
+
+    def _supports_custom_temperature(self) -> bool:
+        normalized_model = self.model.strip().lower()
+        return not normalized_model.startswith("gpt-5")
+
+    def _resolve_timeout_seconds(self) -> float:
+        raw_timeout = (
+            os.getenv("BUSINESS_REPORT_LLM_TIMEOUT_SECONDS")
+            or os.getenv("LLM_TIMEOUT_SECONDS")
+            or "60"
+        )
+        try:
+            timeout_seconds = float(raw_timeout)
+        except ValueError:
+            return 60.0
+
+        return timeout_seconds if timeout_seconds > 0 else 60.0
