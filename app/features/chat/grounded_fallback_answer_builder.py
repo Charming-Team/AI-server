@@ -4,6 +4,15 @@ from app.features.chat.schemas import DocumentSearchResult, EvidenceResult
 class GroundedFallbackAnswerBuilder:
     _max_items = 3
     _max_summary_chars = 140
+    _aggregate_summary_titles = frozenset(
+        {
+            "공정 라인 전체 현황",
+            "생산 라인 구성 전체 현황",
+            "가동 라인 전체 현황",
+            "긴급 주문 전체 생산계획 영향",
+            "자재 부족 영향 생산계획",
+        }
+    )
 
     def build(
         self,
@@ -60,6 +69,8 @@ class GroundedFallbackAnswerBuilder:
     ) -> str:
         if not items:
             return ""
+        if len(items) == 1 and items[0][0] in self._aggregate_summary_titles:
+            return self._normalize_aggregate_sentence(items[0][1])
 
         source_fragments = " ".join(
             f"{item_title}에서는 {self._normalize_sentence(item_summary)}"
@@ -90,3 +101,9 @@ class GroundedFallbackAnswerBuilder:
         if truncated_text.endswith((".", "?", "!", "다.", "요.")):
             return truncated_text
         return f"{truncated_text}."
+
+    def _normalize_aggregate_sentence(self, text: str) -> str:
+        normalized_text = text.strip()
+        if normalized_text.endswith((".", "?", "!", "다.", "요.")):
+            return normalized_text
+        return f"{normalized_text}."

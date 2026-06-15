@@ -70,7 +70,7 @@ class RecommendationService:
             question="자재 부족으로 영향받는 생산계획을 알려줘",
             intent=ChatIntent.MATERIAL_SHORTAGE,
             category="자재 부족",
-            url="/materials/inventories",
+            url="/production-plans?mode=read",
             allowed_roles=("MANUFACTURING_MANAGER",),
         ),
         RecommendedQuestionRule(

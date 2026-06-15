@@ -70,6 +70,94 @@ class FakeLineRdbEvidenceService:
         )
 
 
+class FakeMaterialShortageImpactRdbEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                _build_material_shortage_item(
+                    425,
+                    "ORD-202605-028",
+                    "PE-PIPE",
+                    "LINE-PE-02",
+                    "MAT-HDPE",
+                    "HDPE Resin",
+                    1250,
+                    "KG",
+                    "SHORTAGE",
+                ),
+                _build_material_shortage_item(
+                    423,
+                    "ORD-202605-026",
+                    "PE-PIPE",
+                    "LINE-PE-02",
+                    "MAT-HDPE",
+                    "HDPE Resin",
+                    410,
+                    "KG",
+                    "PARTIAL_RESERVED",
+                ),
+                _build_material_shortage_item(
+                    420,
+                    "ORD-202605-023",
+                    "PP-HEAT",
+                    "LINE-PP-01",
+                    "MAT-PP-BASE",
+                    "PP Base Resin",
+                    860,
+                    "KG",
+                    "SHORTAGE",
+                ),
+            ],
+        )
+
+
+class FakeUrgentOrderImpactRdbEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                _build_urgent_order_impact_item(
+                    101,
+                    "ORD-202605-020",
+                    "LINE-PE-01",
+                    "LINE-PE-02",
+                    True,
+                    2.5,
+                    "A",
+                ),
+                _build_urgent_order_impact_item(
+                    102,
+                    "ORD-202605-026",
+                    "LINE-ABS-01",
+                    "LINE-ABS-01",
+                    False,
+                    1.5,
+                    "B",
+                ),
+                _build_urgent_order_impact_item(
+                    103,
+                    "ORD-202605-033",
+                    "LINE-PP-01",
+                    "LINE-PP-02",
+                    True,
+                    3,
+                    "A",
+                ),
+            ],
+        )
+
+
 def _build_request() -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -102,6 +190,75 @@ def _build_line_item(
             "lineCode": line_code,
             "operationStatus": operation_status,
             "recordedAt": "2026-06-01T00:00:00+00:00",
+        },
+        allowedRoles=["OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"],
+    )
+
+
+def _build_material_shortage_item(
+    plan_id: int,
+    order_no: str,
+    product_code: str,
+    line_code: str,
+    material_code: str,
+    material_name: str,
+    shortage_quantity: float,
+    unit: str,
+    material_plan_status: str,
+) -> EvidenceItem:
+    return EvidenceItem(
+        type="MATERIAL",
+        title=f"{material_code} {material_name} {material_plan_status}",
+        summary=(
+            f"생산계획 ID: {plan_id}, 주문 번호: {order_no}, "
+            f"자재 코드: {material_code}, 부족 수량: {shortage_quantity}{unit}"
+        ),
+        url=f"/materials/inventory/{plan_id}?mode=read",
+        source="chat_material_shortage_evidence_view",
+        referenceId=plan_id,
+        data={
+            "planId": plan_id,
+            "orderNo": order_no,
+            "productCode": product_code,
+            "lineCode": line_code,
+            "materialCode": material_code,
+            "materialName": material_name,
+            "shortageQuantity": shortage_quantity,
+            "unit": unit,
+            "materialPlanStatus": material_plan_status,
+        },
+        allowedRoles=["OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"],
+    )
+
+
+def _build_urgent_order_impact_item(
+    simulation_detail_id: int,
+    order_no: str,
+    before_line_code: str,
+    after_line_code: str,
+    after_is_delayed: bool,
+    delay_reduction_hr: float,
+    recommendation_grade: str,
+) -> EvidenceItem:
+    return EvidenceItem(
+        type="ORDER",
+        title=f"{order_no} Due-Date Optimal DUE_DATE_OPTIMIZATION",
+        summary=(
+            f"simulation_detail_id: {simulation_detail_id}, 대응안: Due-Date Optimal, "
+            f"주문 번호: {order_no}, 변경 후 지연 여부: {after_is_delayed}"
+        ),
+        url=f"/orders/{simulation_detail_id}?mode=read",
+        source="chat_urgent_order_impact_evidence_view",
+        referenceId=simulation_detail_id,
+        data={
+            "simulationDetailId": simulation_detail_id,
+            "orderNo": order_no,
+            "beforeLineCode": before_line_code,
+            "afterLineCode": after_line_code,
+            "afterIsDelayed": after_is_delayed,
+            "delayReductionHr": delay_reduction_hr,
+            "recommendationGrade": recommendation_grade,
+            "simulationType": "DUE_DATE_OPTIMIZATION",
         },
         allowedRoles=["OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"],
     )
@@ -249,6 +406,67 @@ def test_evidence_service_does_not_add_composition_summary_for_bottleneck_questi
     assert result.items[0].title == "LINE-ABS-01 RUNNING"
 
 
+def test_evidence_service_summarizes_material_shortage_impacted_plans() -> None:
+    rdb_evidence_service = FakeMaterialShortageImpactRdbEvidenceService()
+    request = _build_request().model_copy(
+        update={"question": "자재 부족으로 영향받는 생산계획을 알려줘"}
+    )
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.MATERIAL_SHORTAGE)
+
+    assert len(result.items) == 1
+    summary_item = result.items[0]
+    assert summary_item.type == "PLAN"
+    assert summary_item.title == "자재 부족 영향 생산계획"
+    assert "영향받는 생산계획은 총 3건" in summary_item.summary
+    assert "계획 425 / ORD-202605-028 / MAT-HDPE / 부족 1250KG / LINE-PE-02" in (
+        summary_item.summary
+    )
+    assert "부족 자재: MAT-HDPE 2개, MAT-PP-BASE 1개" in summary_item.summary
+    assert "자재 상태: PARTIAL_RESERVED 1개, SHORTAGE 2개" in summary_item.summary
+    assert "생산계획 ID:" not in summary_item.summary
+    assert summary_item.url == "/production-plans?mode=read"
+    assert summary_item.data["affectedPlanCount"] == 3
+    assert summary_item.data["affectedPlanIds"] == [425, 423, 420]
+
+
+def test_evidence_service_summarizes_overall_urgent_order_impact() -> None:
+    rdb_evidence_service = FakeUrgentOrderImpactRdbEvidenceService()
+    request = _build_request().model_copy(
+        update={"question": "긴급 주문이 전체 생산계획에 미치는 영향을 알려줘"}
+    )
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.URGENT_ORDER_IMPACT)
+
+    assert len(result.items) == 1
+    summary_item = result.items[0]
+    assert summary_item.title == "긴급 주문 전체 생산계획 영향"
+    assert "영향 대상은 총 3건" in summary_item.summary
+    assert "ORD-202605-020" in summary_item.summary
+    assert "변경 후 지연 예상: 2건" in summary_item.summary
+    assert "총 지연 감소: 7시간" in summary_item.summary
+    assert "추천 등급: A 2개, B 1개" in summary_item.summary
+    assert "simulation_detail_id" not in summary_item.summary
+    assert summary_item.url == "/schedule-simulations?mode=read"
+    assert summary_item.data["orderCount"] == 3
+    assert summary_item.data["delayedOrderCount"] == 2
+    assert summary_item.data["totalDelayReductionHr"] == 7.0
+
+
 def test_evidence_service_builds_internal_request_payload() -> None:
     service = EvidenceService(Settings(evidence_lookup_internal_token="internal-token"))
     request = _build_request().model_copy(
@@ -351,7 +569,9 @@ def test_evidence_service_calls_internal_endpoint_and_parses_response() -> None:
                 http_client=http_client,
             )
             return await service.get_evidence(
-                _build_request(),
+                _build_request().model_copy(
+                    update={"question": "자재 재고 부족한 항목 알려줘"}
+                ),
                 ChatIntent.MATERIAL_SHORTAGE,
             )
 
