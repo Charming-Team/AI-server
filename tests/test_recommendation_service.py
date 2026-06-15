@@ -160,7 +160,7 @@ def test_recommendation_service_filters_by_keyword() -> None:
     assert len(response.items) == 1
     assert response.items[0].question_id == "material-shortage-impact"
     assert response.items[0].intent == "MATERIAL_SHORTAGE"
-    assert response.items[0].url == "/materials/inventories"
+    assert response.items[0].url == "/production-plans?mode=read"
     assert response.fallback_used is False
 
 

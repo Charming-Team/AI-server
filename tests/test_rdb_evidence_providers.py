@@ -180,6 +180,53 @@ def test_catalog_rdb_evidence_provider_builds_read_only_url_for_non_material_sou
     assert items[0].url == "/predictions/41001?mode=read"
 
 
+def test_catalog_rdb_evidence_provider_formats_urgent_order_impact_without_internal_ids() -> None:
+    definition = get_rdb_evidence_view_definition(ChatIntent.URGENT_ORDER_IMPACT)
+    assert definition is not None
+    row = {
+        "simulation_id": 53,
+        "simulation_detail_id": 105,
+        "simulation_name": "Due-Date Optimal",
+        "simulation_type": "DUE_DATE_OPTIMIZATION",
+        "order_id": 202605020,
+        "order_no": "ORD-202605-020",
+        "product_code": "PE-CLR",
+        "product_name": "투명 PE 원료",
+        "before_line_code": "LINE-PE-01",
+        "after_line_code": "LINE-PE-02",
+        "after_is_delayed": True,
+        "before_total_delay_hr": Decimal("9.0000"),
+        "after_total_delay_hr": Decimal("5.5000"),
+        "delay_reduction_hr": Decimal("3.5000"),
+        "change_reason": "긴급 주문 납기 대응",
+        "action_result": "라인 재배정",
+        "recommendation_grade": "A",
+        "created_at": datetime.fromisoformat("2026-05-23T10:05:00+09:00"),
+    }
+    view_client = FakeRdbEvidenceViewClient([row])
+    provider = CatalogRdbEvidenceProvider(definition, view_client)
+
+    items = anyio.run(
+        provider.get_evidence,
+        _build_request(role="OPERATOR"),
+        EvidenceLookupFilters(limit=5),
+    )
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.title == "ORD-202605-020 PE-CLR A"
+    assert "simulation_id" not in item.summary
+    assert "simulation_detail_id" not in item.summary
+    assert "대응안: Due-Date Optimal" in item.summary
+    assert "주문 번호: ORD-202605-020" in item.summary
+    assert "변경 전 전체 지연: 9시간" in item.summary
+    assert "변경 후 전체 지연: 5.5시간" in item.summary
+    assert "지연 감소 시간: 3.5시간" in item.summary
+    assert "변경 사유: 긴급 주문 납기 대응" in item.summary
+    assert item.url == "/orders/202605020?mode=read"
+    assert item.reference_id == 105
+
+
 def test_catalog_rdb_evidence_provider_blocks_role_outside_view_definition() -> None:
     definition = get_rdb_evidence_view_definition(ChatIntent.URGENT_ORDER_IMPACT)
     assert definition is not None

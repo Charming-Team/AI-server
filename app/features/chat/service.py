@@ -4,6 +4,10 @@ from app.features.chat.audit_logger import ChatAuditLogger
 from app.features.chat.document_access_policy import DocumentAccessPolicy
 from app.features.chat.document_search_service import DocumentSearchService
 from app.features.chat.evidence_access_policy import EvidenceAccessPolicy
+from app.features.chat.evidence_aggregation_policy import (
+    MATERIAL_SHORTAGE_IMPACT_SUMMARY_TITLE,
+    URGENT_ORDER_IMPACT_SUMMARY_TITLE,
+)
 from app.features.chat.evidence_service import EvidenceService
 from app.features.chat.exceptions import ChatExternalServiceError
 from app.features.chat.intent_classifier import IntentClassifier
@@ -90,6 +94,10 @@ class ChatService:
         document_result = self.document_access_policy.sanitize_search_result(
             document_result,
             request.user.role,
+        )
+        document_result = self._suppress_document_sources_for_rdb_summary(
+            evidence_result,
+            document_result,
         )
         answer_result = await self.answer_generation_service.generate_answer(
             request,
@@ -212,6 +220,25 @@ class ChatService:
 
     def _did_vector_search_start(self, exc: ChatExternalServiceError) -> bool:
         return not exc.code.value.startswith("CHAT_EMBEDDING_")
+
+    def _suppress_document_sources_for_rdb_summary(
+        self,
+        evidence_result: EvidenceResult,
+        document_result: DocumentSearchResult,
+    ) -> DocumentSearchResult:
+        if not document_result.sources:
+            return document_result
+        if not any(
+            item.title
+            in {
+                MATERIAL_SHORTAGE_IMPACT_SUMMARY_TITLE,
+                URGENT_ORDER_IMPACT_SUMMARY_TITLE,
+            }
+            for item in evidence_result.items
+        ):
+            return document_result
+
+        return document_result.model_copy(update={"sources": []})
 
     def _build_restricted_answer(self, security_result: SecurityResult) -> str:
         if security_result.status == SecurityStatus.INVALID_REQUEST:

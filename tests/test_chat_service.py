@@ -244,6 +244,30 @@ class FakeScopedEvidenceService:
         )
 
 
+class FakeMaterialShortageSummaryEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[
+                EvidenceItem(
+                    type="PLAN",
+                    title="자재 부족 영향 생산계획",
+                    summary=(
+                        "자재 부족으로 영향받는 생산계획은 총 3건. "
+                        "영향 계획: 계획 425 / ORD-202605-028 / MAT-HDPE."
+                    ),
+                    url="/production-plans?mode=read",
+                    source="chat_material_shortage_evidence_view",
+                )
+            ],
+        )
+
+
 def _build_request(
     status: str = "ACTIVE",
     role: str = "EXECUTIVE",
@@ -470,6 +494,41 @@ def test_chat_service_sanitizes_operator_financial_document_sources_before_llm()
         "월간 생산 리스크 보고서",
     ]
     assert [url.url for url in response.urls] == ["/reports/20?mode=read"]
+
+
+def test_chat_service_suppresses_document_sources_for_material_shortage_plan_summary() -> None:
+    service = ChatService(Settings())
+    answer_generation_service = FakeCapturingAnswerGenerationService()
+    service.evidence_service = FakeMaterialShortageSummaryEvidenceService()
+    service.document_search_service = FakeDocumentSearchService(
+        was_searched=True,
+        sources=[
+            ChatSource(
+                sourceType="COMPANY_INFO",
+                title="S-Map AI 지연 예측 기준",
+                summary="납기 지연 확률과 위험 등급 기준 설명입니다.",
+                url="/company-info/ai-delay-policy?mode=read",
+                sourceOrigin="QDRANT",
+            )
+        ],
+    )
+    service.answer_generation_service = answer_generation_service
+
+    response = anyio.run(
+        service.create_answer,
+        _build_request(
+            role="MANUFACTURING_MANAGER",
+            question="자재 부족으로 영향받는 생산계획을 알려줘",
+        ),
+    )
+
+    assert answer_generation_service.document_result is not None
+    assert answer_generation_service.document_result.sources == []
+    assert [source.title for source in response.sources] == ["자재 부족 영향 생산계획"]
+    assert [source.source_type for source in response.sources] == ["PLAN"]
+    assert [url.url for url in response.urls] == ["/production-plans?mode=read"]
+    assert response.model_result.used_vector_search is True
+    assert response.model_result.document_source_count == 0
 
 
 def test_chat_service_filters_allowed_roles_before_llm_and_ignores_company_name() -> None:
