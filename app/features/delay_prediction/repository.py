@@ -5,7 +5,7 @@ from sqlalchemy import text
 from app.core.database import engine
 from app.features.delay_prediction.features import FEATURE_COLUMNS
 
-VIEW_NAME = "delay_prediction_evidence.vw_delay_train_orders"
+VIEW_NAME = "delay_prediction_evidence.vw_delay_prediction_inference_orders"
 
 
 class DelayPredictionRepository:
