@@ -25,6 +25,14 @@ CHAT_ANSWER_HEADERS = {"X-Internal-Token": CHAT_ANSWER_INTERNAL_TOKEN}
 _MISSING_OVERRIDE = object()
 
 
+def _chat_answer_path() -> str:
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if path.endswith("/chat/answer"):
+            return path
+    return "/api/v1/chat/answer"
+
+
 def _post_chat_answer(*, json: dict):
     previous_override = app.dependency_overrides.get(get_settings, _MISSING_OVERRIDE)
     app.dependency_overrides[get_settings] = lambda: Settings(
@@ -32,7 +40,7 @@ def _post_chat_answer(*, json: dict):
     )
     try:
         return client.post(
-            "/api/v1/chat/answer",
+            _chat_answer_path(),
             headers=CHAT_ANSWER_HEADERS,
             json=json,
         )
@@ -804,6 +812,9 @@ def _build_production_plan_rdb_chat_service() -> ChatService:
 def _build_urgent_order_impact_rdb_chat_service() -> ChatService:
     service = ChatService(Settings())
     service.evidence_service = FakeUrgentOrderImpactEvidenceService()
+    service.document_search_service = DocumentSearchService(
+        Settings(qdrant_search_enabled=False)
+    )
     service.answer_generation_service = FakeUrgentOrderImpactAnswerGenerationService()
     return service
 
@@ -1377,19 +1388,19 @@ def test_chat_answer_evaluation_returns_urgent_order_impact_answer_from_rdb() ->
     assert body["urls"] == [
         {
             "label": "ORD-202605-099 긴급 주문 생산계획 영향",
-            "url": "/orders/9099",
-            "type": "ORDER",
+            "url": "/production-plans?orderNo=ORD-202605-099&mode=read",
+            "type": "PLAN",
         }
     ]
     assert body["sources"] == [
         {
-            "sourceType": "ORDER",
+            "sourceType": "PLAN",
             "title": "ORD-202605-099 긴급 주문 생산계획 영향",
             "summary": (
                 "긴급 주문 투입 시 LINE-A01 생산계획 종료가 "
                 "4시간 지연될 수 있습니다."
             ),
-            "url": "/orders/9099",
+            "url": "/production-plans?orderNo=ORD-202605-099&mode=read",
             "referenceId": 9099,
             "source": "schedule_simulation_results",
             "basisTime": "2026-05-12T10:30:00+09:00",
