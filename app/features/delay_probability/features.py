@@ -10,11 +10,10 @@ FastAPI 운영 추론에서 사용하는 feature 생성 전용 모듈입니다.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
-
 
 # 운영 추론에서는 사용하지 않지만, artifact metadata나 일부 테스트 코드와의
 # 호환성을 위해 상수만 유지합니다.
@@ -64,9 +63,7 @@ DERIVED_SOURCE_COLS = [
 ]
 
 REQUIRED_SOURCE_COLS_INFERENCE = (
-    ["product_code", "primary_line_id"]
-    + BASE_NUMERIC_COLS
-    + DERIVED_SOURCE_COLS
+    ["product_code", "primary_line_id"] + BASE_NUMERIC_COLS + DERIVED_SOURCE_COLS
 )
 
 # 운영 추론에서는 사용하지 않습니다.
@@ -103,12 +100,7 @@ def _to_binary(series: pd.Series) -> pd.Series:
         return series.fillna(False).astype(int)
 
     if pd.api.types.is_numeric_dtype(series):
-        return (
-            pd.to_numeric(series, errors="coerce")
-            .fillna(0)
-            .clip(0, 1)
-            .astype(int)
-        )
+        return pd.to_numeric(series, errors="coerce").fillna(0).clip(0, 1).astype(int)
 
     return (
         series.astype("string")
@@ -145,9 +137,7 @@ def validate_required_source_columns(
     """
 
     required_cols = (
-        REQUIRED_SOURCE_COLS_TRAINING
-        if require_target
-        else REQUIRED_SOURCE_COLS_INFERENCE
+        REQUIRED_SOURCE_COLS_TRAINING if require_target else REQUIRED_SOURCE_COLS_INFERENCE
     )
 
     missing_cols = [col for col in _unique(required_cols) if col not in df.columns]
@@ -213,9 +203,7 @@ def add_selected_derived_features(df: pd.DataFrame) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     planned_quantity_gap_ratio = (1 - df["planned_quantity_ratio"]).clip(lower=0)
-    df["planned_quantity_gap_bin"] = _make_planned_quantity_gap_bin(
-        planned_quantity_gap_ratio
-    )
+    df["planned_quantity_gap_bin"] = _make_planned_quantity_gap_bin(planned_quantity_gap_ratio)
 
     df["capacity_load_ratio"] = np.where(
         df["avg_capacity_per_day"].abs() > eps,
@@ -235,12 +223,16 @@ def add_selected_derived_features(df: pd.DataFrame) -> pd.DataFrame:
         .clip(lower=0, upper=2)
     )
 
-    df["duration_to_leadtime_bin"] = pd.cut(
-        duration_ratio,
-        bins=[-0.001, 0.10, 0.25, 0.50, 1.00, 2.00],
-        labels=["VERY_LOW", "LOW", "MEDIUM", "HIGH", "VERY_HIGH"],
-        include_lowest=True,
-    ).astype("string").fillna("UNKNOWN")
+    df["duration_to_leadtime_bin"] = (
+        pd.cut(
+            duration_ratio,
+            bins=[-0.001, 0.10, 0.25, 0.50, 1.00, 2.00],
+            labels=["VERY_LOW", "LOW", "MEDIUM", "HIGH", "VERY_HIGH"],
+            include_lowest=True,
+        )
+        .astype("string")
+        .fillna("UNKNOWN")
+    )
 
     due_margin_to_duration_ratio = np.where(
         df["total_estimated_duration_hr"].abs() > eps,
@@ -257,9 +249,7 @@ def add_selected_derived_features(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in DERIVED_NUMERIC_COLS:
         df[col] = (
-            pd.to_numeric(df[col], errors="coerce")
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0)
+            pd.to_numeric(df[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0)
         )
 
     for col in ["planned_quantity_gap_bin", "duration_to_leadtime_bin"]:
@@ -290,9 +280,7 @@ def _prepare_selected_X_internal(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in SELECTED_NUMERIC_COLS:
         df[col] = (
-            pd.to_numeric(df[col], errors="coerce")
-            .replace([np.inf, -np.inf], np.nan)
-            .fillna(0)
+            pd.to_numeric(df[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0)
         )
 
     return df[SELECTED_FEATURE_COLS].copy()

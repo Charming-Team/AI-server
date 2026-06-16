@@ -19,7 +19,7 @@ artifact_io.py에서 로드한 모델/전처리기/metadata를 전달받아
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -28,7 +28,6 @@ import xgboost as xgb
 
 from .features import prepare_selected_X
 from .preprocess import prepare_single_inference_source_row
-
 
 DEFAULT_RISK_THRESHOLDS = {
     "SAFE_MAX": 0.10,
@@ -231,17 +230,13 @@ def get_grouped_shap_for_one_row(
     temp = pd.DataFrame(
         {
             "encoded_feature": list(map(str, encoded_feature_names)),
-            "normalized_feature": [
-                normalize_feature_name(name)
-                for name in encoded_feature_names
-            ],
+            "normalized_feature": [normalize_feature_name(name) for name in encoded_feature_names],
             "shap_value": np.asarray(shap_values_1d, dtype=float),
         }
     )
 
-    grouped = (
-        temp.groupby("normalized_feature", as_index=False)
-        .agg(shap_value=("shap_value", "sum"))
+    grouped = temp.groupby("normalized_feature", as_index=False).agg(
+        shap_value=("shap_value", "sum")
     )
 
     grouped["abs_shap_value"] = grouped["shap_value"].abs()
@@ -349,8 +344,7 @@ def compute_grouped_shap_values(
 
     if shap_contribs.ndim != 2 or shap_contribs.shape[0] != 1:
         raise ValueError(
-            "단건 추론의 SHAP contribution shape이 올바르지 않습니다. "
-            f"shape={shap_contribs.shape}"
+            f"단건 추론의 SHAP contribution shape이 올바르지 않습니다. shape={shap_contribs.shape}"
         )
 
     # 마지막 컬럼은 bias/base value입니다.
@@ -410,13 +404,11 @@ def split_risk_factors(
     """
 
     risk_increase_factors = [
-        factor for factor in top_factors
-        if factor.get("direction") == "increase"
+        factor for factor in top_factors if factor.get("direction") == "increase"
     ]
 
     risk_decrease_factors = [
-        factor for factor in top_factors
-        if factor.get("direction") == "decrease"
+        factor for factor in top_factors if factor.get("direction") == "decrease"
     ]
 
     return risk_increase_factors, risk_decrease_factors
@@ -534,11 +526,9 @@ def predict_delay_probability_one(
         top_factors,
     )
 
-    probability_output = str(
-        metadata.get("probability_output", "calibrated_sigmoid")
-    )
+    probability_output = str(metadata.get("probability_output", "calibrated_sigmoid"))
 
-    predicted_at = datetime.now(timezone.utc).isoformat()
+    predicted_at = datetime.now(UTC).isoformat()
 
     cause_detail = build_cause_detail(
         raw_probability=raw_probability,

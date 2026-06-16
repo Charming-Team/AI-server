@@ -27,18 +27,12 @@ from app.features.delay_probability.preprocess import (
     get_required_inference_view_columns,
 )
 
-
-DEFAULT_INFERENCE_VIEW_NAME = (
-    "delay_prediction_evidence.vw_delay_probability_inference_orders"
-)
+DEFAULT_INFERENCE_VIEW_NAME = "delay_prediction_evidence.vw_delay_probability_inference_orders"
 
 
 class DelayProbabilityInferenceRowNotFoundError(ValueError):
     def __init__(self, order_id: int) -> None:
-        message = (
-            "지연 확률 예측 inference row를 찾을 수 없습니다. "
-            f"order_id={order_id}"
-        )
+        message = f"지연 확률 예측 inference row를 찾을 수 없습니다. order_id={order_id}"
         super().__init__(message)
         self.order_id = order_id
 
@@ -76,8 +70,7 @@ def _validate_qualified_view_name(view_name: str) -> str:
 
     if len(parts) not in (1, 2):
         raise ValueError(
-            "view_name은 table 또는 schema.table 형태여야 합니다. "
-            f"입력값: {view_name!r}"
+            f"view_name은 table 또는 schema.table 형태여야 합니다. 입력값: {view_name!r}"
         )
 
     return ".".join(_validate_sql_identifier_part(part) for part in parts)
@@ -86,10 +79,7 @@ def _validate_qualified_view_name(view_name: str) -> str:
 def _build_select_clause() -> str:
     columns = get_required_inference_view_columns()
 
-    safe_columns = [
-        _validate_sql_identifier_part(column)
-        for column in columns
-    ]
+    safe_columns = [_validate_sql_identifier_part(column) for column in columns]
 
     return ",\n                ".join(safe_columns)
 
@@ -141,12 +131,16 @@ class DelayProbabilityRepository:
 
         try:
             with self.engine.connect() as conn:
-                rows = conn.execute(
-                    query,
-                    {
-                        "order_id": order_id,
-                    },
-                ).mappings().all()
+                rows = (
+                    conn.execute(
+                        query,
+                        {
+                            "order_id": order_id,
+                        },
+                    )
+                    .mappings()
+                    .all()
+                )
         except Exception as exc:
             raise DelayProbabilityRepositoryError(
                 "지연 확률 예측 inference view 조회 중 오류가 발생했습니다."

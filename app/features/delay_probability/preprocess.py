@@ -23,7 +23,6 @@ from .features import (
     validate_required_source_columns,
 )
 
-
 REQUIRED_IDENTIFIER_COLS = [
     "order_id",
     "product_id",
@@ -131,15 +130,11 @@ def validate_identifier_columns(df: pd.DataFrame) -> None:
             f"{missing_cols}. 최소 order_id, product_id는 필요합니다."
         )
 
-    null_required = [
-        col for col in REQUIRED_IDENTIFIER_COLS
-        if df[col].isna().any()
-    ]
+    null_required = [col for col in REQUIRED_IDENTIFIER_COLS if df[col].isna().any()]
 
     if null_required:
         raise ValueError(
-            "지연 확률 예측 응답 저장에 필요한 식별자 컬럼에 NULL 값이 있습니다: "
-            f"{null_required}."
+            f"지연 확률 예측 응답 저장에 필요한 식별자 컬럼에 NULL 값이 있습니다: {null_required}."
         )
 
 
@@ -154,8 +149,7 @@ def coerce_inference_source_types(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     numeric_source_cols = [
-        col for col in BASE_NUMERIC_COLS
-        if col not in BINARY_COLS
+        col for col in BASE_NUMERIC_COLS if col not in BINARY_COLS
     ] + DERIVED_SOURCE_COLS
 
     identifier_numeric_cols = [
@@ -201,8 +195,7 @@ def prepare_inference_source_frame(
 
     if expect_single and len(df) != 1:
         raise ValueError(
-            "단건 지연 확률 예측에는 정확히 1개의 row가 필요합니다. "
-            f"입력 row 수: {len(df)}"
+            f"단건 지연 확률 예측에는 정확히 1개의 row가 필요합니다. 입력 row 수: {len(df)}"
         )
 
     validate_inference_source_columns(df)

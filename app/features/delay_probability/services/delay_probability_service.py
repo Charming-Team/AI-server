@@ -84,9 +84,7 @@ class DelayProbabilityPredictionService:
             top_n=request.top_n,
         )
 
-        return DelayProbabilityPredictResponse.from_prediction_result(
-            prediction_result
-        )
+        return DelayProbabilityPredictResponse.from_prediction_result(prediction_result)
 
 
 _default_service: DelayProbabilityPredictionService | None = None

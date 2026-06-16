@@ -18,7 +18,6 @@ from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-
 RiskLevel = Literal["SAFE", "CAUTION", "WARNING", "CRITICAL"]
 ImpactDirection = Literal["increase", "decrease"]
 FeatureValue = str | int | float | bool | None
@@ -337,7 +336,7 @@ class DelayProbabilityPredictResponse(BaseModel):
     def from_prediction_result(
         cls,
         prediction_result: dict[str, Any],
-    ) -> "DelayProbabilityPredictResponse":
+    ) -> DelayProbabilityPredictResponse:
         """
         artifact.predict_one(...) 또는 inference_utils.predict_delay_probability_one(...) 결과를
         응답 DTO로 변환합니다.

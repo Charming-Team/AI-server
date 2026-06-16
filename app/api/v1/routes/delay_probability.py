@@ -4,7 +4,7 @@ Delay probability prediction API routes.
 
 Endpoint:
 - POST /delay-probability/predict
-최종 경로: 
+최종 경로:
 - POST /api/v1/delay-probability/predict
 """
 
@@ -28,7 +28,6 @@ from app.features.delay_probability.schemas.response import (
 from app.features.delay_probability.services.delay_probability_service import (
     get_delay_probability_prediction_service,
 )
-
 
 logger = logging.getLogger(__name__)
 

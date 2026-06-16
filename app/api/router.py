@@ -8,7 +8,6 @@ from app.api.v1.routes.planning import router as planning_router
 from app.api.v1.routes.report import router as report_router
 from app.features.chat.router import router as chat_router
 
-
 api_router = APIRouter()
 api_router.include_router(chat_router)
 api_router.include_router(health.router, tags=["health"])
@@ -17,4 +16,3 @@ api_router.include_router(business_report_router)
 api_router.include_router(delay_prediction_router)
 api_router.include_router(delay_probability_router)
 api_router.include_router(planning_router)
-

@@ -24,7 +24,6 @@ import pandas as pd
 
 from .inference_utils import predict_delay_probability_one
 
-
 RISK_THRESHOLDS = {
     "SAFE_MAX": 0.10,
     "CAUTION_MAX": 0.40,
@@ -75,7 +74,8 @@ def _validate_artifact_dir(artifact_dir: Path) -> None:
         raise NotADirectoryError(f"artifact path가 directory가 아닙니다: {artifact_dir}")
 
     missing_files = [
-        file_name for file_name in REQUIRED_ARTIFACT_FILES
+        file_name
+        for file_name in REQUIRED_ARTIFACT_FILES
         if not (artifact_dir / file_name).exists()
     ]
 
@@ -99,8 +99,7 @@ def _safe_extract_tarball(tarball_path: Path, extract_root: Path) -> None:
             member_path = (extract_root / member.name).resolve()
             if not member_path.is_relative_to(root_resolved):
                 raise ValueError(
-                    "안전하지 않은 tar.gz artifact 경로가 발견되었습니다: "
-                    f"{member.name}"
+                    f"안전하지 않은 tar.gz artifact 경로가 발견되었습니다: {member.name}"
                 )
 
         tar.extractall(extract_root)
@@ -144,7 +143,8 @@ def extract_artifact_tarball(
 
     # tar 내부 최상위 폴더명이 예상과 다른 경우를 대비한 fallback입니다.
     candidates = [
-        path for path in extract_root_path.iterdir()
+        path
+        for path in extract_root_path.iterdir()
         if path.is_dir() and (path / "xgb_pipeline.joblib").exists()
     ]
 
@@ -208,8 +208,7 @@ def resolve_artifact_dir(
         )
 
     raise FileNotFoundError(
-        "artifact_path는 artifact directory 또는 .tar.gz 파일이어야 합니다. "
-        f"입력값: {path}"
+        f"artifact_path는 artifact directory 또는 .tar.gz 파일이어야 합니다. 입력값: {path}"
     )
 
 
@@ -235,7 +234,8 @@ def _load_encoded_feature_names(
 
     raise ValueError(
         "encoded feature name을 확인할 수 없습니다. "
-        "preprocessor.get_feature_names_out() 또는 feature_schema.encoded_feature_names가 필요합니다."
+        "preprocessor.get_feature_names_out() 또는 "
+        "feature_schema.encoded_feature_names가 필요합니다."
     )
 
 
@@ -318,17 +318,13 @@ def get_grouped_shap_for_one_row(
     temp = pd.DataFrame(
         {
             "encoded_feature": list(encoded_feature_names),
-            "normalized_feature": [
-                normalize_feature_name(name)
-                for name in encoded_feature_names
-            ],
+            "normalized_feature": [normalize_feature_name(name) for name in encoded_feature_names],
             "shap_value": np.asarray(shap_values_1d, dtype=float),
         }
     )
 
-    grouped = (
-        temp.groupby("normalized_feature", as_index=False)
-        .agg(shap_value=("shap_value", "sum"))
+    grouped = temp.groupby("normalized_feature", as_index=False).agg(
+        shap_value=("shap_value", "sum")
     )
 
     grouped["abs_shap_value"] = grouped["shap_value"].abs()
@@ -382,9 +378,7 @@ class DelayProbabilityArtifact:
 
         feature_schema_path = self.artifact_dir / "feature_schema.json"
         self.feature_schema = (
-            _read_json(feature_schema_path)
-            if feature_schema_path.exists()
-            else {}
+            _read_json(feature_schema_path) if feature_schema_path.exists() else {}
         )
 
         self.encoded_feature_names = _load_encoded_feature_names(
