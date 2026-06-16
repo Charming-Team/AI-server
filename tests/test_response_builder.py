@@ -2,9 +2,11 @@ from datetime import datetime
 
 from app.features.chat.response_builder import ChatResponseBuilder
 from app.features.chat.schemas import (
+    ChatAnswerRequest,
     ChatErrorCode,
     ChatIntent,
     ChatSource,
+    ChatUserContext,
     DocumentSearchResult,
     EvidenceItem,
     EvidenceResult,
@@ -17,6 +19,24 @@ def _build_evidence_result(items: list[EvidenceItem]) -> EvidenceResult:
         intent=ChatIntent.DELIVERY_RISK,
         basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
         items=items,
+    )
+
+
+def _build_request(
+    question: str,
+    role: str = "MANUFACTURING_MANAGER",
+) -> ChatAnswerRequest:
+    return ChatAnswerRequest(
+        sessionId=10,
+        messageId=24,
+        user=ChatUserContext(
+            userId=1,
+            role=role,
+            companyName="S-MAP",
+            status="ACTIVE",
+        ),
+        question=question,
+        requestedAt=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
     )
 
 
@@ -161,6 +181,119 @@ def test_response_builder_deduplicates_sources_by_safe_url() -> None:
     assert len(sources) == 1
     assert sources[0].title == "MAT-FOAM-ADD 발포 첨가제 SHORTAGE"
     assert sources[0].url == "/materials/inventory/711?mode=read"
+
+
+def test_response_builder_routes_material_shortage_impact_to_plan_detail() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.MATERIAL_SHORTAGE,
+        basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+        items=[
+            EvidenceItem(
+                type="MATERIAL",
+                title="MAT-HDPE HDPE Resin SHORTAGE",
+                summary="생산계획 425에서 MAT-HDPE 부족이 확인되었습니다.",
+                url="/materials/inventory/11?mode=read",
+                source="chat_material_shortage_evidence_view",
+                data={
+                    "planId": 425,
+                    "orderNo": "ORD-202605-028",
+                    "materialId": 11,
+                    "materialCode": "MAT-HDPE",
+                },
+            )
+        ],
+    )
+
+    sources = builder.build_sources(
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+        request=_build_request("자재 부족으로 영향받는 생산계획을 알려줘"),
+    )
+
+    assert sources[0].source_type == "PLAN"
+    assert sources[0].url == "/production-plans/425?mode=read"
+
+
+def test_response_builder_routes_material_inventory_question_to_material_detail() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.MATERIAL_SHORTAGE,
+        basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+        items=[
+            EvidenceItem(
+                type="MATERIAL",
+                title="MAT-HDPE HDPE Resin SHORTAGE",
+                summary="MAT-HDPE 재고 부족이 확인되었습니다.",
+                url="/materials/inventory/11?mode=read",
+                source="chat_material_shortage_evidence_view",
+                data={"materialId": 11, "materialCode": "MAT-HDPE"},
+            )
+        ],
+    )
+
+    sources = builder.build_sources(
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+        request=_build_request("현재 자재 재고 현황을 조회해줘"),
+    )
+
+    assert sources[0].source_type == "MATERIAL"
+    assert sources[0].url == "/materials/inventory/11?mode=read"
+
+
+def test_response_builder_routes_urgent_order_plan_question_to_plan_filter() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.URGENT_ORDER_IMPACT,
+        basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+        items=[
+            EvidenceItem(
+                type="ORDER",
+                title="ORD-202605-033 긴급 주문 영향",
+                summary="LINE-PE-02에서 LINE-PE-01로 변경됩니다.",
+                url="/orders/1033?mode=read",
+                source="chat_urgent_order_impact_evidence_view",
+                data={"orderNo": "ORD-202605-033", "orderId": 1033},
+            )
+        ],
+    )
+
+    sources = builder.build_sources(
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+        request=_build_request("긴급 주문이 전체 생산계획에 미치는 영향을 알려줘"),
+    )
+
+    assert sources[0].source_type == "PLAN"
+    assert sources[0].url == "/production-plans?orderNo=ORD-202605-033&mode=read"
+
+
+def test_response_builder_routes_order_question_to_order_detail() -> None:
+    builder = ChatResponseBuilder()
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.URGENT_ORDER_IMPACT,
+        basisTime=datetime.fromisoformat("2026-05-12T10:30:00+09:00"),
+        items=[
+            EvidenceItem(
+                type="ORDER",
+                title="ORD-202605-033 긴급 주문 영향",
+                summary="긴급 주문 영향이 확인되었습니다.",
+                url="/production-plans?orderNo=ORD-202605-033&mode=read",
+                source="chat_urgent_order_impact_evidence_view",
+                data={"orderNo": "ORD-202605-033", "orderId": 1033},
+            )
+        ],
+    )
+
+    sources = builder.build_sources(
+        evidence_result,
+        DocumentSearchResult(sources=[]),
+        request=_build_request("ORD-202605-033 주문 영향만 알려줘"),
+    )
+
+    assert sources[0].source_type == "ORDER"
+    assert sources[0].url == "/orders/1033?mode=read"
 
 
 def test_response_builder_builds_latest_basis_time_from_sources() -> None:

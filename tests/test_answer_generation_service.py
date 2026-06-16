@@ -20,6 +20,7 @@ from app.features.chat.schemas import (
     EvidenceResult,
     LlmUsage,
 )
+from app.features.chat.skip_reasons import LLM_UNAVAILABLE
 
 BLOCKED_GENERATED_ANSWER = (
     "보안상 생성된 답변을 제공할 수 없습니다. "
@@ -130,10 +131,10 @@ def test_answer_generation_returns_grounded_fallback_when_llm_disabled() -> None
     )
 
     assert result.was_generated is False
-    assert "확인된 문서 검색 근거 기준으로 요약합니다." in result.answer
+    assert "확인된 문서를 기준으로 답변합니다." in result.answer
     assert "문서 검색 근거:" not in result.answer
     assert "핵심 답변:" not in result.answer
-    assert "문서 근거로는" in result.answer
+    assert "참고 문서에는" in result.answer
     assert "2026년 5월 생산 리스크 보고서" in result.answer
     assert "자재 부족과 LINE-A01 병목이 주요 리스크입니다." in result.answer
     assert "추가 확인이 필요합니다" in result.answer
@@ -142,25 +143,14 @@ def test_answer_generation_returns_grounded_fallback_when_llm_disabled() -> None
 
 
 @pytest.mark.parametrize(
-    ("settings", "expected_message"),
+    "settings",
     [
-        (
-            Settings(llm_enabled=True, llm_base_url=" "),
-            "LLM 필수 설정이 누락되었습니다: llm_base_url",
-        ),
-        (
-            Settings(llm_enabled=True, llm_model=" "),
-            "LLM 필수 설정이 누락되었습니다: llm_model",
-        ),
-        (
-            Settings(llm_enabled=True, llm_base_url=" ", llm_model=" "),
-            "LLM 필수 설정이 누락되었습니다: llm_base_url, llm_model",
-        ),
+        Settings(llm_enabled=True, llm_provider="unsupported"),
+        Settings(llm_enabled=True, llm_model=" "),
     ],
 )
 def test_answer_generation_requires_llm_settings_when_enabled(
     settings: Settings,
-    expected_message: str,
 ) -> None:
     service = AnswerGenerationService(settings, llm_client=FakeLlmClient())
     request = _build_request()
@@ -179,17 +169,17 @@ def test_answer_generation_requires_llm_settings_when_enabled(
         ]
     )
 
-    with pytest.raises(ChatExternalServiceError) as exc_info:
-        anyio.run(
-            service.generate_answer,
-            request,
-            evidence_result,
-            document_result,
-        )
+    result = anyio.run(
+        service.generate_answer,
+        request,
+        evidence_result,
+        document_result,
+    )
 
-    assert exc_info.value.status_code == 503
-    assert exc_info.value.code == ChatErrorCode.CHAT_LLM_001
-    assert exc_info.value.message == expected_message
+    assert result.was_generated is False
+    assert "확인된 문서를 기준으로 답변합니다." in result.answer
+    assert "2026년 5월 생산 리스크 보고서" in result.answer
+    assert result.skipped_reason == LLM_UNAVAILABLE
 
 
 def test_answer_generation_service_builds_grounded_prompt() -> None:
@@ -607,11 +597,12 @@ def test_answer_generation_returns_grounded_fallback_when_llm_call_fails() -> No
     )
 
     assert result.was_generated is False
-    assert "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다." in result.answer
+    assert "확인된 업무 데이터와 문서를 기준으로 답변합니다." in result.answer
     assert "RDB 근거:" not in result.answer
     assert "문서 검색 근거:" not in result.answer
-    assert "RDB 근거로는" in result.answer
-    assert "문서 근거로는" in result.answer
+    assert "RDB 근거로는" not in result.answer
+    assert "주요 확인 내용은" in result.answer
+    assert "참고 문서에는" in result.answer
     assert "월간 생산 리스크" in result.answer
     assert "2026년 5월 생산 리스크 보고서" in result.answer
     assert (

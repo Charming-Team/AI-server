@@ -13,6 +13,15 @@ class GroundedFallbackAnswerBuilder:
             "자재 부족 영향 생산계획",
         }
     )
+    _aggregate_action_sentences = {
+        "긴급 주문 전체 생산계획 영향": "상세 일정은 생산계획 화면에서 확인할 수 있습니다.",
+        "자재 부족 영향 생산계획": (
+            "영향받는 작업의 상세 일정은 생산계획 화면에서 확인할 수 있습니다."
+        ),
+        "공정 라인 전체 현황": "라인별 상세 상태는 생산 라인 화면에서 확인할 수 있습니다.",
+        "생산 라인 구성 전체 현황": "라인별 상세 상태는 생산 라인 화면에서 확인할 수 있습니다.",
+        "가동 라인 전체 현황": "라인별 상세 상태는 생산 라인 화면에서 확인할 수 있습니다.",
+    }
 
     def build(
         self,
@@ -55,12 +64,12 @@ class GroundedFallbackAnswerBuilder:
         has_rdb_evidence = bool(evidence_result.items)
         has_document_sources = bool(document_result.sources)
         if has_rdb_evidence and has_document_sources:
-            return "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다."
+            return "확인된 업무 데이터와 문서를 기준으로 답변합니다."
         if has_rdb_evidence:
-            return "확인된 RDB 근거 기준으로 요약합니다."
+            return "확인된 업무 데이터를 기준으로 답변합니다."
         if has_document_sources:
-            return "확인된 문서 검색 근거 기준으로 요약합니다."
-        return "확인된 내부 근거 기준으로 요약합니다."
+            return "확인된 문서를 기준으로 답변합니다."
+        return "확인된 내부 근거를 기준으로 답변합니다."
 
     def _build_source_sentence(
         self,
@@ -70,13 +79,15 @@ class GroundedFallbackAnswerBuilder:
         if not items:
             return ""
         if len(items) == 1 and items[0][0] in self._aggregate_summary_titles:
-            return self._normalize_aggregate_sentence(items[0][1])
+            return self._build_aggregate_sentence(items[0][0], items[0][1])
 
         source_fragments = " ".join(
             f"{item_title}에서는 {self._normalize_sentence(item_summary)}"
             for item_title, item_summary in items
         )
-        return f"{source_label} 근거로는 {source_fragments}"
+        if source_label == "문서":
+            return f"참고 문서에는 {source_fragments}"
+        return f"주요 확인 내용은 {source_fragments}"
 
     def _select_items(self, items: list[tuple[str, str]]) -> list[tuple[str, str]]:
         selected_items: list[tuple[str, str]] = []
@@ -107,3 +118,10 @@ class GroundedFallbackAnswerBuilder:
         if normalized_text.endswith((".", "?", "!", "다.", "요.")):
             return normalized_text
         return f"{normalized_text}."
+
+    def _build_aggregate_sentence(self, title: str, summary: str) -> str:
+        sentence = self._normalize_aggregate_sentence(summary)
+        action_sentence = self._aggregate_action_sentences.get(title)
+        if action_sentence and action_sentence not in sentence:
+            return f"{sentence} {action_sentence}"
+        return sentence

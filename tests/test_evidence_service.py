@@ -454,6 +454,7 @@ def test_evidence_service_summarizes_overall_urgent_order_impact() -> None:
 
     assert len(result.items) == 1
     summary_item = result.items[0]
+    assert summary_item.type == "PLAN"
     assert summary_item.title == "긴급 주문 전체 생산계획 영향"
     assert "영향 대상은 총 3건" in summary_item.summary
     assert "ORD-202605-020" in summary_item.summary
@@ -461,7 +462,7 @@ def test_evidence_service_summarizes_overall_urgent_order_impact() -> None:
     assert "총 지연 감소: 7시간" in summary_item.summary
     assert "추천 등급: A 2개, B 1개" in summary_item.summary
     assert "simulation_detail_id" not in summary_item.summary
-    assert summary_item.url == "/schedule-simulations?mode=read"
+    assert summary_item.url == "/production-plans?mode=read"
     assert summary_item.data["orderCount"] == 3
     assert summary_item.data["delayedOrderCount"] == 2
     assert summary_item.data["totalDelayReductionHr"] == 7.0

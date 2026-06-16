@@ -39,12 +39,13 @@ def test_grounded_fallback_answer_builder_summarizes_internal_evidence() -> None
 
     answer = builder.build(evidence_result, document_result)
 
-    assert "확인된 RDB 근거와 문서 검색 근거 기준으로 요약합니다." in answer
+    assert "확인된 업무 데이터와 문서를 기준으로 답변합니다." in answer
     assert "RDB 근거:" not in answer
-    assert "RDB 근거로는" in answer
+    assert "RDB 근거로는" not in answer
+    assert "주요 확인 내용은" in answer
     assert "RM-AL-001 알루미늄 원자재 재고 부족" in answer
     assert "문서 검색 근거:" not in answer
-    assert "문서 근거로는" in answer
+    assert "참고 문서에는" in answer
     assert "5월 생산 리스크 보고서" in answer
     assert "추가 확인이 필요" in answer
 
@@ -97,10 +98,10 @@ def test_grounded_fallback_answer_builder_explains_document_only_grounding() -> 
 
     answer = builder.build(evidence_result, document_result)
 
-    assert "확인된 문서 검색 근거 기준으로 요약합니다." in answer
+    assert "확인된 문서를 기준으로 답변합니다." in answer
     assert "RDB 근거:" not in answer
     assert "문서 검색 근거:" not in answer
-    assert "문서 근거로는" in answer
+    assert "참고 문서에는" in answer
     assert "S-Map 회사 개요" in answer
 
 
@@ -123,9 +124,10 @@ def test_grounded_fallback_answer_builder_explains_rdb_only_grounding() -> None:
 
     answer = builder.build(evidence_result, document_result)
 
-    assert "확인된 RDB 근거 기준으로 요약합니다." in answer
+    assert "확인된 업무 데이터를 기준으로 답변합니다." in answer
     assert "RDB 근거:" not in answer
-    assert "RDB 근거로는" in answer
+    assert "RDB 근거로는" not in answer
+    assert "주요 확인 내용은" in answer
     assert "문서 검색 근거:" not in answer
 
 
@@ -158,6 +160,7 @@ def test_grounded_fallback_answer_builder_uses_material_shortage_plan_summary() 
     assert "자재 부족 영향 생산계획에서는" not in answer
     assert "영향받는 생산계획은 총 3건" in answer
     assert "MAT-HDPE 2개" in answer
+    assert "상세 일정은 생산계획 화면에서 확인할 수 있습니다" in answer
     assert "..." not in answer
     assert "생산계획 ID:" not in answer
 
@@ -177,7 +180,7 @@ def test_grounded_fallback_answer_builder_uses_urgent_order_impact_summary() -> 
                     "변경 후 지연 예상: 2건(ORD-202605-020, ORD-202605-033). "
                     "총 지연 감소: 7시간."
                 ),
-                url="/schedule-simulations?mode=read",
+                url="/production-plans?mode=read",
                 source="chat_urgent_order_impact_evidence_view",
             )
         ],
@@ -191,6 +194,7 @@ def test_grounded_fallback_answer_builder_uses_urgent_order_impact_summary() -> 
     assert "영향 대상은 총 3건" in answer
     assert "변경 후 지연 예상: 2건" in answer
     assert "총 지연 감소: 7시간" in answer
+    assert "상세 일정은 생산계획 화면에서 확인할 수 있습니다" in answer
     assert "..." not in answer
     assert "simulation_id" not in answer
     assert "simulation_detail_id" not in answer
