@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 
+from app.features.chat.navigation_target_resolver import NavigationTargetResolver
 from app.features.chat.schemas import (
+    ChatAnswerRequest,
     ChatErrorCode,
     ChatSource,
     ChatUrl,
@@ -19,13 +21,27 @@ class ChatResponseBuilder:
     _max_source_summary_chars = 300
     _max_urls = 3
 
+    def __init__(
+        self,
+        navigation_target_resolver: NavigationTargetResolver | None = None,
+    ) -> None:
+        self.navigation_target_resolver = (
+            navigation_target_resolver or NavigationTargetResolver()
+        )
+
     def build_sources(
         self,
         evidence_result: EvidenceResult,
         document_result: DocumentSearchResult,
+        request: ChatAnswerRequest | None = None,
     ) -> list[ChatSource]:
         evidence_sources = [
-            self._evidence_item_to_source(item, evidence_result.basis_time)
+            self._evidence_item_to_source(
+                item,
+                evidence_result.basis_time,
+                evidence_result=evidence_result,
+                request=request,
+            )
             for item in evidence_result.items
         ]
         document_sources = [
@@ -101,12 +117,20 @@ class ChatResponseBuilder:
         self,
         item: EvidenceItem,
         basis_time: datetime,
+        *,
+        evidence_result: EvidenceResult,
+        request: ChatAnswerRequest | None,
     ) -> ChatSource:
+        navigation_target = self.navigation_target_resolver.resolve(
+            item,
+            intent=evidence_result.intent,
+            request=request,
+        )
         return ChatSource(
-            source_type=item.type,
+            source_type=navigation_target.source_type,
             title=item.title,
             summary=self._truncate_source_summary(item.summary),
-            url=self._safe_internal_url(item.url),
+            url=self._safe_internal_url(navigation_target.url),
             reference_id=item.reference_id,
             source=item.source,
             basis_time=basis_time,

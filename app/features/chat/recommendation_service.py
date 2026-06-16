@@ -134,7 +134,7 @@ class RecommendationService:
             question="긴급 주문이 전체 생산계획에 미치는 영향을 알려줘",
             intent=ChatIntent.URGENT_ORDER_IMPACT,
             category="긴급 주문 영향",
-            url="/schedule-simulations?mode=read",
+            url="/production-plans?mode=read",
             allowed_roles=("OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"),
         ),
         RecommendedQuestionRule(

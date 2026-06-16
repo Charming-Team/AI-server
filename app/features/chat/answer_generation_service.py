@@ -120,20 +120,19 @@ class AnswerGenerationService:
                 skipped_reason=LLM_DISABLED,
             )
 
-        validate_llm_settings(self.settings)
-        prompt = self.build_prompt(request, evidence_result, document_result)
-        cache_key = self._build_cache_key(prompt)
-        if cached_answer := self.llm_response_cache.get(cache_key):
-            return self._build_generated_result_from_llm_answer(
-                cached_answer,
-                role=request.user.role,
-                evidence_result=evidence_result,
-                document_result=document_result,
-                llm_cache_hit=True,
-                llm_usage=LlmUsage(promptTokens=0, completionTokens=0, totalTokens=0),
-            )
-
         try:
+            validate_llm_settings(self.settings)
+            prompt = self.build_prompt(request, evidence_result, document_result)
+            cache_key = self._build_cache_key(prompt)
+            if cached_answer := self.llm_response_cache.get(cache_key):
+                return self._build_generated_result_from_llm_answer(
+                    cached_answer,
+                    role=request.user.role,
+                    evidence_result=evidence_result,
+                    document_result=document_result,
+                    llm_cache_hit=True,
+                    llm_usage=LlmUsage(promptTokens=0, completionTokens=0, totalTokens=0),
+                )
             completion = await self.llm_client.generate_completion(prompt)
         except ChatExternalServiceError:
             answer = self.fallback_answer_builder.build(evidence_result, document_result)

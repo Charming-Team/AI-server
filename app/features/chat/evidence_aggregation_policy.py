@@ -297,10 +297,10 @@ class EvidenceAggregationPolicy:
 
         first_item = items[0]
         return EvidenceItem(
-            type="ORDER",
+            type="PLAN",
             title=URGENT_ORDER_IMPACT_SUMMARY_TITLE,
             summary=". ".join(summary_parts) + ".",
-            url="/schedule-simulations?mode=read",
+            url="/production-plans?mode=read",
             source=first_item.source,
             data={
                 "orderCount": affected_order_count,
@@ -331,7 +331,7 @@ class EvidenceAggregationPolicy:
                 "simulationDetailId",
                 "simulation_detail_id",
             )
-            impact_key = str(simulation_detail_id or order_no or item.reference_id)
+            impact_key = str(order_no or simulation_detail_id or item.reference_id)
             if impact_key in seen_keys:
                 continue
 

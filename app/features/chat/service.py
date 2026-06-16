@@ -104,7 +104,11 @@ class ChatService:
             evidence_result,
             document_result,
         )
-        sources = self.response_builder.build_sources(evidence_result, document_result)
+        sources = self.response_builder.build_sources(
+            evidence_result,
+            document_result,
+            request=request,
+        )
         basis_time = self.response_builder.build_basis_time(
             sources,
             fallback=evidence_result.basis_time,
