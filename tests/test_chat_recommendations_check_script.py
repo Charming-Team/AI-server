@@ -55,7 +55,7 @@ def _recommendation_response(
 
 def test_chat_recommendations_script_resolves_path_and_token() -> None:
     settings = Settings(
-        api_v1_prefix="/ai/api/v1",
+        api_v1_prefix="/api/v1",
         chat_recommendation_internal_token="env-recommendation-token",
     )
 
@@ -64,7 +64,7 @@ def test_chat_recommendations_script_resolves_path_and_token() -> None:
             _build_args(path=None),
             settings,
         )
-        == "/ai/api/v1/chat/recommendations"
+        == "/api/v1/chat/recommendations"
     )
     assert (
         check_chat_recommendations.resolve_recommendation_token(

@@ -34,7 +34,13 @@ def _write_payload(tmp_path, payload, file_name: str = "document-payload.json"):
     return input_path
 
 
-def test_validate_document_payload_script_builds_settings_from_env_file(tmp_path) -> None:
+def test_validate_document_payload_script_builds_settings_from_env_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DOCUMENT_CHUNK_SIZE", raising=False)
+    monkeypatch.delenv("DOCUMENT_CHUNK_OVERLAP", raising=False)
+    monkeypatch.delenv("DOCUMENT_MAX_CHUNKS", raising=False)
     env_file = tmp_path / ".env.document"
     env_file.write_text(
         "\n".join(
@@ -412,7 +418,11 @@ def test_validate_document_payload_script_prints_json_batch_without_content(
 
 def test_validate_document_payload_script_sums_batch_work_estimates(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("EMBEDDING_ENABLED", raising=False)
+    monkeypatch.delenv("DOCUMENT_CHUNK_SIZE", raising=False)
+    monkeypatch.delenv("DOCUMENT_CHUNK_OVERLAP", raising=False)
     first_input = _write_payload(
         tmp_path,
         _build_payload(documentId="report-202605-a", content="A" * 30 + "\n" + "B" * 30),
@@ -536,7 +546,9 @@ def test_validate_document_payload_script_returns_two_when_warning_is_strict(
 
 def test_validate_document_payload_script_returns_zero_when_strict_without_warning(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("EMBEDDING_ENABLED", raising=False)
     input_path = _write_payload(tmp_path, _build_payload())
     env_file = tmp_path / ".env.document"
     env_file.write_text("EMBEDDING_ENABLED=true", encoding="utf-8")
@@ -599,7 +611,10 @@ def test_validate_document_payload_script_prints_json_without_document_content(
 
 def test_validate_document_payload_script_prints_safe_chunk_metadata(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("DOCUMENT_CHUNK_SIZE", raising=False)
+    monkeypatch.delenv("DOCUMENT_CHUNK_OVERLAP", raising=False)
     content = "A" * 30 + "\n" + "B" * 30
     input_path = _write_payload(tmp_path, _build_payload(content=content))
     env_file = tmp_path / ".env.document"

@@ -39,13 +39,13 @@ def _delete_response(
 
 def test_document_delete_api_script_resolves_path_and_token() -> None:
     settings = Settings(
-        api_v1_prefix="/ai/api/v1",
+        api_v1_prefix="/api/v1",
         document_index_internal_token="env-document-token",
     )
 
     assert (
         check_document_delete_api.resolve_delete_path(_build_args(path=None), settings)
-        == "/ai/api/v1/chat/internal/documents/delete"
+        == "/api/v1/chat/internal/documents/delete"
     )
     assert (
         check_document_delete_api.resolve_delete_token(_build_args(token=None), settings)

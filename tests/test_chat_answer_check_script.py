@@ -161,13 +161,13 @@ def test_check_chat_answer_script_builds_request() -> None:
 
 def test_check_chat_answer_script_resolves_path_and_token() -> None:
     settings = Settings(
-        api_v1_prefix="/ai/api/v1",
+        api_v1_prefix="/api/v1",
         chat_answer_internal_token="env-answer-token",
     )
 
     assert (
         check_chat_answer.resolve_answer_path(_build_args(path=None), settings)
-        == "/ai/api/v1/chat/answer"
+        == "/api/v1/chat/answer"
     )
     assert (
         check_chat_answer.resolve_answer_token(_build_args(token=None), settings)

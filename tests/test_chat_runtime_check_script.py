@@ -582,7 +582,7 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
 def test_check_chat_runtime_summarizes_k8s_configmap_chat_mode() -> None:
     settings = _base_ready_settings(
         environment="prod",
-        api_v1_prefix="/ai/api/v1",
+        api_v1_prefix="/api/v1",
         rdb_evidence_enabled=True,
         rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
         qdrant_search_enabled=True,
@@ -599,7 +599,7 @@ def test_check_chat_runtime_summarizes_k8s_configmap_chat_mode() -> None:
 
     assert result["checkStatus"] == "PASS"
     assert result["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "RDB_QDRANT",
         "answerMode": "FALLBACK",
         "ragSearchMode": "ENABLED",
@@ -1956,7 +1956,7 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence"],
             "runtimeMode": {
-                "apiPrefix": "/ai/api/v1",
+                "apiPrefix": "/api/v1",
                 "groundingMode": "RDB_QDRANT",
                 "answerMode": "FALLBACK",
                 "ragSearchMode": "ENABLED",
@@ -1995,7 +1995,7 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
     assert "status=FAIL" in output
     assert "requiredComponents=rdbEvidence" in output
     assert "summary=passed:0 failed:1 total:1" in output
-    assert "apiPrefix=/ai/api/v1" in output
+    assert "apiPrefix=/api/v1" in output
     assert "groundingMode=RDB_QDRANT" in output
     assert "answerMode=FALLBACK" in output
     assert "ragSearchMode=ENABLED" in output
@@ -2013,7 +2013,7 @@ def test_check_chat_runtime_markdown_output_includes_step_status() -> None:
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence"],
             "runtimeMode": {
-                "apiPrefix": "/ai/api/v1",
+                "apiPrefix": "/api/v1",
                 "groundingMode": "RDB_QDRANT",
                 "answerMode": "FALLBACK",
                 "ragSearchMode": "ENABLED",
@@ -2434,7 +2434,7 @@ def test_check_chat_runtime_main_formats_markdown(
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence", "qdrantSearch"],
             "runtimeMode": {
-                "apiPrefix": "/ai/api/v1",
+                "apiPrefix": "/api/v1",
                 "groundingMode": "RDB_QDRANT",
                 "answerMode": "FALLBACK",
                 "ragSearchMode": "ENABLED",

@@ -27,23 +27,33 @@ def test_health_check() -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_health_check_supports_ai_alias_for_nested_ai_prefix(monkeypatch) -> None:
-    monkeypatch.setenv("API_V1_PREFIX", "/ai/api/v1")
+def test_health_check_uses_internal_api_prefix(monkeypatch) -> None:
+    monkeypatch.setenv("API_V1_PREFIX", "/api/v1")
     get_settings.cache_clear()
     try:
         test_client = TestClient(create_app())
-        canonical_response = test_client.get("/ai/api/v1/health")
-        alias_response = test_client.get("/ai/health")
+        canonical_response = test_client.get("/api/v1/health")
+        ai_alias_response = test_client.get("/ai/health")
     finally:
         get_settings.cache_clear()
 
     assert canonical_response.status_code == 200
-    assert alias_response.status_code == 200
-    assert alias_response.json()["status"] == "ok"
+    assert canonical_response.json()["status"] == "ok"
+    assert ai_alias_response.status_code == 404
 
 
 def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() -> None:
-    previous_override = _override_settings(Settings())
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token=None,
+            chat_recommendation_internal_token=None,
+            document_index_internal_token=None,
+            evidence_lookup_enabled=False,
+            evidence_lookup_internal_token=None,
+            rdb_evidence_enabled=False,
+            qdrant_search_enabled=False,
+        )
+    )
     try:
         response = client.get("/api/v1/health/ready")
     finally:
@@ -103,6 +113,7 @@ def test_readiness_check_returns_ready_without_exposing_secret_values() -> None:
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
             evidence_lookup_enabled=True,
+            rdb_evidence_enabled=False,
             evidence_lookup_base_url="http://spring.local",
             evidence_lookup_path="/internal/chat/evidence",
             evidence_lookup_internal_token="evidence-secret",
@@ -144,7 +155,7 @@ def test_readiness_check_summarizes_k8s_configmap_chat_mode() -> None:
     previous_override = _override_settings(
         Settings(
             environment="prod",
-            api_v1_prefix="/ai/api/v1",
+            api_v1_prefix="/api/v1",
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
             rdb_evidence_enabled=True,
@@ -169,7 +180,7 @@ def test_readiness_check_summarizes_k8s_configmap_chat_mode() -> None:
     assert body["status"] == "ready"
     assert body["environment"] == "prod"
     assert body["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "RDB_QDRANT",
         "answerMode": "FALLBACK",
         "ragSearchMode": "ENABLED",

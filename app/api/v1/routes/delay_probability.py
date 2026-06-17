@@ -45,8 +45,8 @@ router = APIRouter(
     summary="주문별 지연 확률 예측",
     description=(
         "orderId 기준으로 inference 전용 view에서 주문 단위 feature row를 조회한 뒤, "
-        "XGBoost 지연 확률 예측 모델을 실행하여 delay_probability, risk_level, "
-        "SHAP 기반 cause_detail을 반환합니다."
+        "XGBoost 지연 확률 예측 모델을 실행하여 delayProbability, riskLevel, "
+        "SHAP 기반 causeDetail을 반환합니다."
     ),
 )
 def predict_delay_probability(

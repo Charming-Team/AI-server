@@ -7,7 +7,7 @@ from scripts import check_k8s_runtime_env
 def _valid_env_values() -> dict[str, str]:
     return {
         "ENVIRONMENT": "prod",
-        "API_V1_PREFIX": "/ai/api/v1",
+        "API_V1_PREFIX": "/api/v1",
         "CHAT_ANSWER_INTERNAL_TOKEN": "answer-token",
         "CHAT_RECOMMENDATION_INTERNAL_TOKEN": "recommendation-token",
         "DOCUMENT_INDEX_INTERNAL_TOKEN": "document-token",

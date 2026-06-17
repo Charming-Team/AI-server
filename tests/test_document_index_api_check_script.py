@@ -56,13 +56,13 @@ def _index_response(
 
 def test_document_index_api_script_resolves_path_and_token() -> None:
     settings = Settings(
-        api_v1_prefix="/ai/api/v1",
+        api_v1_prefix="/api/v1",
         document_index_internal_token="env-document-token",
     )
 
     assert (
         check_document_index_api.resolve_index_path(_build_args(path=None), settings)
-        == "/ai/api/v1/chat/internal/documents/index"
+        == "/api/v1/chat/internal/documents/index"
     )
     assert (
         check_document_index_api.resolve_index_token(_build_args(token=None), settings)
