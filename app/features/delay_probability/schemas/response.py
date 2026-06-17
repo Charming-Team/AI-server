@@ -45,7 +45,7 @@ class ShapFactor(BaseModel):
 
     feature_name_ko: str = Field(
         validation_alias=AliasChoices("feature_name_ko", "featureNameKo"),
-        serialization_alias="feature_name_ko",
+        serialization_alias="featureNameKo",
         min_length=1,
         description="feature 한글 표시명",
         examples=["라인 생산능력 대비 주문 부하"],
@@ -53,7 +53,7 @@ class ShapFactor(BaseModel):
 
     cause_tag: str = Field(
         validation_alias=AliasChoices("cause_tag", "causeTag"),
-        serialization_alias="cause_tag",
+        serialization_alias="causeTag",
         min_length=1,
         description="feature 기반 원인 태그",
         examples=["LINE_LOAD"],
@@ -61,7 +61,7 @@ class ShapFactor(BaseModel):
 
     feature_value: FeatureValue = Field(
         validation_alias=AliasChoices("feature_value", "featureValue"),
-        serialization_alias="feature_value",
+        serialization_alias="featureValue",
         description="예측에 사용된 해당 feature 값",
         examples=[0.6542056074766355],
     )
@@ -73,7 +73,7 @@ class ShapFactor(BaseModel):
 
     abs_impact: float = Field(
         validation_alias=AliasChoices("abs_impact", "absImpact"),
-        serialization_alias="abs_impact",
+        serialization_alias="absImpact",
         ge=0,
         description="SHAP impact 절댓값",
         examples=[0.3560287654399872],
@@ -98,7 +98,7 @@ class CauseDetail(BaseModel):
 
     raw_delay_probability: float = Field(
         validation_alias=AliasChoices("raw_delay_probability", "rawDelayProbability"),
-        serialization_alias="raw_delay_probability",
+        serialization_alias="rawDelayProbability",
         ge=0,
         le=1,
         description="calibration 적용 전 raw 지연 확률",
@@ -110,7 +110,7 @@ class CauseDetail(BaseModel):
             "calibrated_delay_probability",
             "calibratedDelayProbability",
         ),
-        serialization_alias="calibrated_delay_probability",
+        serialization_alias="calibratedDelayProbability",
         ge=0,
         le=1,
         description="calibration 적용 후 지연 확률",
@@ -119,7 +119,7 @@ class CauseDetail(BaseModel):
 
     probability_output: str = Field(
         validation_alias=AliasChoices("probability_output", "probabilityOutput"),
-        serialization_alias="probability_output",
+        serialization_alias="probabilityOutput",
         min_length=1,
         description="확률 출력 방식",
         examples=["calibrated_sigmoid"],
@@ -127,21 +127,21 @@ class CauseDetail(BaseModel):
 
     top_factors: list[ShapFactor] = Field(
         validation_alias=AliasChoices("top_factors", "topFactors"),
-        serialization_alias="top_factors",
+        serialization_alias="topFactors",
         default_factory=list,
         description="절댓값 기준 상위 SHAP 요인",
     )
 
     risk_increase_factors: list[ShapFactor] = Field(
         validation_alias=AliasChoices("risk_increase_factors", "riskIncreaseFactors"),
-        serialization_alias="risk_increase_factors",
+        serialization_alias="riskIncreaseFactors",
         default_factory=list,
         description="지연 위험 증가 방향 SHAP 요인",
     )
 
     risk_decrease_factors: list[ShapFactor] = Field(
         validation_alias=AliasChoices("risk_decrease_factors", "riskDecreaseFactors"),
-        serialization_alias="risk_decrease_factors",
+        serialization_alias="riskDecreaseFactors",
         default_factory=list,
         description="지연 위험 감소 방향 SHAP 요인",
     )
@@ -151,8 +151,7 @@ class DelayProbabilityPredictResponse(BaseModel):
     """
     지연 확률 예측 API 응답 DTO입니다.
 
-    현재 모델 반환 구조와 동일하게 snake_case로 직렬화합니다.
-    Spring에서는 @JsonProperty 또는 snake_case naming strategy로 수신하면 됩니다.
+    내부 모델 반환 구조는 snake_case로 받아들이고, 외부 응답은 camelCase로 직렬화합니다.
     """
 
     model_config = ConfigDict(
@@ -160,64 +159,64 @@ class DelayProbabilityPredictResponse(BaseModel):
         extra="ignore",
         json_schema_extra={
             "example": {
-                "order_id": 314,
-                "product_id": 10,
-                "plan_id": None,
-                "line_id": 5,
-                "raw_delay_probability": 0.012722019106149673,
-                "delay_probability": 0.014733265154063702,
-                "risk_level": "SAFE",
-                "model_name": "xgboost_delay_probability",
-                "model_version": "v1.0.0",
-                "probability_output": "calibrated_sigmoid",
-                "predicted_at": "2026-06-11T09:22:30.889312+00:00",
-                "top_factors": [
+                "orderId": 314,
+                "productId": 10,
+                "planId": None,
+                "lineId": 5,
+                "rawDelayProbability": 0.012722019106149673,
+                "delayProbability": 0.014733265154063702,
+                "riskLevel": "SAFE",
+                "modelName": "xgboost_delay_probability",
+                "modelVersion": "v1.0.0",
+                "probabilityOutput": "calibrated_sigmoid",
+                "predictedAt": "2026-06-11T09:22:30.889312+00:00",
+                "topFactors": [
                     {
                         "feature": "due_margin_to_duration_ratio_capped",
-                        "feature_name_ko": "생산 소요시간 대비 납기 여유 비율",
-                        "cause_tag": "DUE_MARGIN_RISK",
-                        "feature_value": 3.0,
+                        "featureNameKo": "생산 소요시간 대비 납기 여유 비율",
+                        "causeTag": "DUE_MARGIN_RISK",
+                        "featureValue": 3.0,
                         "impact": -1.798938512802124,
-                        "abs_impact": 1.798938512802124,
+                        "absImpact": 1.798938512802124,
                         "direction": "decrease",
                     }
                 ],
-                "risk_increase_factors": [],
-                "risk_decrease_factors": [
+                "riskIncreaseFactors": [],
+                "riskDecreaseFactors": [
                     {
                         "feature": "due_margin_to_duration_ratio_capped",
-                        "feature_name_ko": "생산 소요시간 대비 납기 여유 비율",
-                        "cause_tag": "DUE_MARGIN_RISK",
-                        "feature_value": 3.0,
+                        "featureNameKo": "생산 소요시간 대비 납기 여유 비율",
+                        "causeTag": "DUE_MARGIN_RISK",
+                        "featureValue": 3.0,
                         "impact": -1.798938512802124,
-                        "abs_impact": 1.798938512802124,
+                        "absImpact": 1.798938512802124,
                         "direction": "decrease",
                     }
                 ],
-                "cause_detail": {
-                    "raw_delay_probability": 0.012722019106149673,
-                    "calibrated_delay_probability": 0.014733265154063702,
-                    "probability_output": "calibrated_sigmoid",
-                    "top_factors": [
+                "causeDetail": {
+                    "rawDelayProbability": 0.012722019106149673,
+                    "calibratedDelayProbability": 0.014733265154063702,
+                    "probabilityOutput": "calibrated_sigmoid",
+                    "topFactors": [
                         {
                             "feature": "due_margin_to_duration_ratio_capped",
-                            "feature_name_ko": "생산 소요시간 대비 납기 여유 비율",
-                            "cause_tag": "DUE_MARGIN_RISK",
-                            "feature_value": 3.0,
+                            "featureNameKo": "생산 소요시간 대비 납기 여유 비율",
+                            "causeTag": "DUE_MARGIN_RISK",
+                            "featureValue": 3.0,
                             "impact": -1.798938512802124,
-                            "abs_impact": 1.798938512802124,
+                            "absImpact": 1.798938512802124,
                             "direction": "decrease",
                         }
                     ],
-                    "risk_increase_factors": [],
-                    "risk_decrease_factors": [
+                    "riskIncreaseFactors": [],
+                    "riskDecreaseFactors": [
                         {
                             "feature": "due_margin_to_duration_ratio_capped",
-                            "feature_name_ko": "생산 소요시간 대비 납기 여유 비율",
-                            "cause_tag": "DUE_MARGIN_RISK",
-                            "feature_value": 3.0,
+                            "featureNameKo": "생산 소요시간 대비 납기 여유 비율",
+                            "causeTag": "DUE_MARGIN_RISK",
+                            "featureValue": 3.0,
                             "impact": -1.798938512802124,
-                            "abs_impact": 1.798938512802124,
+                            "absImpact": 1.798938512802124,
                             "direction": "decrease",
                         }
                     ],
@@ -228,21 +227,21 @@ class DelayProbabilityPredictResponse(BaseModel):
 
     order_id: int = Field(
         validation_alias=AliasChoices("order_id", "orderId"),
-        serialization_alias="order_id",
+        serialization_alias="orderId",
         ge=1,
         description="주문 ID",
     )
 
     product_id: int = Field(
         validation_alias=AliasChoices("product_id", "productId"),
-        serialization_alias="product_id",
+        serialization_alias="productId",
         ge=1,
         description="제품 ID",
     )
 
     plan_id: int | None = Field(
         validation_alias=AliasChoices("plan_id", "planId"),
-        serialization_alias="plan_id",
+        serialization_alias="planId",
         default=None,
         ge=1,
         description="생산계획 ID. 없을 경우 null",
@@ -250,7 +249,7 @@ class DelayProbabilityPredictResponse(BaseModel):
 
     line_id: int | None = Field(
         validation_alias=AliasChoices("line_id", "lineId"),
-        serialization_alias="line_id",
+        serialization_alias="lineId",
         default=None,
         ge=1,
         description="라인 ID. 없을 경우 null",
@@ -258,7 +257,7 @@ class DelayProbabilityPredictResponse(BaseModel):
 
     raw_delay_probability: float = Field(
         validation_alias=AliasChoices("raw_delay_probability", "rawDelayProbability"),
-        serialization_alias="raw_delay_probability",
+        serialization_alias="rawDelayProbability",
         ge=0,
         le=1,
         description="calibration 적용 전 raw 지연 확률",
@@ -266,7 +265,7 @@ class DelayProbabilityPredictResponse(BaseModel):
 
     delay_probability: float = Field(
         validation_alias=AliasChoices("delay_probability", "delayProbability"),
-        serialization_alias="delay_probability",
+        serialization_alias="delayProbability",
         ge=0,
         le=1,
         description="calibration 적용 후 지연 확률. DB 저장 대상",
@@ -274,61 +273,61 @@ class DelayProbabilityPredictResponse(BaseModel):
 
     risk_level: RiskLevel = Field(
         validation_alias=AliasChoices("risk_level", "riskLevel"),
-        serialization_alias="risk_level",
+        serialization_alias="riskLevel",
         description="지연 위험 등급",
     )
 
     model_name: str = Field(
         validation_alias=AliasChoices("model_name", "modelName"),
-        serialization_alias="model_name",
+        serialization_alias="modelName",
         min_length=1,
         description="모델명",
     )
 
     model_version: str = Field(
         validation_alias=AliasChoices("model_version", "modelVersion"),
-        serialization_alias="model_version",
+        serialization_alias="modelVersion",
         min_length=1,
         description="모델 버전",
     )
 
     probability_output: str = Field(
         validation_alias=AliasChoices("probability_output", "probabilityOutput"),
-        serialization_alias="probability_output",
+        serialization_alias="probabilityOutput",
         min_length=1,
         description="확률 출력 방식",
     )
 
     predicted_at: datetime = Field(
         validation_alias=AliasChoices("predicted_at", "predictedAt"),
-        serialization_alias="predicted_at",
+        serialization_alias="predictedAt",
         description="ML 지연 확률 예측 시각",
     )
 
     top_factors: list[ShapFactor] = Field(
         validation_alias=AliasChoices("top_factors", "topFactors"),
-        serialization_alias="top_factors",
+        serialization_alias="topFactors",
         default_factory=list,
         description="절댓값 기준 상위 SHAP 요인",
     )
 
     risk_increase_factors: list[ShapFactor] = Field(
         validation_alias=AliasChoices("risk_increase_factors", "riskIncreaseFactors"),
-        serialization_alias="risk_increase_factors",
+        serialization_alias="riskIncreaseFactors",
         default_factory=list,
         description="지연 위험 증가 방향 SHAP 요인",
     )
 
     risk_decrease_factors: list[ShapFactor] = Field(
         validation_alias=AliasChoices("risk_decrease_factors", "riskDecreaseFactors"),
-        serialization_alias="risk_decrease_factors",
+        serialization_alias="riskDecreaseFactors",
         default_factory=list,
         description="지연 위험 감소 방향 SHAP 요인",
     )
 
     cause_detail: CauseDetail = Field(
         validation_alias=AliasChoices("cause_detail", "causeDetail"),
-        serialization_alias="cause_detail",
+        serialization_alias="causeDetail",
         description="ai_prediction_results.cause_detail JSONB 저장 대상",
     )
 
