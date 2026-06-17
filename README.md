@@ -26,7 +26,7 @@ uvicorn app.main:app --reload
 Open:
 
 - API docs: http://127.0.0.1:8000/docs
-- Health check: http://127.0.0.1:8000/ai/api/v1/health
+- Health check: http://127.0.0.1:8000/api/v1/health
 
 ## 리포지토리 구조
 

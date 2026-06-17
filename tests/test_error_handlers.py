@@ -22,7 +22,7 @@ def _post_chat_answer(*, json: dict):
     )
     try:
         return client.post(
-            "/ai/api/v1/chat/answer",
+            "/api/v1/chat/answer",
             headers=CHAT_ANSWER_HEADERS,
             json=json,
         )
@@ -40,7 +40,7 @@ def _post_chat_answer_raw(*, content: str):
     )
     try:
         return client.post(
-            "/ai/api/v1/chat/answer",
+            "/api/v1/chat/answer",
             headers={
                 **CHAT_ANSWER_HEADERS,
                 "Content-Type": "application/json",
@@ -189,7 +189,7 @@ def test_chat_answer_returns_evidence_error_when_rdb_lookup_fails() -> None:
     app.dependency_overrides[get_chat_service] = build_chat_service
     try:
         response = client.post(
-            "/ai/api/v1/chat/answer",
+            "/api/v1/chat/answer",
             headers=CHAT_ANSWER_HEADERS,
             json={
                 "sessionId": 10,

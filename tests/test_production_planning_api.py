@@ -10,7 +10,7 @@ from app.features.production_planning.schemas import ProductionPlanningAdjustmen
 
 def _test_client() -> TestClient:
     app = FastAPI()
-    app.include_router(planning_route.router, prefix="/ai/api/v1")
+    app.include_router(planning_route.router, prefix="/api/v1")
     return TestClient(app)
 
 
@@ -109,7 +109,7 @@ def test_planning_api_returns_planning_and_simulation_payloads(monkeypatch) -> N
 
     client = _test_client()
     response = client.post(
-        "/ai/api/v1/planning",
+        "/api/v1/planning",
         json={
             "planning_start": "2026-05-01 09:00:00.000 +0900",
             "planning_end": "2026-06-09 08:59:00.000 +0900",
@@ -146,7 +146,7 @@ def test_planning_api_returns_compact_planning_error(monkeypatch) -> None:
 
     client = _test_client()
     response = client.post(
-        "/ai/api/v1/planning",
+        "/api/v1/planning",
         json={
             "planning_start": "2026-05-01 09:00:00.000 +0900",
             "planning_end": "2026-06-09 08:59:00.000 +0900",
@@ -165,7 +165,7 @@ def test_planning_api_returns_compact_planning_error(monkeypatch) -> None:
 def test_planning_health_route() -> None:
     client = _test_client()
 
-    response = client.get("/ai/api/v1/planning/health")
+    response = client.get("/api/v1/planning/health")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -185,7 +185,7 @@ def test_planning_openapi_uses_executable_request_examples() -> None:
     client = _test_client()
 
     schema = client.get("/openapi.json").json()
-    request_body = schema["paths"]["/ai/api/v1/planning"]["post"]["requestBody"]
+    request_body = schema["paths"]["/api/v1/planning"]["post"]["requestBody"]
     examples = request_body["content"]["application/json"]["examples"]
     example = examples["edit_and_add_orders"]["value"]
 

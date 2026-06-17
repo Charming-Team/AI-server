@@ -145,7 +145,7 @@ def _delete_response(document_id: str = "smoke-company-line-bottleneck") -> dict
 
 def test_rag_end_to_end_validate_only_checks_tokens_and_paths() -> None:
     args = _build_args(validate_only=True)
-    settings = Settings(api_v1_prefix="/ai/api/v1")
+    settings = Settings(api_v1_prefix="/api/v1")
 
     result = check_rag_end_to_end.build_validate_only_result(
         args,
@@ -159,9 +159,9 @@ def test_rag_end_to_end_validate_only_checks_tokens_and_paths() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "answerPath": "/ai/api/v1/chat/answer",
-        "indexPath": "/ai/api/v1/chat/internal/documents/index",
-        "deletePath": "/ai/api/v1/chat/internal/documents/delete",
+        "answerPath": "/api/v1/chat/answer",
+        "indexPath": "/api/v1/chat/internal/documents/index",
+        "deletePath": "/api/v1/chat/internal/documents/delete",
         "documentId": "smoke-company-line-bottleneck",
         "documentType": "COMPANY_INFO",
         "question": "LINE-A01 병목 대응 기준 알려줘",
@@ -266,9 +266,9 @@ def test_rag_end_to_end_carries_llm_generation_and_cache_miss_requirements() -> 
     result = anyio.run(run)
 
     assert calls == [
-        "/ai/api/v1/chat/internal/documents/index",
-        "/ai/api/v1/chat/answer",
-        "/ai/api/v1/chat/internal/documents/delete",
+        "/api/v1/chat/internal/documents/index",
+        "/api/v1/chat/answer",
+        "/api/v1/chat/internal/documents/delete",
     ]
     assert result["requireLlmGeneration"] is True
     assert result["requireLlmCacheMiss"] is True
@@ -438,9 +438,9 @@ def test_rag_end_to_end_format_text_does_not_expose_tokens() -> None:
             "mode": "NETWORK",
             "networkChecked": True,
             "baseUrl": "http://fastapi.local",
-            "answerPath": "/ai/api/v1/chat/answer",
-            "indexPath": "/ai/api/v1/chat/internal/documents/index",
-            "deletePath": "/ai/api/v1/chat/internal/documents/delete",
+            "answerPath": "/api/v1/chat/answer",
+            "indexPath": "/api/v1/chat/internal/documents/index",
+            "deletePath": "/api/v1/chat/internal/documents/delete",
             "documentId": "smoke-company-line-bottleneck",
             "question": "LINE-A01 병목 대응 기준 알려줘",
             "role": "MANUFACTURING_MANAGER",

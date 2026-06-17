@@ -15,7 +15,7 @@ from scripts import check_rag_chat_scenarios
 def _build_args(**overrides: Any) -> Namespace:
     values = {
         "base_url": "http://fastapi.local",
-        "path": "/ai/api/v1/chat/answer",
+        "path": "/api/v1/chat/answer",
         "token": "answer-token",
         "env_file": None,
         "timeout_seconds": 10.0,

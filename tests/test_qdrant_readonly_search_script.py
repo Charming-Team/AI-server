@@ -118,7 +118,7 @@ def test_qdrant_readonly_search_validate_only_result() -> None:
     assert result["mode"] == "VALIDATE_ONLY"
     assert result["collectionName"] == "smap_internal_documents"
     assert result["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "QDRANT_ONLY",
         "answerMode": "FALLBACK",
         "ragSearchMode": "ENABLED",

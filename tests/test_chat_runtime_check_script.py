@@ -524,7 +524,7 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     assert result["steps"][4]["result"]["minEvidenceCount"] == 1
     assert result["steps"][4]["result"]["requireRdbEvidence"] is True
     assert result["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "RDB_ONLY",
         "answerMode": "LLM",
         "ragSearchMode": "DISABLED",
@@ -570,7 +570,7 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
     assert result["steps"][7]["result"]["requireRdbEvidence"] is True
     assert result["steps"][7]["result"]["requireVectorSearch"] is True
     assert result["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "RDB_QDRANT",
         "answerMode": "LLM",
         "ragSearchMode": "ENABLED",
@@ -582,7 +582,7 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
 def test_check_chat_runtime_summarizes_k8s_configmap_chat_mode() -> None:
     settings = _base_ready_settings(
         environment="prod",
-        api_v1_prefix="/ai/api/v1",
+        api_v1_prefix="/api/v1",
         rdb_evidence_enabled=True,
         rdb_evidence_dsn="postgresql://reader:secret@postgres.local:5432/smap",
         qdrant_search_enabled=True,
@@ -599,7 +599,7 @@ def test_check_chat_runtime_summarizes_k8s_configmap_chat_mode() -> None:
 
     assert result["checkStatus"] == "PASS"
     assert result["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "RDB_QDRANT",
         "answerMode": "FALLBACK",
         "ragSearchMode": "ENABLED",
@@ -795,7 +795,7 @@ def test_check_chat_runtime_validate_only_checks_rdb_chat_scenarios() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "path": "/ai/api/v1/chat/answer",
+        "path": "/api/v1/chat/answer",
         "tokenConfigured": True,
         "scenarioGroups": ["access"],
         "scenarioCount": 1,
@@ -882,7 +882,7 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
     assert result["steps"][-1]["name"] == "rdbChatScenarios"
     assert captured == {
         "base_url": "http://fastapi.local",
-        "path": "/ai/api/v1/chat/answer",
+        "path": "/api/v1/chat/answer",
         "token": "answer-token",
         "scenario_group": ["access"],
         "scenario": ["operator-financial-blocked"],
@@ -945,7 +945,7 @@ def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
     assert result["checkStatus"] == "PASS"
     assert captured == {
         "base_url": "http://fastapi.local",
-        "path": "/ai/api/v1/chat/answer",
+        "path": "/api/v1/chat/answer",
         "token": "answer-token",
         "scenario_group": ["core"],
         "scenario": ["line-bottleneck-with-company-guide"],
@@ -1198,8 +1198,8 @@ def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "indexPath": "/ai/api/v1/chat/internal/documents/index",
-        "deletePath": "/ai/api/v1/chat/internal/documents/delete",
+        "indexPath": "/api/v1/chat/internal/documents/index",
+        "deletePath": "/api/v1/chat/internal/documents/delete",
         "documentId": "smoke-document-api-contract",
         "tokenConfigured": True,
         "minIndexedCount": 0,
@@ -1509,7 +1509,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "path": "/ai/api/v1/chat/answer",
+        "path": "/api/v1/chat/answer",
         "question": "자재 부족 현황 알려줘",
         "role": "MANUFACTURING_MANAGER",
         "expectedIntent": None,
@@ -1838,7 +1838,7 @@ def test_check_chat_runtime_validate_only_checks_recommendation_api_smoke() -> N
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "path": "/ai/api/v1/chat/recommendations",
+        "path": "/api/v1/chat/recommendations",
         "role": "OPERATOR",
         "keywordConfigured": True,
         "tokenConfigured": True,
@@ -1956,7 +1956,7 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence"],
             "runtimeMode": {
-                "apiPrefix": "/ai/api/v1",
+                "apiPrefix": "/api/v1",
                 "groundingMode": "RDB_QDRANT",
                 "answerMode": "FALLBACK",
                 "ragSearchMode": "ENABLED",
@@ -1995,7 +1995,7 @@ def test_check_chat_runtime_text_output_includes_step_status() -> None:
     assert "status=FAIL" in output
     assert "requiredComponents=rdbEvidence" in output
     assert "summary=passed:0 failed:1 total:1" in output
-    assert "apiPrefix=/ai/api/v1" in output
+    assert "apiPrefix=/api/v1" in output
     assert "groundingMode=RDB_QDRANT" in output
     assert "answerMode=FALLBACK" in output
     assert "ragSearchMode=ENABLED" in output
@@ -2013,7 +2013,7 @@ def test_check_chat_runtime_markdown_output_includes_step_status() -> None:
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence"],
             "runtimeMode": {
-                "apiPrefix": "/ai/api/v1",
+                "apiPrefix": "/api/v1",
                 "groundingMode": "RDB_QDRANT",
                 "answerMode": "FALLBACK",
                 "ragSearchMode": "ENABLED",
@@ -2434,7 +2434,7 @@ def test_check_chat_runtime_main_formats_markdown(
             "networkChecked": False,
             "requiredComponents": ["rdbEvidence", "qdrantSearch"],
             "runtimeMode": {
-                "apiPrefix": "/ai/api/v1",
+                "apiPrefix": "/api/v1",
                 "groundingMode": "RDB_QDRANT",
                 "answerMode": "FALLBACK",
                 "ragSearchMode": "ENABLED",

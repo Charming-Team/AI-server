@@ -42,7 +42,7 @@ def _post_chat_answer(*, json: dict, headers: dict[str, str] | None = None):
     )
     try:
         return client.post(
-            "/ai/api/v1/chat/answer",
+            "/api/v1/chat/answer",
             headers=headers or CHAT_ANSWER_HEADERS,
             json=json,
         )
@@ -67,7 +67,7 @@ def _post_chat_recommendations(
     )
     try:
         return client.post(
-            "/ai/api/v1/chat/recommendations",
+            "/api/v1/chat/recommendations",
             headers=headers or CHAT_RECOMMENDATION_HEADERS,
             json=json,
         )
@@ -206,7 +206,7 @@ def test_chat_answer_requires_configured_internal_token() -> None:
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/answer",
+            "/api/v1/chat/answer",
             headers=CHAT_ANSWER_HEADERS,
             json=_build_chat_answer_payload(),
         )
@@ -229,7 +229,7 @@ def test_chat_answer_rejects_invalid_internal_token() -> None:
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/answer",
+            "/api/v1/chat/answer",
             headers={"X-Internal-Token": "wrong-token"},
             json=_build_chat_answer_payload(),
         )
@@ -586,7 +586,7 @@ def test_chat_recommendations_requires_configured_internal_token() -> None:
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/recommendations",
+            "/api/v1/chat/recommendations",
             headers=CHAT_RECOMMENDATION_HEADERS,
             json={
                 "user": {
@@ -617,7 +617,7 @@ def test_chat_recommendations_rejects_invalid_internal_token() -> None:
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/recommendations",
+            "/api/v1/chat/recommendations",
             headers={"X-Internal-Token": "wrong-token"},
             json={
                 "user": {
@@ -726,7 +726,7 @@ def test_chat_internal_document_index_requires_configured_token() -> None:
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/internal/documents/index",
+            "/api/v1/chat/internal/documents/index",
             json={
                 "documentId": "report-202605",
                 "documentType": "REPORT",
@@ -750,7 +750,7 @@ def test_chat_internal_document_index_rejects_invalid_token() -> None:
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/internal/documents/index",
+            "/api/v1/chat/internal/documents/index",
             headers={"X-Internal-Token": "wrong-token"},
             json={
                 "documentId": "report-202605",
@@ -777,7 +777,7 @@ def test_chat_internal_document_index_calls_index_service() -> None:
     app.dependency_overrides[get_document_index_service] = lambda: index_service
     try:
         response = client.post(
-            "/ai/api/v1/chat/internal/documents/index",
+            "/api/v1/chat/internal/documents/index",
             headers={"X-Internal-Token": "secret-token"},
             json={
                 "documentId": "report-202605",
@@ -811,7 +811,7 @@ def test_chat_internal_company_info_index_rejects_unauthorized_requester_role() 
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/internal/documents/index",
+            "/api/v1/chat/internal/documents/index",
             headers={"X-Internal-Token": "secret-token"},
             json={
                 "documentId": "company-policy-production-priority",
@@ -844,7 +844,7 @@ def test_chat_internal_document_delete_calls_index_service() -> None:
     app.dependency_overrides[get_document_index_service] = lambda: index_service
     try:
         response = client.post(
-            "/ai/api/v1/chat/internal/documents/delete",
+            "/api/v1/chat/internal/documents/delete",
             headers={"X-Internal-Token": "secret-token"},
             json={
                 "documentId": " report-202605 ",
@@ -869,7 +869,7 @@ def test_chat_internal_document_index_rejects_invalid_document_policy() -> None:
     )
     try:
         response = client.post(
-            "/ai/api/v1/chat/internal/documents/index",
+            "/api/v1/chat/internal/documents/index",
             headers={"X-Internal-Token": "secret-token"},
             json={
                 "documentId": "process-guide",
@@ -897,14 +897,14 @@ def test_chat_openapi_documents_error_response_model() -> None:
     assert response.status_code == 200
     schema = response.json()
     assert "ErrorResponse" in schema["components"]["schemas"]
-    answer_responses = schema["paths"]["/ai/api/v1/chat/answer"]["post"]["responses"]
-    recommendation_responses = schema["paths"]["/ai/api/v1/chat/recommendations"]["post"][
+    answer_responses = schema["paths"]["/api/v1/chat/answer"]["post"]["responses"]
+    recommendation_responses = schema["paths"]["/api/v1/chat/recommendations"]["post"][
         "responses"
     ]
-    index_responses = schema["paths"]["/ai/api/v1/chat/internal/documents/index"]["post"][
+    index_responses = schema["paths"]["/api/v1/chat/internal/documents/index"]["post"][
         "responses"
     ]
-    delete_responses = schema["paths"]["/ai/api/v1/chat/internal/documents/delete"]["post"][
+    delete_responses = schema["paths"]["/api/v1/chat/internal/documents/delete"]["post"][
         "responses"
     ]
 

@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "S-MAP AI Server"
     environment: str = "local"
-    api_v1_prefix: str = "/ai/api/v1"
+    api_v1_prefix: str = "/api/v1"
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )

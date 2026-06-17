@@ -30,7 +30,7 @@ def _chat_answer_path() -> str:
         path = getattr(route, "path", "")
         if path.endswith("/chat/answer"):
             return path
-    return "/ai/api/v1/chat/answer"
+    return "/api/v1/chat/answer"
 
 
 def _post_chat_answer(*, json: dict):

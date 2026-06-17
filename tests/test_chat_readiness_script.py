@@ -75,7 +75,7 @@ def test_check_chat_readiness_script_builds_ready_result() -> None:
     components = {component["name"]: component for component in result["components"]}
     assert result["status"] == "ready"
     assert result["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "SPRING_EVIDENCE_ONLY",
         "answerMode": "LLM",
         "ragSearchMode": "DISABLED",
@@ -90,7 +90,7 @@ def test_check_chat_readiness_script_builds_ready_result() -> None:
 def test_check_chat_readiness_script_summarizes_k8s_configmap_chat_mode() -> None:
     result = check_chat_readiness.build_readiness_result(
         Settings(
-            api_v1_prefix="/ai/api/v1",
+            api_v1_prefix="/api/v1",
             chat_answer_internal_token="answer-token",
             chat_recommendation_internal_token="recommendation-token",
             rdb_evidence_enabled=True,
@@ -108,7 +108,7 @@ def test_check_chat_readiness_script_summarizes_k8s_configmap_chat_mode() -> Non
 
     assert result["status"] == "ready"
     assert result["runtimeMode"] == {
-        "apiPrefix": "/ai/api/v1",
+        "apiPrefix": "/api/v1",
         "groundingMode": "RDB_QDRANT",
         "answerMode": "FALLBACK",
         "ragSearchMode": "ENABLED",
