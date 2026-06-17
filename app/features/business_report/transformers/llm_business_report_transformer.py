@@ -4,17 +4,56 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from app.core.config import Settings, get_settings
+from app.core.langsmith_tracing import configure_langsmith_tracing_from_settings
 from app.features.business_report.prompts.business_report_writing_prompt import (
     BUSINESS_REPORT_WRITING_SYSTEM_PROMPT,
     build_business_report_writing_user_prompt,
 )
 from app.features.business_report.schemas.source import BusinessReportSource
 
+try:
+    from langsmith import traceable
+except ImportError:  # pragma: no cover - langgraph installs langsmith in normal runtime.
+
+    def traceable(*args, **kwargs):
+        def decorator(func):
+            return func
+
+        if args and callable(args[0]) and not kwargs:
+            return args[0]
+        return decorator
+
 load_dotenv()
+
+
+def _process_business_report_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    source = inputs.get("source")
+    settings = get_settings()
+    safe_inputs: dict[str, Any] = {
+        "report_id": getattr(source, "report_id", None),
+        "report_type": getattr(source, "report_type", None),
+        "report_title": getattr(source, "report_title", None),
+        "target_start_date": str(getattr(source, "target_start_date", "")),
+        "target_end_date": str(getattr(source, "target_end_date", "")),
+    }
+    if settings.langsmith_trace_payloads:
+        safe_inputs["report_content"] = getattr(source, "report_content", None)
+        safe_inputs["report_evidence"] = getattr(source, "report_evidence", None)
+    return safe_inputs
+
+
+def _process_business_report_trace_outputs(output: str) -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.langsmith_trace_payloads:
+        return {"answer_length": len(output or "")}
+    return {"answer": output}
 
 
 class LlmBusinessReportTransformer:
     def __init__(self) -> None:
+        self.settings: Settings = get_settings()
+        configure_langsmith_tracing_from_settings(self.settings)
         self.enabled = os.getenv("BUSINESS_REPORT_LLM_ENABLED", "").lower() == "true"
         self.model = os.getenv("LLM_MODEL", "")
         self.api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
@@ -41,6 +80,20 @@ class LlmBusinessReportTransformer:
             raise RuntimeError("Business report OpenAI client를 초기화할 수 없습니다.")
 
         user_prompt = build_business_report_writing_user_prompt(source)
+        return self._generate_business_report_content(source, user_prompt)
+
+    @traceable(
+        name="business_report.llm_generation",
+        run_type="llm",
+        process_inputs=_process_business_report_trace_inputs,
+        process_outputs=_process_business_report_trace_outputs,
+    )
+    def _generate_business_report_content(
+        self,
+        source: BusinessReportSource,
+        user_prompt: str,
+    ) -> str:
+        del source
 
         try:
             request_options: dict[str, Any] = {
