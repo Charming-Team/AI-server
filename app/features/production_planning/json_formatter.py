@@ -2284,7 +2284,6 @@ def validate_final_ai_evaluation(
         raise PlanningValidationError(
             f"Final AI evaluation JSON schema is invalid: {exc}"
         ) from exc
-    validate_llm_output_against_evidence(evaluation.model_dump(), evidence_json)
     return evaluation
 
 
