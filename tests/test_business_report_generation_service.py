@@ -210,11 +210,57 @@ def test_business_report_generation_prefers_source_report_request() -> None:
         }
     ]
     assert response.report_content["sections"]["analysis"] == {
-        "overview": "분석 내용이 없습니다.",
-        "sections": [{"title": "종합 분석", "items": ["분석 내용이 없습니다."]}],
+        "overview": "일반 보고서 markdown",
+        "sections": [],
         "recommendation": "생성 필요",
     }
     assert response.report_evidence == [{"source": "production_plans"}]
+
+
+def test_business_report_generation_uses_markdown_when_analysis_is_empty() -> None:
+    service = BusinessReportGenerationService(
+        repository=FailingBusinessReportRepository(),
+        llm_business_report_transformer=FallbackBusinessReportTransformer(),
+    )
+
+    response = asyncio.run(
+        service.generate_business_report(
+            BusinessReportGenerateRequest(
+                report_id=4,
+                source_report={
+                    "report_id": 4,
+                    "report_title": "리스크 분석 보고서",
+                    "report_type": "ON_DEMAND",
+                    "author_id": 4,
+                    "target_start_date": "2026-06-01",
+                    "target_end_date": "2026-06-14",
+                    "markdown": (
+                        "# 리스크 분석 보고서\n\n"
+                        "주요 납기 리스크를 우선 점검해야 합니다.\n\n"
+                        "## 납기 위험 분석\n"
+                        "- 주문 ORD-1의 납기 위험이 높습니다.\n\n"
+                        "## 종합 의견 및 제안\n"
+                        "- 생산 순서 조정 검토가 필요합니다."
+                    ),
+                    "sections": {"analysis": {}},
+                    "report_content": {},
+                    "report_evidence": [],
+                    "related_simulation_id": None,
+                },
+            )
+        )
+    )
+
+    assert response.report_content["sections"]["analysis"] == {
+        "overview": "주요 납기 리스크를 우선 점검해야 합니다.",
+        "sections": [
+            {
+                "title": "납기 위험 분석",
+                "items": ["주문 ORD-1의 납기 위험이 높습니다."],
+            }
+        ],
+        "recommendation": "생산 순서 조정 검토가 필요합니다.",
+    }
 
 
 class FailingBusinessReportRepository:
