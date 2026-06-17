@@ -210,7 +210,7 @@ class BusinessReportGenerationService:
 
         return {
             "markdown": markdown,
-            "sections": self._ensure_frontend_sections(sections),
+            "sections": self._ensure_frontend_sections(sections, markdown),
         }
 
     def _extract_business_sections(
@@ -230,6 +230,7 @@ class BusinessReportGenerationService:
     def _ensure_frontend_sections(
         self,
         sections: dict[str, Any],
+        markdown: str = "",
     ) -> dict[str, Any]:
         frontend_sections = dict(sections)
         frontend_sections["summaryRows"] = self._ensure_rows(
@@ -260,7 +261,8 @@ class BusinessReportGenerationService:
             ],
         )
         frontend_sections["analysis"] = self._ensure_analysis(
-            frontend_sections.get("analysis")
+            frontend_sections.get("analysis"),
+            markdown,
         )
         return frontend_sections
 
@@ -277,20 +279,22 @@ class BusinessReportGenerationService:
     def _ensure_analysis(
         self,
         analysis: Any,
+        markdown: str = "",
     ) -> dict[str, Any]:
+        fallback_analysis = self._build_fallback_analysis(markdown)
         if not isinstance(analysis, dict):
-            return self._build_fallback_analysis()
+            return fallback_analysis
 
-        overview = analysis.get("overview")
+        overview = self._text_or_none(analysis.get("overview"))
         analysis_sections = analysis.get("sections")
-        recommendation = analysis.get("recommendation")
+        recommendation = self._text_or_none(analysis.get("recommendation"))
 
         return {
-            "overview": overview if overview else "분석 내용이 없습니다.",
+            "overview": overview or fallback_analysis["overview"],
             "sections": analysis_sections
-            if isinstance(analysis_sections, list) and analysis_sections
-            else [{"title": "종합 분석", "items": ["분석 내용이 없습니다."]}],
-            "recommendation": recommendation if recommendation else "생성 필요",
+            if self._has_meaningful_analysis_sections(analysis_sections)
+            else fallback_analysis["sections"],
+            "recommendation": recommendation or fallback_analysis["recommendation"],
         }
 
     def _build_unknown_summary_rows(self) -> list[dict[str, str]]:
@@ -311,12 +315,146 @@ class BusinessReportGenerationService:
         ]
         return [{"label": label, "value": "확인 필요", "change": "-"} for label in labels]
 
-    def _build_fallback_analysis(self) -> dict[str, Any]:
+    def _build_fallback_analysis(self, markdown: str | None = None) -> dict[str, Any]:
+        markdown_analysis = self._parse_markdown_analysis(markdown)
+        if markdown_analysis is not None:
+            return markdown_analysis
+
         return {
             "overview": "분석 내용이 없습니다.",
             "sections": [{"title": "종합 분석", "items": ["분석 내용이 없습니다."]}],
             "recommendation": "생성 필요",
         }
+
+    def _parse_markdown_analysis(self, markdown: str | None) -> dict[str, Any] | None:
+        lines = self._normalize_markdown_lines(markdown)
+        if not lines:
+            return None
+
+        overview_lines: list[str] = []
+        sections: list[dict[str, Any]] = []
+        current_section: dict[str, Any] | None = None
+
+        for line in lines:
+            heading = self._extract_markdown_heading(line)
+            if heading:
+                if line.startswith("# ") and not sections and not overview_lines:
+                    current_section = None
+                    continue
+
+                current_section = {"title": heading, "items": []}
+                sections.append(current_section)
+                continue
+
+            item_text = self._strip_markdown_line(line)
+            if not item_text:
+                continue
+
+            if current_section is None:
+                overview_lines.append(item_text)
+            else:
+                current_section["items"].append(item_text)
+
+        normalized_sections = [
+            {
+                "title": self._text_or_none(section.get("title")) or "종합 분석",
+                "items": [
+                    item
+                    for item in section.get("items", [])
+                    if self._is_meaningful_text(item)
+                ],
+            }
+            for section in sections
+        ]
+        normalized_sections = [
+            section for section in normalized_sections if section["items"]
+        ]
+
+        recommendation = ""
+        content_sections: list[dict[str, Any]] = []
+        for section in normalized_sections:
+            if not recommendation and self._is_recommendation_heading(section["title"]):
+                recommendation = " ".join(section["items"])
+                continue
+            content_sections.append(section)
+
+        overview = " ".join(overview_lines).strip()
+        if not overview and content_sections:
+            overview = content_sections[0]["items"][0]
+        if not overview and recommendation:
+            overview = recommendation
+
+        if not overview and not content_sections and not recommendation:
+            return None
+
+        return {
+            "overview": overview or "보고서 본문을 확인해 주세요.",
+            "sections": content_sections,
+            "recommendation": recommendation or "생성 필요",
+        }
+
+    def _normalize_markdown_lines(self, markdown: str | None) -> list[str]:
+        if not isinstance(markdown, str):
+            return []
+
+        return [
+            line.strip()
+            for line in markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            if line.strip()
+        ]
+
+    def _extract_markdown_heading(self, line: str) -> str | None:
+        if not line.startswith("#"):
+            return None
+
+        heading = line.lstrip("#").strip()
+        return heading or None
+
+    def _strip_markdown_line(self, line: str) -> str:
+        return (
+            line.strip()
+            .lstrip("-*+")
+            .strip()
+            .removeprefix("1.")
+            .strip()
+            .replace("**", "")
+            .replace("__", "")
+            .replace("`", "")
+            .strip()
+        )
+
+    def _has_meaningful_analysis_sections(self, sections: Any) -> bool:
+        if not isinstance(sections, list):
+            return False
+
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            items = section.get("items")
+            if isinstance(items, list) and any(
+                self._is_meaningful_text(item) for item in items
+            ):
+                return True
+
+        return False
+
+    def _is_recommendation_heading(self, title: str) -> bool:
+        normalized_title = title.lower()
+        return any(
+            keyword in normalized_title
+            for keyword in ["종합 의견", "제안", "권고", "recommend"]
+        )
+
+    def _text_or_none(self, value: Any) -> str | None:
+        if value is None:
+            return None
+
+        text = str(value).strip()
+        return text if text else None
+
+    def _is_meaningful_text(self, value: Any) -> bool:
+        text = self._text_or_none(value)
+        return text not in {None, "-", "—", "분석 내용이 없습니다."}
 
     def _build_fallback_markdown(
         self,
