@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.config import Settings
-from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.json_formatter import (
     build_dashboard_response,
     build_evaluation_draft_prompt,
@@ -675,7 +674,7 @@ def test_dashboard_response_hides_missing_value_tokens_from_llm_evidence() -> No
     assert "MISSING_VALUE" not in prompt_text
 
 
-def test_ai_evaluation_returns_failed_evaluation_on_grounding_error() -> None:
+def test_ai_evaluation_keeps_final_text_after_grounding_validation_removed() -> None:
     class FakeLlmClient:
         def __init__(self) -> None:
             self.prompts = []
@@ -739,10 +738,13 @@ def test_ai_evaluation_returns_failed_evaluation_on_grounding_error() -> None:
         )
     )
 
-    assert evaluation.status == "FAILED"
-    assert "LLM output contains numbers" not in evaluation.ai_recommendation.summary_text
-    assert "AI 평가 문구를 생성하지 못했습니다" in evaluation.ai_recommendation.summary_text
-    assert "LLM output contains numbers" not in evaluation.recommendation_grade_basis[0]
+    assert evaluation.status == "COMPLETED"
+    assert (
+        evaluation.current_state_summary.risk_analysis_text
+        == "근거에 없는 41.0 값을 생성했습니다."
+    )
+    assert evaluation.ai_recommendation.summary_text == "정보 없음"
+    assert evaluation.recommendation_grade_basis == ["정보 없음"]
 
 
 def test_fallback_ai_evaluation_hides_schema_validation_error() -> None:
@@ -871,7 +873,7 @@ def test_json_normalization_runs_after_draft_with_ungrounded_numbers() -> None:
     assert "Final Output JSON Schema" in fake_client.prompts[1].user_prompt
 
 
-def test_final_ai_evaluation_validation_rejects_unknown_event_tokens() -> None:
+def test_final_ai_evaluation_validation_allows_unknown_event_tokens() -> None:
     evidence = {
         "computed_deltas": {"risk_cost_saving_percent": 40.0},
         "important_events": [{"event": "MACHINE_BREAKDOWN"}],
@@ -890,5 +892,11 @@ def test_final_ai_evaluation_validation_rejects_unknown_event_tokens() -> None:
         "recommendation_level": "RECOMMEND",
     }
 
-    with pytest.raises(PlanningValidationError):
-        validate_final_ai_evaluation(payload, evidence)
+    evaluation = validate_final_ai_evaluation(payload, evidence)
+
+    assert evaluation.status == "COMPLETED"
+    assert (
+        evaluation.current_state_summary.risk_analysis_text
+        == "FIRE_EVENT 영향이 있습니다."
+    )
+    assert evaluation.risk_interpretation.text == "MACHINE_BREAKDOWN 영향이 있습니다."
