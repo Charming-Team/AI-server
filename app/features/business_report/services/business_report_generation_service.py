@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -48,7 +49,10 @@ class BusinessReportGenerationService:
         self._validate_source(source)
 
         try:
-            transformed_text = self.llm_business_report_transformer.run(source)
+            transformed_text = await asyncio.to_thread(
+                self.llm_business_report_transformer.run,
+                source,
+            )
         except RuntimeError as error:
             message = str(error)
             status_code = 503 if "설정" in message or "client" in message else 502
