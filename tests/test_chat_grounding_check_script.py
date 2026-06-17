@@ -16,7 +16,7 @@ def _build_args(**overrides):
         "spring_path": "/internal/chat/evidence",
         "spring_token": "spring-token",
         "fastapi_base_url": "http://fastapi.local",
-        "fastapi_path": "/api/v1/chat/answer",
+        "fastapi_path": "/ai/api/v1/chat/answer",
         "fastapi_token": "answer-token",
         "timeout_seconds": 10.0,
         "intent": "MATERIAL_SHORTAGE",
@@ -181,7 +181,7 @@ def test_check_chat_grounding_script_calls_spring_and_fastapi_contracts() -> Non
     assert captured["spring_url"] == "http://spring.local/internal/chat/evidence"
     assert captured["spring_token"] == "spring-token"
     assert '"intent":"MATERIAL_SHORTAGE"' in captured["spring_body"]
-    assert captured["fastapi_url"] == "http://fastapi.local/api/v1/chat/answer"
+    assert captured["fastapi_url"] == "http://fastapi.local/ai/api/v1/chat/answer"
     assert captured["fastapi_token"] == "answer-token"
     assert '"question":"자재 부족 현황 알려줘"' in captured["fastapi_body"]
     assert result["checkStatus"] == "PASS"
@@ -313,7 +313,7 @@ def test_check_chat_grounding_script_formats_text_result() -> None:
             "sourceTypes": ["MATERIAL"],
         },
         "fastapiAnswer": {
-            "url": "http://fastapi.local/api/v1/chat/answer",
+            "url": "http://fastapi.local/ai/api/v1/chat/answer",
             "securityStatus": "PASSED",
             "evidenceCount": 1,
             "usedRdbEvidence": True,
@@ -348,7 +348,7 @@ def test_check_chat_grounding_script_main_does_not_expose_secret(
                 "sourceTypes": ["MATERIAL"],
             },
             "fastapiAnswer": {
-                "url": "http://fastapi.local/api/v1/chat/answer",
+                "url": "http://fastapi.local/ai/api/v1/chat/answer",
                 "securityStatus": "PASSED",
                 "evidenceCount": 1,
                 "usedRdbEvidence": True,

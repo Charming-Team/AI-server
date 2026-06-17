@@ -524,7 +524,7 @@ def test_check_chat_runtime_rdb_preset_enables_core_api_smokes() -> None:
     assert result["steps"][4]["result"]["minEvidenceCount"] == 1
     assert result["steps"][4]["result"]["requireRdbEvidence"] is True
     assert result["runtimeMode"] == {
-        "apiPrefix": "/api/v1",
+        "apiPrefix": "/ai/api/v1",
         "groundingMode": "RDB_ONLY",
         "answerMode": "LLM",
         "ragSearchMode": "DISABLED",
@@ -570,7 +570,7 @@ def test_check_chat_runtime_rag_preset_enables_rdb_and_qdrant_scenarios() -> Non
     assert result["steps"][7]["result"]["requireRdbEvidence"] is True
     assert result["steps"][7]["result"]["requireVectorSearch"] is True
     assert result["runtimeMode"] == {
-        "apiPrefix": "/api/v1",
+        "apiPrefix": "/ai/api/v1",
         "groundingMode": "RDB_QDRANT",
         "answerMode": "LLM",
         "ragSearchMode": "ENABLED",
@@ -795,7 +795,7 @@ def test_check_chat_runtime_validate_only_checks_rdb_chat_scenarios() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "path": "/api/v1/chat/answer",
+        "path": "/ai/api/v1/chat/answer",
         "tokenConfigured": True,
         "scenarioGroups": ["access"],
         "scenarioCount": 1,
@@ -882,7 +882,7 @@ def test_check_chat_runtime_network_runs_rdb_chat_scenarios(
     assert result["steps"][-1]["name"] == "rdbChatScenarios"
     assert captured == {
         "base_url": "http://fastapi.local",
-        "path": "/api/v1/chat/answer",
+        "path": "/ai/api/v1/chat/answer",
         "token": "answer-token",
         "scenario_group": ["access"],
         "scenario": ["operator-financial-blocked"],
@@ -945,7 +945,7 @@ def test_check_chat_runtime_rag_scenarios_carry_llm_generation_requirement(
     assert result["checkStatus"] == "PASS"
     assert captured == {
         "base_url": "http://fastapi.local",
-        "path": "/api/v1/chat/answer",
+        "path": "/ai/api/v1/chat/answer",
         "token": "answer-token",
         "scenario_group": ["core"],
         "scenario": ["line-bottleneck-with-company-guide"],
@@ -1198,8 +1198,8 @@ def test_check_chat_runtime_validate_only_checks_document_api_smoke() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "indexPath": "/api/v1/chat/internal/documents/index",
-        "deletePath": "/api/v1/chat/internal/documents/delete",
+        "indexPath": "/ai/api/v1/chat/internal/documents/index",
+        "deletePath": "/ai/api/v1/chat/internal/documents/delete",
         "documentId": "smoke-document-api-contract",
         "tokenConfigured": True,
         "minIndexedCount": 0,
@@ -1509,7 +1509,7 @@ def test_check_chat_runtime_validate_only_checks_answer_api_smoke() -> None:
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "path": "/api/v1/chat/answer",
+        "path": "/ai/api/v1/chat/answer",
         "question": "자재 부족 현황 알려줘",
         "role": "MANUFACTURING_MANAGER",
         "expectedIntent": None,
@@ -1838,7 +1838,7 @@ def test_check_chat_runtime_validate_only_checks_recommendation_api_smoke() -> N
         "mode": "VALIDATE_ONLY",
         "networkChecked": False,
         "baseUrl": "http://fastapi.local",
-        "path": "/api/v1/chat/recommendations",
+        "path": "/ai/api/v1/chat/recommendations",
         "role": "OPERATOR",
         "keywordConfigured": True,
         "tokenConfigured": True,

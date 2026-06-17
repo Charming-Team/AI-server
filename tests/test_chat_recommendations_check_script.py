@@ -14,7 +14,7 @@ from scripts import check_chat_recommendations
 def _build_args(**overrides):
     values = {
         "base_url": "http://fastapi.local",
-        "path": "/api/v1/chat/recommendations",
+        "path": "/ai/api/v1/chat/recommendations",
         "token": "recommendation-token",
         "env_file": None,
         "timeout_seconds": 10.0,
@@ -76,9 +76,9 @@ def test_chat_recommendations_script_resolves_path_and_token() -> None:
     assert (
         check_chat_recommendations.build_recommendation_url(
             "http://fastapi.local/",
-            "/api/v1/chat/recommendations",
+            "/ai/api/v1/chat/recommendations",
         )
-        == "http://fastapi.local/api/v1/chat/recommendations"
+        == "http://fastapi.local/ai/api/v1/chat/recommendations"
     )
 
 
@@ -106,7 +106,7 @@ def test_chat_recommendations_script_calls_fastapi_recommendation_contract() -> 
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="recommendation-token",
                 request=check_chat_recommendations.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -116,12 +116,12 @@ def test_chat_recommendations_script_calls_fastapi_recommendation_contract() -> 
 
     result = anyio.run(run)
 
-    assert captured_request["url"] == "http://fastapi.local/api/v1/chat/recommendations"
+    assert captured_request["url"] == "http://fastapi.local/ai/api/v1/chat/recommendations"
     assert captured_request["token"] == "recommendation-token"
     assert '"role":"MANUFACTURING_MANAGER"' in captured_request["body"]
     assert result == {
         "checkStatus": "PASS",
-        "url": "http://fastapi.local/api/v1/chat/recommendations",
+        "url": "http://fastapi.local/ai/api/v1/chat/recommendations",
         "role": "MANUFACTURING_MANAGER",
         "keywordConfigured": True,
         "itemCount": 1,
@@ -144,7 +144,7 @@ def test_chat_recommendations_script_fails_when_item_count_is_below_minimum() ->
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="recommendation-token",
                 request=check_chat_recommendations.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -168,7 +168,7 @@ def test_chat_recommendations_script_fails_when_fallback_is_expected() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="recommendation-token",
                 request=check_chat_recommendations.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -199,7 +199,7 @@ def test_chat_recommendations_script_fails_on_role_forbidden_intent() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="recommendation-token",
                 request=check_chat_recommendations.build_request(
                     _build_args(role="OPERATOR")
@@ -224,7 +224,7 @@ def test_chat_recommendations_script_fails_operator_without_read_only_url() -> N
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="recommendation-token",
                 request=check_chat_recommendations.build_request(
                     _build_args(role="OPERATOR")
@@ -258,7 +258,7 @@ def test_chat_recommendations_script_fails_operator_financial_question() -> None
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="recommendation-token",
                 request=check_chat_recommendations.build_request(
                     _build_args(role="OPERATOR")
@@ -287,7 +287,7 @@ def test_chat_recommendations_script_allows_operator_read_only_url() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="recommendation-token",
                 request=check_chat_recommendations.build_request(
                     _build_args(role="OPERATOR")
@@ -315,7 +315,7 @@ def test_chat_recommendations_script_uses_error_response_code() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_recommendations.check_chat_recommendations(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/recommendations",
+                path="/ai/api/v1/chat/recommendations",
                 token="wrong-token",
                 request=check_chat_recommendations.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -335,7 +335,7 @@ def test_chat_recommendations_script_main_does_not_expose_secret(
     async def fake_check_chat_recommendations(**kwargs) -> dict:
         return {
             "checkStatus": "PASS",
-            "url": "http://fastapi.local/api/v1/chat/recommendations",
+            "url": "http://fastapi.local/ai/api/v1/chat/recommendations",
             "role": "MANUFACTURING_MANAGER",
             "keywordConfigured": True,
             "itemCount": 1,

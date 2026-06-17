@@ -14,7 +14,7 @@ from scripts import check_document_delete_api
 def _build_args(**overrides):
     values = {
         "base_url": "http://fastapi.local",
-        "path": "/api/v1/chat/internal/documents/delete",
+        "path": "/ai/api/v1/chat/internal/documents/delete",
         "token": "document-token",
         "env_file": None,
         "timeout_seconds": 10.0,
@@ -54,9 +54,9 @@ def test_document_delete_api_script_resolves_path_and_token() -> None:
     assert (
         check_document_delete_api.build_delete_url(
             "http://fastapi.local/",
-            "/api/v1/chat/internal/documents/delete",
+            "/ai/api/v1/chat/internal/documents/delete",
         )
-        == "http://fastapi.local/api/v1/chat/internal/documents/delete"
+        == "http://fastapi.local/ai/api/v1/chat/internal/documents/delete"
     )
 
 
@@ -82,7 +82,7 @@ def test_document_delete_api_script_calls_fastapi_delete_contract() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_document_delete_api.check_document_delete_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/delete",
+                path="/ai/api/v1/chat/internal/documents/delete",
                 token="document-token",
                 request=check_document_delete_api.build_delete_request(_build_args()),
                 timeout_seconds=10.0,
@@ -93,13 +93,13 @@ def test_document_delete_api_script_calls_fastapi_delete_contract() -> None:
     result = anyio.run(run)
 
     assert captured_request["url"] == (
-        "http://fastapi.local/api/v1/chat/internal/documents/delete"
+        "http://fastapi.local/ai/api/v1/chat/internal/documents/delete"
     )
     assert captured_request["token"] == "document-token"
     assert captured_request["body"] == '{"documentId":"smoke-document-api-contract"}'
     assert result == {
         "checkStatus": "PASS",
-        "url": "http://fastapi.local/api/v1/chat/internal/documents/delete",
+        "url": "http://fastapi.local/ai/api/v1/chat/internal/documents/delete",
         "documentId": "smoke-document-api-contract",
         "operationType": "DELETE",
         "operationId": 101,
@@ -118,7 +118,7 @@ def test_document_delete_api_script_fails_on_operation_status_mismatch() -> None
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_document_delete_api.check_document_delete_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/delete",
+                path="/ai/api/v1/chat/internal/documents/delete",
                 token="document-token",
                 request=check_document_delete_api.build_delete_request(_build_args()),
                 timeout_seconds=10.0,
@@ -150,7 +150,7 @@ def test_document_delete_api_script_fails_on_invalid_response_shape() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_document_delete_api.check_document_delete_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/delete",
+                path="/ai/api/v1/chat/internal/documents/delete",
                 token="document-token",
                 request=check_document_delete_api.build_delete_request(_build_args()),
                 timeout_seconds=10.0,
@@ -177,7 +177,7 @@ def test_document_delete_api_script_uses_error_response_code() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_document_delete_api.check_document_delete_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/delete",
+                path="/ai/api/v1/chat/internal/documents/delete",
                 token="wrong-token",
                 request=check_document_delete_api.build_delete_request(_build_args()),
                 timeout_seconds=10.0,
@@ -197,7 +197,7 @@ def test_document_delete_api_script_main_does_not_expose_secret(
     async def fake_check_document_delete_api(**kwargs) -> dict:
         return {
             "checkStatus": "PASS",
-            "url": "http://fastapi.local/api/v1/chat/internal/documents/delete",
+            "url": "http://fastapi.local/ai/api/v1/chat/internal/documents/delete",
             "documentId": "smoke-document-api-contract",
             "operationType": "DELETE",
             "operationId": 101,

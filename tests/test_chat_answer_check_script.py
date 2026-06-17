@@ -14,7 +14,7 @@ from scripts import check_chat_answer
 def _build_args(**overrides):
     values = {
         "base_url": "http://fastapi.local",
-        "path": "/api/v1/chat/answer",
+        "path": "/ai/api/v1/chat/answer",
         "token": "answer-token",
         "env_file": None,
         "timeout_seconds": 10.0,
@@ -176,9 +176,9 @@ def test_check_chat_answer_script_resolves_path_and_token() -> None:
     assert (
         check_chat_answer.build_answer_url(
             "http://fastapi.local/",
-            "/api/v1/chat/answer",
+            "/ai/api/v1/chat/answer",
         )
-        == "http://fastapi.local/api/v1/chat/answer"
+        == "http://fastapi.local/ai/api/v1/chat/answer"
     )
 
 
@@ -196,7 +196,7 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -209,12 +209,12 @@ def test_check_chat_answer_script_calls_fastapi_answer_contract() -> None:
 
     result = anyio.run(run)
 
-    assert captured_request["url"] == "http://fastapi.local/api/v1/chat/answer"
+    assert captured_request["url"] == "http://fastapi.local/ai/api/v1/chat/answer"
     assert captured_request["token"] == "answer-token"
     assert '"question":"자재 부족 현황 알려줘"' in captured_request["body"]
     assert result == {
         "checkStatus": "PASS",
-        "url": "http://fastapi.local/api/v1/chat/answer",
+        "url": "http://fastapi.local/ai/api/v1/chat/answer",
         "intent": ChatIntent.MATERIAL_SHORTAGE.value,
         "answer": "근거는 조회됐지만 LLM 답변 생성 기능이 아직 활성화되지 않았습니다.",
         "expectedIntent": None,
@@ -280,7 +280,7 @@ def test_check_chat_answer_script_exposes_llm_usage() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -320,7 +320,7 @@ def test_check_chat_answer_script_fails_when_llm_total_tokens_exceed_limit() -> 
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -351,7 +351,7 @@ def test_check_chat_answer_script_fails_when_llm_token_limit_requires_missing_us
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -376,7 +376,7 @@ def test_check_chat_answer_script_fails_when_evidence_count_is_below_minimum() -
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -409,7 +409,7 @@ def test_check_chat_answer_script_fails_when_rdb_evidence_is_required() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -442,7 +442,7 @@ def test_check_chat_answer_script_validates_expected_security_result() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(
                     _build_args(
@@ -473,7 +473,7 @@ def test_check_chat_answer_script_validates_empty_security_code() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -498,7 +498,7 @@ def test_check_chat_answer_script_validates_expected_intent() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -525,7 +525,7 @@ def test_check_chat_answer_script_fails_when_intent_is_unexpected() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -549,7 +549,7 @@ def test_check_chat_answer_script_fails_when_security_status_is_unexpected() -> 
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -582,7 +582,7 @@ def test_check_chat_answer_script_fails_when_security_code_is_unexpected() -> No
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -617,7 +617,7 @@ def test_check_chat_answer_script_passes_when_vector_search_is_required() -> Non
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -652,7 +652,7 @@ def test_check_chat_answer_script_fails_when_document_source_count_is_below_mini
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -685,7 +685,7 @@ def test_check_chat_answer_script_fails_when_vector_search_is_required() -> None
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -716,7 +716,7 @@ def test_check_chat_answer_script_passes_when_llm_generation_is_required() -> No
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -745,7 +745,7 @@ def test_check_chat_answer_script_fails_when_llm_generation_is_required() -> Non
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -777,7 +777,7 @@ def test_check_chat_answer_script_passes_when_llm_cache_miss_is_required() -> No
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -810,7 +810,7 @@ def test_check_chat_answer_script_fails_when_llm_cache_miss_requires_generation(
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -842,7 +842,7 @@ def test_check_chat_answer_script_fails_when_llm_cache_miss_is_required_but_cach
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -876,7 +876,7 @@ def test_check_chat_answer_script_validates_expected_llm_skipped_reason() -> Non
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -903,7 +903,7 @@ def test_check_chat_answer_script_validates_no_llm_skipped_reason() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -921,7 +921,7 @@ def test_check_chat_answer_script_formats_markdown_result() -> None:
     output = check_chat_answer.format_markdown_result(
         {
             "checkStatus": "PASS",
-            "url": "http://fastapi.local/api/v1/chat/answer",
+            "url": "http://fastapi.local/ai/api/v1/chat/answer",
             "intent": "LINE_BOTTLENECK",
             "securityStatus": "PASSED",
             "securityCode": None,
@@ -990,7 +990,7 @@ def test_check_chat_answer_script_fails_when_llm_skipped_reason_is_unexpected() 
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_chat_answer.check_chat_answer(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/answer",
+                path="/ai/api/v1/chat/answer",
                 token="answer-token",
                 request=check_chat_answer.build_request(_build_args()),
                 timeout_seconds=10.0,
@@ -1013,7 +1013,7 @@ def test_check_chat_answer_script_main_does_not_expose_secret(
     async def fake_check_chat_answer(**kwargs) -> dict:
         return {
             "checkStatus": "PASS",
-            "url": "http://fastapi.local/api/v1/chat/answer",
+            "url": "http://fastapi.local/ai/api/v1/chat/answer",
             "intent": "MATERIAL_SHORTAGE",
             "expectedIntent": None,
             "securityStatus": "PASSED",
@@ -1071,7 +1071,7 @@ def test_check_chat_answer_script_main_formats_markdown_without_secret(
     async def fake_check_chat_answer(**kwargs) -> dict:
         return {
             "checkStatus": "PASS",
-            "url": "http://fastapi.local/api/v1/chat/answer",
+            "url": "http://fastapi.local/ai/api/v1/chat/answer",
             "intent": "MATERIAL_SHORTAGE",
             "answer": "핵심 답변: 자재 부족 근거를 확인했습니다.",
             "expectedIntent": None,

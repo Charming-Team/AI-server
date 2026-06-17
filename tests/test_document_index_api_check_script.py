@@ -14,7 +14,7 @@ from scripts import check_document_index_api
 def _build_args(**overrides):
     values = {
         "base_url": "http://fastapi.local",
-        "path": "/api/v1/chat/internal/documents/index",
+        "path": "/ai/api/v1/chat/internal/documents/index",
         "token": "document-token",
         "env_file": None,
         "timeout_seconds": 10.0,
@@ -71,9 +71,9 @@ def test_document_index_api_script_resolves_path_and_token() -> None:
     assert (
         check_document_index_api.build_index_url(
             "http://fastapi.local/",
-            "/api/v1/chat/internal/documents/index",
+            "/ai/api/v1/chat/internal/documents/index",
         )
-        == "http://fastapi.local/api/v1/chat/internal/documents/index"
+        == "http://fastapi.local/ai/api/v1/chat/internal/documents/index"
     )
 
 
@@ -106,7 +106,7 @@ def test_document_index_api_script_calls_fastapi_index_contract() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_document_index_api.check_document_index_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/index",
+                path="/ai/api/v1/chat/internal/documents/index",
                 token="document-token",
                 document=check_document_index_api.build_sample_document(_build_args()),
                 timeout_seconds=10.0,
@@ -117,14 +117,14 @@ def test_document_index_api_script_calls_fastapi_index_contract() -> None:
     result = anyio.run(run)
 
     assert captured_request["url"] == (
-        "http://fastapi.local/api/v1/chat/internal/documents/index"
+        "http://fastapi.local/ai/api/v1/chat/internal/documents/index"
     )
     assert captured_request["token"] == "document-token"
     assert '"documentId":"company-info-line-bottleneck"' in captured_request["body"]
     assert '"content":"LINE-A01' in captured_request["body"]
     assert result == {
         "checkStatus": "PASS",
-        "url": "http://fastapi.local/api/v1/chat/internal/documents/index",
+        "url": "http://fastapi.local/ai/api/v1/chat/internal/documents/index",
         "documentId": "company-info-line-bottleneck",
         "documentType": "COMPANY_INFO",
         "title": "LINE-A01 병목 대응 기준",
@@ -152,7 +152,7 @@ def test_document_index_api_script_fails_when_indexed_count_is_below_minimum() -
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_document_index_api.check_document_index_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/index",
+                path="/ai/api/v1/chat/internal/documents/index",
                 token="document-token",
                 document=check_document_index_api.build_sample_document(_build_args()),
                 timeout_seconds=10.0,
@@ -180,7 +180,7 @@ def test_document_index_api_script_fails_when_document_is_skipped() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_document_index_api.check_document_index_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/index",
+                path="/ai/api/v1/chat/internal/documents/index",
                 token="document-token",
                 document=check_document_index_api.build_sample_document(_build_args()),
                 timeout_seconds=10.0,
@@ -207,7 +207,7 @@ def test_document_index_api_script_can_allow_skipped_document() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await check_document_index_api.check_document_index_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/index",
+                path="/ai/api/v1/chat/internal/documents/index",
                 token="document-token",
                 document=check_document_index_api.build_sample_document(_build_args()),
                 timeout_seconds=10.0,
@@ -236,7 +236,7 @@ def test_document_index_api_script_uses_error_response_code() -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             await check_document_index_api.check_document_index_api(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/index",
+                path="/ai/api/v1/chat/internal/documents/index",
                 token="wrong-token",
                 document=check_document_index_api.build_sample_document(_build_args()),
                 timeout_seconds=10.0,
@@ -256,7 +256,7 @@ def test_document_index_api_script_main_does_not_expose_secret(
     async def fake_check_document_index_api(**kwargs) -> dict:
         return {
             "checkStatus": "PASS",
-            "url": "http://fastapi.local/api/v1/chat/internal/documents/index",
+            "url": "http://fastapi.local/ai/api/v1/chat/internal/documents/index",
             "documentId": "company-info-line-bottleneck",
             "documentType": "COMPANY_INFO",
             "title": "LINE-A01 병목 대응 기준",

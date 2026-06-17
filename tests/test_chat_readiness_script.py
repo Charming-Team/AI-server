@@ -75,7 +75,7 @@ def test_check_chat_readiness_script_builds_ready_result() -> None:
     components = {component["name"]: component for component in result["components"]}
     assert result["status"] == "ready"
     assert result["runtimeMode"] == {
-        "apiPrefix": "/api/v1",
+        "apiPrefix": "/ai/api/v1",
         "groundingMode": "SPRING_EVIDENCE_ONLY",
         "answerMode": "LLM",
         "ragSearchMode": "DISABLED",

@@ -21,7 +21,7 @@ def _restore_settings(previous_override: object) -> None:
 
 
 def test_health_check() -> None:
-    response = client.get("/api/v1/health")
+    response = client.get("/ai/api/v1/health")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
@@ -43,9 +43,19 @@ def test_health_check_supports_ai_alias_for_nested_ai_prefix(monkeypatch) -> Non
 
 
 def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() -> None:
-    previous_override = _override_settings(Settings())
+    previous_override = _override_settings(
+        Settings(
+            chat_answer_internal_token=None,
+            chat_recommendation_internal_token=None,
+            document_index_internal_token=None,
+            evidence_lookup_enabled=False,
+            evidence_lookup_internal_token=None,
+            rdb_evidence_enabled=False,
+            qdrant_search_enabled=False,
+        )
+    )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -53,7 +63,7 @@ def test_readiness_check_returns_not_ready_when_required_tokens_are_missing() ->
     body = response.json()
     assert body["status"] == "not_ready"
     assert body["runtimeMode"] == {
-        "apiPrefix": "/api/v1",
+        "apiPrefix": "/ai/api/v1",
         "groundingMode": "NONE",
         "answerMode": "FALLBACK",
         "ragSearchMode": "DISABLED",
@@ -103,6 +113,7 @@ def test_readiness_check_returns_ready_without_exposing_secret_values() -> None:
             chat_answer_internal_token="answer-secret",
             chat_recommendation_internal_token="recommendation-secret",
             evidence_lookup_enabled=True,
+            rdb_evidence_enabled=False,
             evidence_lookup_base_url="http://spring.local",
             evidence_lookup_path="/internal/chat/evidence",
             evidence_lookup_internal_token="evidence-secret",
@@ -119,7 +130,7 @@ def test_readiness_check_returns_ready_without_exposing_secret_values() -> None:
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -127,7 +138,7 @@ def test_readiness_check_returns_ready_without_exposing_secret_values() -> None:
     body = response.json()
     assert body["status"] == "ready"
     assert body["runtimeMode"] == {
-        "apiPrefix": "/api/v1",
+        "apiPrefix": "/ai/api/v1",
         "groundingMode": "HYBRID",
         "answerMode": "LLM",
         "ragSearchMode": "ENABLED",
@@ -160,7 +171,7 @@ def test_readiness_check_summarizes_k8s_configmap_chat_mode() -> None:
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -198,7 +209,7 @@ def test_readiness_check_returns_custom_codes_for_missing_integration_settings()
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -244,7 +255,7 @@ def test_readiness_check_requires_openai_api_key_when_llm_provider_is_openai() -
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -276,7 +287,7 @@ def test_readiness_check_accepts_openai_provider_without_exposing_api_key() -> N
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -307,7 +318,7 @@ def test_readiness_check_rejects_openai_model_outside_allowlist() -> None:
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -336,7 +347,7 @@ def test_readiness_check_requires_at_least_one_grounding_source() -> None:
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -373,7 +384,7 @@ def test_readiness_check_accepts_rdb_evidence_view_as_grounding_source() -> None
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -409,7 +420,7 @@ def test_readiness_check_accepts_fallback_answer_generation_when_llm_is_disabled
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -442,7 +453,7 @@ def test_readiness_check_does_not_require_document_index_token_for_chat_runtime(
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 
@@ -465,7 +476,7 @@ def test_readiness_check_requires_embedding_when_qdrant_search_is_enabled() -> N
         )
     )
     try:
-        response = client.get("/api/v1/health/ready")
+        response = client.get("/ai/api/v1/health/ready")
     finally:
         _restore_settings(previous_override)
 

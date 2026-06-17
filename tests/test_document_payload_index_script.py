@@ -39,7 +39,7 @@ def _build_args(**overrides):
         "input": None,
         "input_dir": None,
         "base_url": "http://fastapi.local",
-        "path": "/api/v1/chat/internal/documents/index",
+        "path": "/ai/api/v1/chat/internal/documents/index",
         "token": "document-token",
         "env_file": None,
         "timeout_seconds": 10.0,
@@ -142,7 +142,7 @@ def test_index_document_payloads_calls_fastapi_for_each_payload(tmp_path) -> Non
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await index_document_payloads.index_document_payloads(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/index",
+                path="/ai/api/v1/chat/internal/documents/index",
                 token="document-token",
                 input_paths=[str(first_input), str(second_input)],
                 settings=Settings(),
@@ -199,7 +199,7 @@ def test_index_document_payloads_returns_partial_failure(tmp_path) -> None:
         async with httpx.AsyncClient(transport=transport) as http_client:
             return await index_document_payloads.index_document_payloads(
                 base_url="http://fastapi.local",
-                path="/api/v1/chat/internal/documents/index",
+                path="/ai/api/v1/chat/internal/documents/index",
                 token="document-token",
                 input_paths=[str(first_input), str(second_input)],
                 settings=Settings(),
@@ -227,7 +227,7 @@ def test_index_document_payloads_main_does_not_expose_token_or_content(
             "checkStatus": "PASS",
             "phase": "INDEX",
             "networkChecked": True,
-            "url": "http://fastapi.local/api/v1/chat/internal/documents/index",
+            "url": "http://fastapi.local/ai/api/v1/chat/internal/documents/index",
             "documentCount": 1,
             "indexedDocumentCount": 1,
             "failedDocumentCount": 0,

@@ -214,7 +214,7 @@ def test_check_chat_quality_scenarios_main_does_not_expose_secret(
             "networkChecked": False,
             "profile": "minimal",
             "baseUrl": "http://fastapi.local",
-            "path": "/api/v1/chat/answer",
+            "path": "/ai/api/v1/chat/answer",
             "tokenConfigured": True,
             "rdbScenarioGroups": ["access"],
             "ragScenarioGroups": ["company"],
