@@ -2,7 +2,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import APITimeoutError, OpenAI
 
 from app.core.config import Settings, get_settings
 from app.core.langsmith_tracing import configure_langsmith_tracing_from_settings
@@ -113,7 +113,7 @@ class LlmBusinessReportTransformer:
             if self._supports_custom_temperature():
                 request_options["temperature"] = 0.1
 
-            response = self.client.chat.completions.create(**request_options)
+            response = self._create_completion_with_timeout_retry(request_options)
         except Exception as error:
             raise RuntimeError(f"Business report LLM 호출에 실패했습니다: {error}") from error
 
@@ -123,6 +123,23 @@ class LlmBusinessReportTransformer:
 
         return content.strip()
 
+    def _create_completion_with_timeout_retry(self, request_options: dict[str, Any]):
+        max_attempts = 2
+        last_timeout: APITimeoutError | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self.client.chat.completions.create(**request_options)
+            except APITimeoutError as error:
+                last_timeout = error
+                if attempt >= max_attempts:
+                    break
+
+        raise RuntimeError(
+            f"Business report LLM 응답 시간이 초과되었습니다. "
+            f"timeoutSeconds={self.timeout_seconds} attempts={max_attempts}"
+        ) from last_timeout
+
     def _supports_custom_temperature(self) -> bool:
         normalized_model = self.model.strip().lower()
         return not normalized_model.startswith("gpt-5")
@@ -131,11 +148,11 @@ class LlmBusinessReportTransformer:
         raw_timeout = (
             os.getenv("BUSINESS_REPORT_LLM_TIMEOUT_SECONDS")
             or os.getenv("LLM_TIMEOUT_SECONDS")
-            or "60"
+            or "180"
         )
         try:
             timeout_seconds = float(raw_timeout)
         except ValueError:
-            return 60.0
+            return 180.0
 
-        return timeout_seconds if timeout_seconds > 0 else 60.0
+        return timeout_seconds if timeout_seconds > 0 else 180.0

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.features.business_report.schemas.response import BusinessReportGenerateResponse
 from app.features.delay_probability.schemas.response import DelayProbabilityPredictResponse
 from app.main import create_app
@@ -10,16 +11,17 @@ from app.main import create_app
 def test_openapi_uses_api_v1_contract_paths() -> None:
     client = TestClient(create_app())
     paths = client.get("/openapi.json").json()["paths"]
+    api_prefix = get_settings().api_v1_prefix.rstrip("/")
 
-    assert "/api/v1/chat/answer" in paths
-    assert "/api/v1/reports/generate" in paths
-    assert "/api/v1/business-reports/generate" in paths
-    assert "/api/v1/delay-prediction/predict" in paths
-    assert "/api/v1/delay-prediction/health" in paths
-    assert "/api/v1/planning" in paths
-    assert "/api/v1/health" in paths
-    assert "/api/v1/business-report/generate" not in paths
-    assert "/api/v1/delay_prediction/predict" not in paths
+    assert f"{api_prefix}/chat/answer" in paths
+    assert f"{api_prefix}/reports/generate" in paths
+    assert f"{api_prefix}/business-reports/generate" in paths
+    assert f"{api_prefix}/delay-prediction/predict" in paths
+    assert f"{api_prefix}/delay-prediction/health" in paths
+    assert f"{api_prefix}/planning" in paths
+    assert f"{api_prefix}/health" in paths
+    assert f"{api_prefix}/business-report/generate" not in paths
+    assert f"{api_prefix}/delay_prediction/predict" not in paths
 
 
 def test_business_report_response_serializes_external_fields_as_camel_case() -> None:
