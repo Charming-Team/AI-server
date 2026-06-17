@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from secrets import choice
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
+from app.core.langsmith_tracing import configure_langsmith_tracing_from_settings
 from app.features.production_planning.config import SolverConfig
 from app.features.production_planning.cpsat_model_builder import (
     CpsatModelBundle,
@@ -130,32 +130,6 @@ def run_production_planning_graph(
     configure_langsmith_tracing_from_settings(get_settings())
     state = build_production_planning_graph().invoke({"request": request})
     return state["result"]
-
-
-def configure_langsmith_tracing_from_settings(settings: Settings) -> None:
-    """
-    Parameters:
-        - settings: Application settings loaded from environment or .env.
-
-    Methodology:
-        - Copy optional LangSmith settings into os.environ before graph invocation.
-        - Keep existing shell-provided environment values when they are already present.
-        - Do not log or expose the LangSmith API key.
-
-    Output:
-        - None. Updates process environment for LangGraph/LangSmith auto tracing.
-    """
-    if not settings.langsmith_tracing:
-        return
-
-    os.environ["LANGSMITH_TRACING"] = "true"
-    os.environ["LANGSMITH_TRACING_V2"] = "true"
-    if settings.langsmith_api_key:
-        os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
-    if settings.langsmith_project:
-        os.environ["LANGSMITH_PROJECT"] = settings.langsmith_project
-    if settings.langsmith_endpoint:
-        os.environ["LANGSMITH_ENDPOINT"] = settings.langsmith_endpoint
 
 
 def validate_request_node(
