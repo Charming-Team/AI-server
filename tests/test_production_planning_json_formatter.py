@@ -4,8 +4,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
-import pytest
-
 from app.core.config import Settings
 from app.features.production_planning.json_formatter import (
     build_dashboard_response,
