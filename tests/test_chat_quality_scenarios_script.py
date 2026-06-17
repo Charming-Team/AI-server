@@ -76,12 +76,12 @@ def test_check_chat_quality_scenarios_validate_only_builds_execution_plan() -> N
     )
     result = check_chat_quality_scenarios.build_validate_only_result(
         args,
-        Settings(api_v1_prefix="/ai/api/v1"),
+        Settings(api_v1_prefix="/api/v1"),
     )
 
     assert result["checkStatus"] == "VALIDATED"
     assert result["mode"] == "VALIDATE_ONLY"
-    assert result["path"] == "/ai/api/v1/chat/answer"
+    assert result["path"] == "/api/v1/chat/answer"
     assert result["tokenConfigured"] is True
     assert result["rdbScenarioGroups"] == ["core", "access"]
     assert result["ragScenarioGroups"] == ["core", "access", "company"]
@@ -95,7 +95,7 @@ def test_check_chat_quality_scenarios_validate_only_builds_execution_plan() -> N
 def test_check_chat_quality_scenarios_business_profile_builds_role_execution_plan() -> None:
     result = check_chat_quality_scenarios.build_validate_only_result(
         _build_args(profile="business", max_llm_total_tokens=2500),
-        Settings(api_v1_prefix="/ai/api/v1"),
+        Settings(api_v1_prefix="/api/v1"),
     )
 
     assert result["checkStatus"] == "VALIDATED"

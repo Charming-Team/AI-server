@@ -19,7 +19,10 @@ def test_env_example_covers_all_settings_fields() -> None:
     assert expected_keys - env_keys == set()
 
 
-def test_env_example_loads_as_valid_settings() -> None:
+def test_env_example_loads_as_valid_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    for field_name in Settings.model_fields:
+        monkeypatch.delenv(field_name.upper(), raising=False)
+
     settings = Settings(_env_file=".env.example")
 
     assert settings.app_name == "S-MAP AI Server"

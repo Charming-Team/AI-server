@@ -35,7 +35,10 @@ _MISSING_OVERRIDE = object()
 def _post_chat_answer(*, json: dict, headers: dict[str, str] | None = None):
     previous_override = app.dependency_overrides.get(get_settings, _MISSING_OVERRIDE)
     app.dependency_overrides[get_settings] = lambda: Settings(
-        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
+        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN,
+        evidence_lookup_enabled=False,
+        rdb_evidence_enabled=False,
+        qdrant_search_enabled=False,
     )
     try:
         return client.post(
@@ -57,7 +60,10 @@ def _post_chat_recommendations(
 ):
     previous_override = app.dependency_overrides.get(get_settings, _MISSING_OVERRIDE)
     app.dependency_overrides[get_settings] = lambda: Settings(
-        chat_recommendation_internal_token=CHAT_RECOMMENDATION_INTERNAL_TOKEN
+        chat_recommendation_internal_token=CHAT_RECOMMENDATION_INTERNAL_TOKEN,
+        evidence_lookup_enabled=False,
+        rdb_evidence_enabled=False,
+        qdrant_search_enabled=False,
     )
     try:
         return client.post(
@@ -216,7 +222,10 @@ def test_chat_answer_requires_configured_internal_token() -> None:
 
 def test_chat_answer_rejects_invalid_internal_token() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
-        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN
+        chat_answer_internal_token=CHAT_ANSWER_INTERNAL_TOKEN,
+        evidence_lookup_enabled=False,
+        rdb_evidence_enabled=False,
+        qdrant_search_enabled=False,
     )
     try:
         response = client.post(
@@ -601,7 +610,10 @@ def test_chat_recommendations_requires_configured_internal_token() -> None:
 
 def test_chat_recommendations_rejects_invalid_internal_token() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
-        chat_recommendation_internal_token=CHAT_RECOMMENDATION_INTERNAL_TOKEN
+        chat_recommendation_internal_token=CHAT_RECOMMENDATION_INTERNAL_TOKEN,
+        evidence_lookup_enabled=False,
+        rdb_evidence_enabled=False,
+        qdrant_search_enabled=False,
     )
     try:
         response = client.post(

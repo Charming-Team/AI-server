@@ -12,7 +12,7 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 REQUIRED_EXACT_VALUES = {
     "ENVIRONMENT": "prod",
-    "API_V1_PREFIX": "/ai/api/v1",
+    "API_V1_PREFIX": "/api/v1",
     "RDB_EVIDENCE_ENABLED": "true",
     "QDRANT_SEARCH_ENABLED": "true",
     "QDRANT_COLLECTION": "smap_internal_documents",
