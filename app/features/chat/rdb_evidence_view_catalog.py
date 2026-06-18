@@ -22,6 +22,7 @@ class RdbEvidenceViewDefinition:
     allowed_roles: frozenset[str]
     target_code_columns: tuple[str, ...] = ()
     date_filter_columns: tuple[str, ...] = ()
+    date_filter_end_columns: tuple[str, ...] = ()
     restricted_columns: tuple[str, ...] = ()
     default_order_columns: tuple[str, ...] = ()
     schema_name: str = "chat_evidence"
@@ -191,6 +192,7 @@ RDB_EVIDENCE_VIEW_DEFINITIONS = (
         allowed_roles=BUSINESS_ALLOWED_ROLES,
         target_code_columns=("order_no", "line_code", "product_code"),
         date_filter_columns=("planned_start_at",),
+        date_filter_end_columns=("planned_end_at",),
         restricted_columns=("contract_amount", "late_penalty_amount"),
         default_order_columns=("planned_start_at", "plan_sequence", "plan_id"),
     ),

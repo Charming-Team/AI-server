@@ -198,3 +198,33 @@ def test_grounded_fallback_answer_builder_uses_urgent_order_impact_summary() -> 
     assert "..." not in answer
     assert "simulation_id" not in answer
     assert "simulation_detail_id" not in answer
+
+
+def test_grounded_fallback_answer_builder_uses_empty_production_plan_summary() -> None:
+    builder = GroundedFallbackAnswerBuilder()
+    basis_time = datetime.fromisoformat("2026-06-18T14:40:00+09:00")
+    evidence_result = EvidenceResult(
+        intent=ChatIntent.PRODUCTION_PLAN,
+        basisTime=basis_time,
+        items=[
+            EvidenceItem(
+                type="PLAN",
+                title="생산계획 조회 결과 없음",
+                summary=(
+                    "2026-06-18 기준 조회된 생산계획이 없습니다. "
+                    "따라서 해당 기준일에 생산할 제품명도 확인되지 않습니다."
+                ),
+                url="/production-plans?mode=read",
+                source="chat_production_plan_evidence_view",
+            )
+        ],
+    )
+    document_result = DocumentSearchResult(sources=[])
+
+    answer = builder.build(evidence_result, document_result)
+
+    assert "확인된 업무 데이터를 기준으로 답변합니다." in answer
+    assert "생산계획 조회 결과 없음에서는" not in answer
+    assert "2026-06-18 기준 조회된 생산계획이 없습니다" in answer
+    assert "생산할 제품명도 확인되지 않습니다" in answer
+    assert "생산계획 화면에서 기간이나 라인 조건을 바꿔 확인할 수 있습니다" in answer

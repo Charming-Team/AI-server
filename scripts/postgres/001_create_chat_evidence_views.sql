@@ -107,11 +107,11 @@ select
     co.order_quantity,
     co.order_status
 from public.production_plans pp
-join public.customer_orders co on co.order_id = pp.order_id
+left join public.customer_orders co on co.order_id = pp.order_id
 join public.products p on p.product_id = pp.product_id
 join public.production_lines pl on pl.line_id = pp.line_id
 left join public.users u on u.id = pp.operator_id
-where pp.plan_status in ('SCHEDULED', 'IN_PROGRESS', 'DELAYED');
+where pp.plan_status <> 'CANCELLED';
 
 create or replace view chat_evidence.chat_line_bottleneck_evidence_view as
 select

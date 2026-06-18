@@ -30,6 +30,40 @@ class IntentClassifier:
         "inbound",
         "reserved",
     )
+    _production_plan_lookup_signals = (
+        "오늘주문",
+        "내일주문",
+        "이번주주문",
+        "다음주주문",
+        "주문제품",
+        "주문인제품",
+        "제품목록",
+        "제품명",
+        "제품명들",
+        "생산예정",
+        "생산할제품",
+        "생산할제품명",
+        "생산제품",
+        "배정된주문",
+        "스케줄된주문",
+        "처리수량",
+        "불량수량",
+    )
+    _production_plan_exclusion_signals = (
+        "긴급",
+        "납기",
+        "지연",
+        "위험",
+        "부족",
+        "재고",
+        "자재",
+        "병목",
+        "설비",
+        "장비",
+        "라인",
+        "보고서",
+        "리포트",
+    )
 
     _intent_rules: tuple[IntentRule, ...] = (
         IntentRule(
@@ -106,8 +140,11 @@ class IntentClassifier:
                 "생산 우선순위",
                 "먼저 처리",
                 "먼저 생산",
+                "작업 순서",
+                "처리 순서",
+                "우선 처리",
             ),
-            keywords=("우선순위", "우선", "먼저", "급한", "priority"),
+            keywords=("우선순위", "순서", "우선", "먼저", "급한", "priority"),
         ),
         IntentRule(
             intent=ChatIntent.DELIVERY_RISK,
@@ -171,9 +208,28 @@ class IntentClassifier:
                 "계획 변경",
                 "스케줄 변경",
                 "일정 변경",
+                "주문 제품",
+                "주문인 제품",
+                "제품 목록",
+                "생산 예정",
+                "생산 제품",
+                "배정된 주문",
+                "스케줄된 주문",
+                "처리 수량",
+                "불량 수량",
                 "production plan",
             ),
-            keywords=("계획", "일정", "스케줄", "배정", "plan", "schedule"),
+            keywords=(
+                "계획",
+                "일정",
+                "스케줄",
+                "배정",
+                "생산",
+                "제품",
+                "수량",
+                "plan",
+                "schedule",
+            ),
         ),
     )
 
@@ -205,6 +261,8 @@ class IntentClassifier:
     ) -> ChatIntent:
         if self._has_material_shortage_signal(normalized_question, compact_question):
             return ChatIntent.MATERIAL_SHORTAGE
+        if self._has_production_plan_lookup_signal(compact_question):
+            return ChatIntent.PRODUCTION_PLAN
         return ChatIntent.UNKNOWN
 
     def _has_material_shortage_signal(
@@ -217,6 +275,18 @@ class IntentClassifier:
         return any(
             self._compact(term) in compact_question
             for term in self._material_shortage_signal_terms
+        )
+
+    def _has_production_plan_lookup_signal(self, compact_question: str) -> bool:
+        has_lookup_signal = any(
+            signal in compact_question
+            for signal in self._production_plan_lookup_signals
+        )
+        if not has_lookup_signal:
+            return False
+        return not any(
+            signal in compact_question
+            for signal in self._production_plan_exclusion_signals
         )
 
     def _score_rule(
