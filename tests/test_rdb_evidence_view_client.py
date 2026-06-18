@@ -75,7 +75,7 @@ def test_build_rdb_evidence_select_sql_uses_date_filters() -> None:
 
     assert 'from "chat_evidence"."chat_production_plan_evidence_view"' in sql
     assert 'upper("line_code"::text) = $1' in sql
-    assert '"planned_start_at"::date >= $2::date' in sql
+    assert '"planned_end_at"::date >= $2::date' in sql
     assert '"planned_start_at"::date <= $3::date' in sql
     assert "where (" in sql
     assert ") and (" in sql

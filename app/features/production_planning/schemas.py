@@ -5,9 +5,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.features.production_planning.config import SimulationConfig, SolverConfig
+from app.schemas.base import to_camel
 
 PlanFamily = Literal["DUE_DATE_OPTIMAL", "AMOUNT_OPTIMAL"]
 
@@ -84,6 +85,8 @@ class LockedPlanInput(BaseModel):
 
 
 class LockedPlanPatchInput(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     line_id: DbBigInt
     planned_start_at: datetime
     planned_end_at: datetime
@@ -138,6 +141,8 @@ class OrderInput(BaseModel):
 
 
 class PlanningOrderPatchInput(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     order_id: DbBigInt
     order_no: str | None = None
     product_id: DbBigInt
@@ -155,6 +160,8 @@ class PlanningOrderPatchInput(BaseModel):
 
 
 class ProductionPlanningAdjustmentRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     planning_start: datetime
     planning_end: datetime
     edit_orders: list[PlanningOrderPatchInput] = Field(default_factory=list)

@@ -21,6 +21,7 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check(settings: SettingsDep) -> HealthResponse:
+    """Return a lightweight process liveness response."""
     return HealthResponse(
         status="ok",
         app_name=settings.app_name,
@@ -37,6 +38,7 @@ async def readiness_check(
     response: Response,
     settings: SettingsDep,
 ) -> ReadinessResponse:
+    """Return lightweight dependency readiness without calling LLM generation."""
     components = build_readiness_components(settings)
     is_ready = all(component.configured for component in components)
     if not is_ready:

@@ -158,6 +158,19 @@ class FakeUrgentOrderImpactRdbEvidenceService:
         )
 
 
+class FakeEmptyProductionPlanRdbEvidenceService:
+    async def get_evidence(
+        self,
+        request: ChatAnswerRequest,
+        intent: ChatIntent,
+    ) -> EvidenceResult:
+        return EvidenceResult(
+            intent=intent,
+            basisTime=request.requested_at,
+            items=[],
+        )
+
+
 def _build_request() -> ChatAnswerRequest:
     return ChatAnswerRequest(
         sessionId=10,
@@ -466,6 +479,38 @@ def test_evidence_service_summarizes_overall_urgent_order_impact() -> None:
     assert summary_item.data["orderCount"] == 3
     assert summary_item.data["delayedOrderCount"] == 2
     assert summary_item.data["totalDelayReductionHr"] == 7.0
+
+
+def test_evidence_service_returns_empty_production_plan_summary_as_evidence() -> None:
+    rdb_evidence_service = FakeEmptyProductionPlanRdbEvidenceService()
+    request = _build_request().model_copy(
+        update={
+            "question": "오늘 생산하는 제품 알려줘",
+            "requested_at": datetime.fromisoformat("2026-06-18T14:40:00+09:00"),
+        }
+    )
+    service = EvidenceService(
+        Settings(
+            evidence_lookup_enabled=True,
+            rdb_evidence_enabled=True,
+        ),
+        rdb_evidence_service=rdb_evidence_service,
+    )
+
+    result = anyio.run(service.get_evidence, request, ChatIntent.PRODUCTION_PLAN)
+
+    assert result.has_evidence is True
+    assert len(result.items) == 1
+    summary_item = result.items[0]
+    assert summary_item.type == "PLAN"
+    assert summary_item.title == "생산계획 조회 결과 없음"
+    assert "2026-06-18 기준 조회된 생산계획이 없습니다" in summary_item.summary
+    assert "생산할 제품명도 확인되지 않습니다" in summary_item.summary
+    assert summary_item.url == "/production-plans?mode=read"
+    assert summary_item.source == "chat_production_plan_evidence_view"
+    assert summary_item.data["resultCount"] == 0
+    assert summary_item.data["basisDate"] == "2026-06-18"
+    assert summary_item.data["isEmptyResult"] is True
 
 
 def test_evidence_service_builds_internal_request_payload() -> None:

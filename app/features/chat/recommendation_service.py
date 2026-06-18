@@ -146,28 +146,12 @@ class RecommendationService:
             allowed_roles=("OPERATOR",),
         ),
         RecommendedQuestionRule(
-            question_id="work-priority-today",
-            question="오늘 먼저 처리해야 할 작업 우선순위를 알려줘",
-            intent=ChatIntent.WORK_PRIORITY,
-            category="작업 우선순위",
-            url="/work-orders?mode=read",
-            allowed_roles=("OPERATOR", "MANUFACTURING_MANAGER"),
-        ),
-        RecommendedQuestionRule(
             question_id="monthly-report-summary",
             question="최근 생산 리스크 보고서를 요약해줘",
             intent=ChatIntent.REPORT_LOOKUP,
             category="보고서 조회",
             url="/reports",
             allowed_roles=("EXECUTIVE",),
-        ),
-        RecommendedQuestionRule(
-            question_id="manager-report-summary",
-            question="최근 제조 리스크 보고서를 요약해줘",
-            intent=ChatIntent.REPORT_LOOKUP,
-            category="보고서 조회",
-            url="/reports?type=manufacturing",
-            allowed_roles=("MANUFACTURING_MANAGER",),
         ),
     )
 

@@ -11,6 +11,7 @@ from app.features.chat.schemas import (
 LINE_COUNT_SUMMARY_TITLE = "공정 라인 전체 현황"
 LINE_COMPOSITION_SUMMARY_TITLE = "생산 라인 구성 전체 현황"
 RUNNING_LINE_SUMMARY_TITLE = "가동 라인 전체 현황"
+PRODUCTION_PLAN_EMPTY_SUMMARY_TITLE = "생산계획 조회 결과 없음"
 URGENT_ORDER_IMPACT_SUMMARY_TITLE = "긴급 주문 전체 생산계획 영향"
 MATERIAL_SHORTAGE_IMPACT_SUMMARY_TITLE = "자재 부족 영향 생산계획"
 LINE_SUMMARY_TITLES = frozenset(
@@ -29,6 +30,9 @@ class EvidenceAggregationPolicy:
         request: ChatAnswerRequest,
         result: EvidenceResult,
     ) -> EvidenceResult:
+        if result.intent == ChatIntent.PRODUCTION_PLAN and not result.items:
+            return self._apply_empty_production_plan_summary(request, result)
+
         if result.intent == ChatIntent.MATERIAL_SHORTAGE:
             return self._apply_material_shortage_impact_summary(request, result)
 
@@ -52,6 +56,31 @@ class EvidenceAggregationPolicy:
         if line_summary_item is None:
             return result
         return result.model_copy(update={"items": [line_summary_item, *result.items]})
+
+    def _apply_empty_production_plan_summary(
+        self,
+        request: ChatAnswerRequest,
+        result: EvidenceResult,
+    ) -> EvidenceResult:
+        basis_date = request.requested_at.date().isoformat()
+        summary = (
+            f"{basis_date} 기준 조회된 생산계획이 없습니다. "
+            "따라서 해당 기준일에 생산할 제품명도 확인되지 않습니다."
+        )
+        summary_item = EvidenceItem(
+            type="PLAN",
+            title=PRODUCTION_PLAN_EMPTY_SUMMARY_TITLE,
+            summary=summary,
+            url="/production-plans?mode=read",
+            source="chat_production_plan_evidence_view",
+            data={
+                "resultCount": 0,
+                "basisDate": basis_date,
+                "isEmptyResult": True,
+            },
+            allowedRoles=["OPERATOR", "EXECUTIVE", "MANUFACTURING_MANAGER"],
+        )
+        return result.model_copy(update={"items": [summary_item]})
 
     def _apply_material_shortage_impact_summary(
         self,

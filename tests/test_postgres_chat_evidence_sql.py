@@ -77,6 +77,23 @@ def test_chat_evidence_views_keep_prediction_cause_column_compatible() -> None:
     assert "null::text as main_cause_type" in sql
 
 
+def test_production_plan_evidence_view_matches_plan_screen_visibility() -> None:
+    sql = _read_sql(CREATE_VIEWS_SQL)
+    view_start = sql.index(
+        "create or replace view chat_evidence.chat_production_plan_evidence_view"
+    )
+    next_view_start = sql.index(
+        "create or replace view chat_evidence.chat_line_bottleneck_evidence_view"
+    )
+    view_sql = sql[view_start:next_view_start]
+
+    assert "left join public.customer_orders co on co.order_id = pp.order_id" in view_sql
+    assert "join public.products p on p.product_id = pp.product_id" in view_sql
+    assert "join public.production_lines pl on pl.line_id = pp.line_id" in view_sql
+    assert "where pp.plan_status <> 'cancelled'" in view_sql
+    assert "where pp.plan_status in ('scheduled', 'in_progress', 'delayed')" not in view_sql
+
+
 def test_readonly_role_script_grants_only_view_read_privileges() -> None:
     sql = _read_sql(GRANT_READONLY_SQL)
 

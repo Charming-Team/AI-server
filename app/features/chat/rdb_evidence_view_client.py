@@ -98,9 +98,12 @@ def build_rdb_evidence_select_sql(
 
     if filters.from_date and definition.date_filter_columns:
         params.append(date.fromisoformat(filters.from_date))
+        from_filter_columns = (
+            definition.date_filter_end_columns or definition.date_filter_columns
+        )
         from_conditions = [
             f"{_quote_identifier(column)}::date >= ${len(params)}::date"
-            for column in definition.date_filter_columns
+            for column in from_filter_columns
         ]
         where_clauses.append(f"({' or '.join(from_conditions)})")
 
