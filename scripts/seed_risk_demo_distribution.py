@@ -7,12 +7,11 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 
 import json
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import text
-from app.core.database import engine
 
+from app.core.database import engine
 
 MODEL_NAME = "xgboost_delay_probability"
 MODEL_VERSION = "v1.0.0-demo-risk-seed"
@@ -422,7 +421,6 @@ def apply_source_mutation(conn, row: dict[str, Any], slot: dict[str, Any]) -> No
     if slot["level"] == "SAFE":
         return
 
-    delay_days = Decimal(str(slot["delay_days"]))
     risk_level = slot["level"]
 
     if row.get("plan_id") is not None:

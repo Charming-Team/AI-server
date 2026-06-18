@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import text
+
 from app.core.database import engine
 
 PROGRESS_RATIOS = [
@@ -90,7 +92,7 @@ def ensure_plan(conn, row: dict, idx: int) -> dict:
         LIMIT 1
     """), {"orderId": row["order_id"]}).mappings().first()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     planned_start_at = now - timedelta(hours=2)
     planned_end_at = now + timedelta(hours=8 + idx % 12)
 
