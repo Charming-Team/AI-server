@@ -7,11 +7,46 @@ from sqlalchemy import text
 from app.core.database import engine
 
 PROGRESS_RATIOS = [
-    0.03, 0.11, 0.27, 0.06, 0.42, 0.18, 0.34, 0.09,
-    0.55, 0.22, 0.15, 0.47, 0.31, 0.08, 0.63, 0.25,
-    0.39, 0.12, 0.51, 0.29, 0.17, 0.44, 0.36, 0.21,
-    0.58, 0.14, 0.32, 0.07, 0.49, 0.26, 0.41, 0.19,
-    0.61, 0.24, 0.37, 0.13, 0.46, 0.32, 0.52, 0.16,
+    0.03,
+    0.11,
+    0.27,
+    0.06,
+    0.42,
+    0.18,
+    0.34,
+    0.09,
+    0.55,
+    0.22,
+    0.15,
+    0.47,
+    0.31,
+    0.08,
+    0.63,
+    0.25,
+    0.39,
+    0.12,
+    0.51,
+    0.29,
+    0.17,
+    0.44,
+    0.36,
+    0.21,
+    0.58,
+    0.14,
+    0.32,
+    0.07,
+    0.49,
+    0.26,
+    0.41,
+    0.19,
+    0.61,
+    0.24,
+    0.37,
+    0.13,
+    0.46,
+    0.32,
+    0.52,
+    0.16,
 ]
 
 
@@ -33,18 +68,22 @@ def next_id(conn, table_name: str, column_name: str) -> int:
 
 def choose_line_id(conn, product_id: int, preferred_line_id: int | None) -> int:
     if preferred_line_id is not None:
-        exists = conn.execute(text("""
+        exists = conn.execute(
+            text("""
             SELECT EXISTS (
                 SELECT 1
                 FROM production_lines
                 WHERE line_id = :lineId
             )
-        """), {"lineId": preferred_line_id}).scalar()
+        """),
+            {"lineId": preferred_line_id},
+        ).scalar()
 
         if exists:
             return preferred_line_id
 
-    line_id = conn.execute(text("""
+    line_id = conn.execute(
+        text("""
         SELECT plc.line_id
         FROM product_line_capabilities plc
         JOIN production_lines pl
@@ -53,18 +92,22 @@ def choose_line_id(conn, product_id: int, preferred_line_id: int | None) -> int:
           AND COALESCE(pl.is_active, true) = true
         ORDER BY plc.priority_rank ASC NULLS LAST, plc.line_id ASC
         LIMIT 1
-    """), {"productId": product_id}).scalar()
+    """),
+        {"productId": product_id},
+    ).scalar()
 
     if line_id is not None:
         return line_id
 
-    line_id = conn.execute(text("""
+    line_id = conn.execute(
+        text("""
         SELECT line_id
         FROM production_lines
         WHERE COALESCE(is_active, true) = true
         ORDER BY line_id
         LIMIT 1
-    """)).scalar()
+    """)
+    ).scalar()
 
     if line_id is None:
         raise RuntimeError("사용 가능한 production_lines row가 없습니다.")
@@ -73,7 +116,9 @@ def choose_line_id(conn, product_id: int, preferred_line_id: int | None) -> int:
 
 
 def ensure_plan(conn, row: dict, idx: int) -> dict:
-    existing = conn.execute(text("""
+    existing = (
+        conn.execute(
+            text("""
         SELECT
             plan_id,
             order_id,
@@ -90,7 +135,12 @@ def ensure_plan(conn, row: dict, idx: int) -> dict:
             plan_sequence ASC NULLS LAST,
             plan_id ASC
         LIMIT 1
-    """), {"orderId": row["order_id"]}).mappings().first()
+    """),
+            {"orderId": row["order_id"]},
+        )
+        .mappings()
+        .first()
+    )
 
     now = datetime.now(UTC)
     planned_start_at = now - timedelta(hours=2)
@@ -99,7 +149,8 @@ def ensure_plan(conn, row: dict, idx: int) -> dict:
     if existing:
         plan_id = existing["plan_id"]
 
-        conn.execute(text("""
+        conn.execute(
+            text("""
             UPDATE production_plans
             SET
                 planned_quantity = :orderQuantity,
@@ -113,14 +164,18 @@ def ensure_plan(conn, row: dict, idx: int) -> dict:
                 estimated_duration_hr = GREATEST(COALESCE(estimated_duration_hr, 1), 1),
                 updated_at = now()
             WHERE plan_id = :planId
-        """), {
-            "planId": plan_id,
-            "orderQuantity": row["order_quantity"],
-            "plannedStartAt": planned_start_at,
-            "plannedEndAt": planned_end_at,
-        })
+        """),
+            {
+                "planId": plan_id,
+                "orderQuantity": row["order_quantity"],
+                "plannedStartAt": planned_start_at,
+                "plannedEndAt": planned_end_at,
+            },
+        )
 
-        return dict(conn.execute(text("""
+        return dict(
+            conn.execute(
+                text("""
             SELECT
                 plan_id,
                 order_id,
@@ -132,18 +187,27 @@ def ensure_plan(conn, row: dict, idx: int) -> dict:
                 estimated_duration_hr
             FROM production_plans
             WHERE plan_id = :planId
-        """), {"planId": plan_id}).mappings().one())
+        """),
+                {"planId": plan_id},
+            )
+            .mappings()
+            .one()
+        )
 
     line_id = choose_line_id(conn, row["product_id"], row["line_id"])
     plan_id = next_id(conn, "production_plans", "plan_id")
 
-    plan_sequence = conn.execute(text("""
+    plan_sequence = conn.execute(
+        text("""
         SELECT COALESCE(MAX(plan_sequence), 0) + 1
         FROM production_plans
         WHERE line_id = :lineId
-    """), {"lineId": line_id}).scalar_one()
+    """),
+        {"lineId": line_id},
+    ).scalar_one()
 
-    conn.execute(text("""
+    conn.execute(
+        text("""
         INSERT INTO production_plans (
             plan_id,
             order_id,
@@ -174,19 +238,23 @@ def ensure_plan(conn, row: dict, idx: int) -> dict:
             now(),
             now()
         )
-    """), {
-        "planId": plan_id,
-        "orderId": row["order_id"],
-        "productId": row["product_id"],
-        "lineId": line_id,
-        "plannedStartAt": planned_start_at,
-        "plannedEndAt": planned_end_at,
-        "estimatedDurationHr": 8 + idx % 12,
-        "plannedQuantity": row["order_quantity"],
-        "planSequence": plan_sequence,
-    })
+    """),
+        {
+            "planId": plan_id,
+            "orderId": row["order_id"],
+            "productId": row["product_id"],
+            "lineId": line_id,
+            "plannedStartAt": planned_start_at,
+            "plannedEndAt": planned_end_at,
+            "estimatedDurationHr": 8 + idx % 12,
+            "plannedQuantity": row["order_quantity"],
+            "planSequence": plan_sequence,
+        },
+    )
 
-    return dict(conn.execute(text("""
+    return dict(
+        conn.execute(
+            text("""
         SELECT
             plan_id,
             order_id,
@@ -198,11 +266,18 @@ def ensure_plan(conn, row: dict, idx: int) -> dict:
             estimated_duration_hr
         FROM production_plans
         WHERE plan_id = :planId
-    """), {"planId": plan_id}).mappings().one())
+    """),
+            {"planId": plan_id},
+        )
+        .mappings()
+        .one()
+    )
 
 
 with engine.begin() as conn:
-    rows = conn.execute(text("""
+    rows = (
+        conn.execute(
+            text("""
         WITH latest AS (
             SELECT DISTINCT ON (apr.order_id)
                 apr.prediction_id,
@@ -216,7 +291,11 @@ with engine.begin() as conn:
             FROM ai_prediction_results apr
             JOIN customer_orders co
               ON co.order_id = apr.order_id
-            WHERE COALESCE(UPPER(co.order_status::text), '') NOT IN ('COMPLETE', 'COMPLETED', 'CANCELLED')
+            WHERE COALESCE(UPPER(co.order_status::text), '') NOT IN (
+                'COMPLETE',
+                'COMPLETED',
+                'CANCELLED'
+            )
             ORDER BY apr.order_id, apr.prediction_id DESC
         )
         SELECT
@@ -242,7 +321,11 @@ with engine.begin() as conn:
             END,
             l.delay_probability DESC NULLS LAST,
             l.order_id
-    """)).mappings().all()
+    """)
+        )
+        .mappings()
+        .all()
+    )
 
     print("target rows:", len(rows))
 
@@ -259,14 +342,18 @@ with engine.begin() as conn:
         good_quantity = max(actual_quantity - defect_quantity, 0)
         yield_rate = 0 if actual_quantity == 0 else round(good_quantity / actual_quantity, 4)
 
-        existing_result_id = conn.execute(text("""
+        existing_result_id = conn.execute(
+            text("""
             SELECT result_id
             FROM production_results
             WHERE plan_id = :planId
-        """), {"planId": plan["plan_id"]}).scalar()
+        """),
+            {"planId": plan["plan_id"]},
+        ).scalar()
 
         if existing_result_id:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 UPDATE production_results
                 SET
                     order_id = :orderId,
@@ -288,23 +375,26 @@ with engine.begin() as conn:
                     result_status = CAST('PARTIAL' AS result_status_enum),
                     updated_at = now()
                 WHERE result_id = :resultId
-            """), {
-                "resultId": existing_result_id,
-                "orderId": row["order_id"],
-                "productId": plan["product_id"],
-                "lineId": plan["line_id"],
-                "plannedStartAt": plan["planned_start_at"],
-                "plannedEndAt": plan["planned_end_at"],
-                "plannedQuantity": order_quantity,
-                "actualQuantity": actual_quantity,
-                "defectQuantity": defect_quantity,
-                "yieldRate": yield_rate,
-                "estimatedDurationHr": plan["estimated_duration_hr"],
-            })
+            """),
+                {
+                    "resultId": existing_result_id,
+                    "orderId": row["order_id"],
+                    "productId": plan["product_id"],
+                    "lineId": plan["line_id"],
+                    "plannedStartAt": plan["planned_start_at"],
+                    "plannedEndAt": plan["planned_end_at"],
+                    "plannedQuantity": order_quantity,
+                    "actualQuantity": actual_quantity,
+                    "defectQuantity": defect_quantity,
+                    "yieldRate": yield_rate,
+                    "estimatedDurationHr": plan["estimated_duration_hr"],
+                },
+            )
         else:
             result_id = next_id(conn, "production_results", "result_id")
 
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO production_results (
                     result_id,
                     plan_id,
@@ -349,22 +439,26 @@ with engine.begin() as conn:
                     CAST('PARTIAL' AS result_status_enum),
                     now()
                 )
-            """), {
-                "resultId": result_id,
-                "planId": plan["plan_id"],
-                "orderId": row["order_id"],
-                "productId": plan["product_id"],
-                "lineId": plan["line_id"],
-                "plannedStartAt": plan["planned_start_at"],
-                "plannedEndAt": plan["planned_end_at"],
-                "plannedQuantity": order_quantity,
-                "actualQuantity": actual_quantity,
-                "defectQuantity": defect_quantity,
-                "yieldRate": yield_rate,
-                "estimatedDurationHr": plan["estimated_duration_hr"],
-            })
+            """),
+                {
+                    "resultId": result_id,
+                    "planId": plan["plan_id"],
+                    "orderId": row["order_id"],
+                    "productId": plan["product_id"],
+                    "lineId": plan["line_id"],
+                    "plannedStartAt": plan["planned_start_at"],
+                    "plannedEndAt": plan["planned_end_at"],
+                    "plannedQuantity": order_quantity,
+                    "actualQuantity": actual_quantity,
+                    "defectQuantity": defect_quantity,
+                    "yieldRate": yield_rate,
+                    "estimatedDurationHr": plan["estimated_duration_hr"],
+                },
+            )
 
-    check = conn.execute(text("""
+    check = (
+        conn.execute(
+            text("""
         WITH latest AS (
             SELECT DISTINCT ON (apr.order_id)
                 apr.order_id,
@@ -372,7 +466,11 @@ with engine.begin() as conn:
             FROM ai_prediction_results apr
             JOIN customer_orders co
               ON co.order_id = apr.order_id
-            WHERE COALESCE(UPPER(co.order_status::text), '') NOT IN ('COMPLETE', 'COMPLETED', 'CANCELLED')
+            WHERE COALESCE(UPPER(co.order_status::text), '') NOT IN (
+                'COMPLETE',
+                'COMPLETED',
+                'CANCELLED'
+            )
             ORDER BY apr.order_id, apr.prediction_id DESC
         )
         SELECT
@@ -406,7 +504,11 @@ with engine.begin() as conn:
                 WHEN 'SAFE' THEN 4
                 ELSE 5
             END
-    """)).mappings().all()
+    """)
+        )
+        .mappings()
+        .all()
+    )
 
     print("✅ demo progress seeded")
     for row in check:

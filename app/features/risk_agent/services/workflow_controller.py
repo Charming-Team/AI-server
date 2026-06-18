@@ -59,10 +59,7 @@ class RiskAgentWorkflowController:
         now = datetime.now(UTC)
 
         state = RiskAgentWorkflowState(
-            workflow_run_id=(
-                request.workflow_run_id
-                or f"risk-agent-{uuid4()}"
-            ),
+            workflow_run_id=(request.workflow_run_id or f"risk-agent-{uuid4()}"),
             prediction_id=request.prediction_id,
             order_id=request.order_id,
             status=WorkflowStatus.CREATED,
@@ -109,14 +106,10 @@ class RiskAgentWorkflowController:
             }
         )
 
-        batch_result = await self.analyzer_executor.run(
-            analyzing_state.evidence
-        )
+        batch_result = await self.analyzer_executor.run(analyzing_state.evidence)
 
-        if (
-            batch_result.failed_analyzers
-            and len(batch_result.failed_analyzers)
-            == len(self.analyzer_executor.analyzers)
+        if batch_result.failed_analyzers and len(batch_result.failed_analyzers) == len(
+            self.analyzer_executor.analyzers
         ):
             return analyzing_state.model_copy(
                 update={
@@ -143,9 +136,7 @@ class RiskAgentWorkflowController:
         confidence_level = self._resolve_confidence(
             current=analyzing_state.confidence_level,
             missing_field_count=len(missing_fields),
-            failed_analyzer_count=len(
-                batch_result.failed_analyzers
-            ),
+            failed_analyzer_count=len(batch_result.failed_analyzers),
         )
 
         return analyzing_state.model_copy(
@@ -158,28 +149,28 @@ class RiskAgentWorkflowController:
         )
 
     async def rank_causes(
-            self,
-            request: RiskAgentContextLoadRequest,
-        ) -> RiskAgentWorkflowState:
-            state = await self.analyze(request)
+        self,
+        request: RiskAgentContextLoadRequest,
+    ) -> RiskAgentWorkflowState:
+        state = await self.analyze(request)
 
-            if state.status in {
-                WorkflowStatus.FAILED,
-                WorkflowStatus.SKIPPED_SAFE,
-            }:
-                return state
+        if state.status in {
+            WorkflowStatus.FAILED,
+            WorkflowStatus.SKIPPED_SAFE,
+        }:
+            return state
 
-            try:
-                return self.cause_ranking_node.run(state)
+        try:
+            return self.cause_ranking_node.run(state)
 
-            except Exception as exc:
-                return state.model_copy(
-                    update={
-                        "status": WorkflowStatus.FAILED,
-                        "finished_at": datetime.now(UTC),
-                        "error_message": str(exc),
-                    }
-                )
+        except Exception as exc:
+            return state.model_copy(
+                update={
+                    "status": WorkflowStatus.FAILED,
+                    "finished_at": datetime.now(UTC),
+                    "error_message": str(exc),
+                }
+            )
 
     async def generate_explanation(
         self,
@@ -219,7 +210,7 @@ class RiskAgentWorkflowController:
             return ConfidenceLevel.MEDIUM
 
         return current
-    
+
     async def validate_explanation(
         self,
         request: RiskAgentContextLoadRequest,
@@ -235,30 +226,20 @@ class RiskAgentWorkflowController:
         validation_feedback: list[str] = []
         last_generated_state: RiskAgentWorkflowState | None = None
 
-        for attempt in range(
-            self.validation_max_retries + 1
-        ):
+        for attempt in range(self.validation_max_retries + 1):
             generation_input = ranked_state.model_copy(
                 update={
                     "validation_errors": validation_feedback,
-                    "retry_count": (
-                        ranked_state.retry_count + attempt
-                    ),
+                    "retry_count": (ranked_state.retry_count + attempt),
                 }
             )
 
             try:
-                generated_state = (
-                    await self.risk_explanation_node.run(
-                        generation_input
-                    )
-                )
+                generated_state = await self.risk_explanation_node.run(generation_input)
 
                 last_generated_state = generated_state
 
-                return self.validation_node.run(
-                    generated_state
-                )
+                return self.validation_node.run(generated_state)
 
             except RiskAgentValidationError as exc:
                 validation_feedback = exc.errors
@@ -267,33 +248,21 @@ class RiskAgentWorkflowController:
                 return ranked_state.model_copy(
                     update={
                         "status": WorkflowStatus.FAILED,
-                        "finished_at": datetime.now(
-                            UTC
-                        ),
+                        "finished_at": datetime.now(UTC),
                         "error_message": str(exc),
                     }
                 )
 
-        failed_state = (
-            last_generated_state
-            if last_generated_state is not None
-            else ranked_state
-        )
+        failed_state = last_generated_state if last_generated_state is not None else ranked_state
 
         return failed_state.model_copy(
             update={
                 "status": WorkflowStatus.FAILED,
                 "validation_errors": validation_feedback,
-                "finished_at": datetime.now(
-                    UTC
-                ),
-                "error_message": (
-                    "Risk Agent 결과가 Validation을 "
-                    "통과하지 못했습니다."
-                ),
+                "finished_at": datetime.now(UTC),
+                "error_message": ("Risk Agent 결과가 Validation을 통과하지 못했습니다."),
             }
         )
-
 
     async def execute(
         self,
@@ -314,9 +283,7 @@ class RiskAgentWorkflowController:
             return state.model_copy(
                 update={
                     "status": WorkflowStatus.FAILED,
-                    "finished_at": datetime.now(
-                        UTC
-                    ),
+                    "finished_at": datetime.now(UTC),
                     "error_message": str(exc),
                 }
             )
