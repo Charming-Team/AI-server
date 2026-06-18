@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
     )
+    internal_api_token: str | None = None
     chat_answer_internal_token: str | None = None
     chat_recommendation_internal_token: str | None = None
     evidence_lookup_enabled: bool = False
@@ -126,6 +127,7 @@ class Settings(BaseSettings):
     @field_validator(
         "chat_answer_internal_token",
         "chat_recommendation_internal_token",
+        "internal_api_token",
         "evidence_lookup_internal_token",
         "rdb_evidence_dsn",
         "report_rdb_dsn",

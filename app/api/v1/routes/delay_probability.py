@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.v1.dependencies import verify_internal_api_token
 from app.features.delay_probability.repositories.delay_probability_repository import (
     DelayProbabilityInferenceRowDuplicatedError,
     DelayProbabilityInferenceRowNotFoundError,
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/delay-probability",
     tags=["delay-probability"],
+    dependencies=[Depends(verify_internal_api_token)],
 )
 
 

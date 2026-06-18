@@ -18,8 +18,10 @@ def test_openapi_uses_api_v1_contract_paths() -> None:
     assert f"{api_prefix}/business-reports/generate" in paths
     assert f"{api_prefix}/delay-prediction/predict" in paths
     assert f"{api_prefix}/delay-prediction/health" in paths
-    assert f"{api_prefix}/planning" in paths
+    assert f"{api_prefix}/production-planning/analyze" in paths
     assert f"{api_prefix}/health" in paths
+    assert f"{api_prefix}/ready" in paths
+    assert f"{api_prefix}/planning" not in paths
     assert f"{api_prefix}/business-report/generate" not in paths
     assert f"{api_prefix}/delay_prediction/predict" not in paths
 

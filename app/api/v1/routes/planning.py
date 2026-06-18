@@ -1,10 +1,11 @@
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, Field
 
+from app.api.v1.dependencies import verify_internal_api_token
 from app.features.production_planning.exceptions import (
     PlanningDataAccessError,
     PlanningInfeasibleError,
@@ -16,8 +17,19 @@ from app.features.production_planning.production_planning_node import (
     generate_adjusted_production_plan_api_response,
 )
 from app.features.production_planning.schemas import ProductionPlanningAdjustmentRequest
+from app.schemas.base import ApiSchema
 
-router = APIRouter(prefix="/planning", tags=["Production Planning"])
+router = APIRouter(
+    prefix="/production-planning",
+    tags=["Production Planning"],
+    dependencies=[Depends(verify_internal_api_token)],
+)
+legacy_router = APIRouter(
+    prefix="/planning",
+    tags=["Production Planning"],
+    dependencies=[Depends(verify_internal_api_token)],
+    include_in_schema=False,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class AdjustedPlanRowItem(BaseModel):
+class AdjustedPlanRowItem(ApiSchema):
     order_id: int = Field(..., description="수주 ID (DB 정수 키)")
     product_id: int = Field(..., description="제품 ID")
     line_id: int = Field(..., description="배정된 생산 라인 ID")
@@ -50,7 +62,7 @@ class AdjustedPlanRowItem(BaseModel):
     )
 
 
-class AdjustedPlanCandidateItem(BaseModel):
+class AdjustedPlanCandidateItem(ApiSchema):
     plan_variant_code: str = Field(
         ...,
         description=(
@@ -83,7 +95,7 @@ class AdjustedPlanCandidateItem(BaseModel):
     )
 
 
-class PlanningResponseBody(BaseModel):
+class PlanningResponseBody(ApiSchema):
     adjusted_plan_candidates: list[AdjustedPlanCandidateItem] = Field(
         ...,
         description=(
@@ -99,7 +111,7 @@ class PlanningResponseBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class BaselineMetrics(BaseModel):
+class BaselineMetrics(ApiSchema):
     delay_probability_percent: float | None = Field(
         None,
         description=(
@@ -205,8 +217,12 @@ class BaselineMetrics(BaseModel):
     )
 
 
-class BaselinePlanRow(BaseModel):
-    model_config = {"extra": "allow"}
+class BaselinePlanRow(ApiSchema):
+    model_config = ConfigDict(
+        alias_generator=ApiSchema.model_config["alias_generator"],
+        populate_by_name=True,
+        extra="allow",
+    )
 
     plan_id: int | None = Field(None, description="계획 ID (DB 기본키)")
     order_id: int | None = Field(None, description="수주 ID")
@@ -222,7 +238,7 @@ class BaselinePlanRow(BaseModel):
     plan_status: str | None = Field(None, description="계획 상태")
 
 
-class CurrentStateSummary(BaseModel):
+class CurrentStateSummary(ApiSchema):
     expected_delay_days: float | None = Field(
         None, description="평균 예상 지연 일수 (total_tardiness_minutes ÷ 1440)"
     )
@@ -287,7 +303,7 @@ class CurrentStateSummary(BaseModel):
     )
 
 
-class BaselineProvenance(BaseModel):
+class BaselineProvenance(ApiSchema):
     source: str = Field(
         ...,
         description=(
@@ -310,7 +326,7 @@ class BaselineProvenance(BaseModel):
     )
 
 
-class PlanValueAnalysis(BaseModel):
+class PlanValueAnalysis(ApiSchema):
     contract_total: int = Field(
         ...,
         description="계획에 포함된 주문의 총 수주 금액입니다. 단위는 KRW입니다.",
@@ -359,7 +375,7 @@ class PlanValueAnalysis(BaseModel):
     )
 
 
-class BaselineBlock(BaseModel):
+class BaselineBlock(ApiSchema):
     source: str = Field(
         ..., description="기준 데이터 출처 식별자. 항상 DB_CURRENT_PLAN입니다."
     )
@@ -398,7 +414,7 @@ class BaselineBlock(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class AlternativeSimulationMetrics(BaseModel):
+class AlternativeSimulationMetrics(ApiSchema):
     delay_probability_percent: float | None = Field(
         None,
         description=(
@@ -504,7 +520,7 @@ class AlternativeSimulationMetrics(BaseModel):
     )
 
 
-class ComputedDeltas(BaseModel):
+class ComputedDeltas(ApiSchema):
     delivery_fulfillment_rate_delta_percent_points: float | None = Field(
         None,
         description=(
@@ -590,7 +606,7 @@ class ComputedDeltas(BaseModel):
     )
 
 
-class ComparisonTableRow(BaseModel):
+class ComparisonTableRow(ApiSchema):
     metric_code: str = Field(..., description="지표 코드입니다.")
     metric_name: str = Field(..., description="지표 한국어 이름입니다.")
     baseline_value: float | None = Field(None, description="기준 계획 값")
@@ -611,7 +627,7 @@ class ComparisonTableRow(BaseModel):
     )
 
 
-class PlanChangeRow(BaseModel):
+class PlanChangeRow(ApiSchema):
     order_id: int | None = Field(None, description="수주 ID")
     plan_id: int | None = Field(None, description="기존 계획 ID")
     line_change: str | None = Field(
@@ -637,7 +653,7 @@ class PlanChangeRow(BaseModel):
     )
 
 
-class ApplicationConditions(BaseModel):
+class ApplicationConditions(ApiSchema):
     available_lines: list[dict[str, Any]] = Field(
         ...,
         description=(
@@ -671,7 +687,7 @@ class ApplicationConditions(BaseModel):
     )
 
 
-class AiRecommendation(BaseModel):
+class AiRecommendation(ApiSchema):
     summary_text: str = Field(
         ...,
         description=(
@@ -690,14 +706,14 @@ class AiRecommendation(BaseModel):
     )
 
 
-class RiskInterpretation(BaseModel):
+class RiskInterpretation(ApiSchema):
     text: str = Field(
         ...,
         description="리스크 해석 텍스트입니다.",
     )
 
 
-class AiEvaluationBlock(BaseModel):
+class AiEvaluationBlock(ApiSchema):
     status: str = Field(
         ...,
         description=(
@@ -743,7 +759,7 @@ class AiEvaluationBlock(BaseModel):
     )
 
 
-class AlternativeBlock(BaseModel):
+class AlternativeBlock(ApiSchema):
     plan_variant_code: str = Field(
         ...,
         description="최적화 변형 코드 (DUE_DATE_OPTIMAL 또는 AMOUNT_OPTIMAL)",
@@ -819,7 +835,7 @@ class AlternativeBlock(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class PlanningWindow(BaseModel):
+class PlanningWindow(ApiSchema):
     planning_start: str | None = Field(
         None, description="계획 기간 시작 (ISO 8601, timezone-aware)"
     )
@@ -828,7 +844,7 @@ class PlanningWindow(BaseModel):
     )
 
 
-class DataSources(BaseModel):
+class DataSources(ApiSchema):
     baseline: str = Field(
         ...,
         description="기준 데이터 소스 식별자. 항상 DB_CURRENT_PLAN입니다.",
@@ -839,7 +855,7 @@ class DataSources(BaseModel):
     )
 
 
-class SimulationResponseBody(BaseModel):
+class SimulationResponseBody(ApiSchema):
     generated_at: str = Field(
         ...,
         description="응답 생성 시각 (ISO 8601, UTC)",
@@ -873,7 +889,7 @@ class SimulationResponseBody(BaseModel):
     )
 
 
-class PlanningGenerateResponse(BaseModel):
+class PlanningGenerateResponse(ApiSchema):
     planning_response: PlanningResponseBody = Field(
         ...,
         description=(
@@ -890,14 +906,14 @@ class PlanningGenerateResponse(BaseModel):
     )
 
 
-class PlanningHealthResponse(BaseModel):
+class PlanningHealthResponse(ApiSchema):
     status: str = Field(..., description="서비스 상태. 정상 시 'ok'를 반환합니다.")
     feature: str = Field(
         ..., description="기능 식별자. 항상 'production-planning'입니다."
     )
 
 
-class PlanningErrorResponse(BaseModel):
+class PlanningErrorResponse(ApiSchema):
     status: str = Field(..., description="HTTP 상태 코드 문자열. 예: '400 Bad Request'")
     message: str = Field(..., description="오류 상세 메시지")
 
@@ -933,33 +949,33 @@ planning_request_examples = {
             "optimized by CP-SAT."
         ),
         "value": {
-            "planning_start": "2026-05-01 09:00:00.000 +0900",
-            "planning_end": "2026-06-09 08:59:00.000 +0900",
-            "edit_orders": [
+            "planningStart": "2026-05-01 09:00:00.000 +0900",
+            "planningEnd": "2026-06-09 08:59:00.000 +0900",
+            "editOrders": [
                 {
-                    "order_id": 399,
-                    "product_id": 10,
-                    "order_quantity": 16800,
-                    "due_date": "2026-05-22 08:59:59.000 +0900",
-                    "contract_amount": "30752426.00",
-                    "late_penalty_amount": "833160.00",
-                    "order_status": "DELAYED",
-                    "locked_plan": {
-                        "line_id": 6,
-                        "planned_start_at": "2026-06-02 00:57:31.000 +0900",
-                        "planned_end_at": "2026-06-03 02:33:31.000 +0900",
+                    "orderId": 399,
+                    "productId": 10,
+                    "orderQuantity": 16800,
+                    "dueDate": "2026-05-22 08:59:59.000 +0900",
+                    "contractAmount": "30752426.00",
+                    "latePenaltyAmount": "833160.00",
+                    "orderStatus": "DELAYED",
+                    "lockedPlan": {
+                        "lineId": 6,
+                        "plannedStartAt": "2026-06-02 00:57:31.000 +0900",
+                        "plannedEndAt": "2026-06-03 02:33:31.000 +0900",
                     },
                 }
             ],
-            "add_orders": [
+            "addOrders": [
                 {
-                    "order_id": 900000001,
-                    "product_id": 10,
-                    "order_quantity": 1200,
-                    "due_date": "2026-05-21 09:00:00.000 +0900",
-                    "contract_amount": "1500000.00",
-                    "late_penalty_amount": "120000.00",
-                    "order_status": "SCHEDULED",
+                    "orderId": 900000001,
+                    "productId": 10,
+                    "orderQuantity": 1200,
+                    "dueDate": "2026-05-21 09:00:00.000 +0900",
+                    "contractAmount": "1500000.00",
+                    "latePenaltyAmount": "120000.00",
+                    "orderStatus": "SCHEDULED",
                 }
             ],
         },
@@ -968,18 +984,18 @@ planning_request_examples = {
         "summary": "Add one movable order",
         "description": "Adds a new order and lets CP-SAT choose the line and time.",
         "value": {
-            "planning_start": "2026-05-01 09:00:00.000 +0900",
-            "planning_end": "2026-06-09 08:59:00.000 +0900",
-            "edit_orders": [],
-            "add_orders": [
+            "planningStart": "2026-05-01 09:00:00.000 +0900",
+            "planningEnd": "2026-06-09 08:59:00.000 +0900",
+            "editOrders": [],
+            "addOrders": [
                 {
-                    "order_id": 900000002,
-                    "product_id": 10,
-                    "order_quantity": 1200,
-                    "due_date": "2026-05-21 09:00:00.000 +0900",
-                    "contract_amount": "1500000.00",
-                    "late_penalty_amount": "120000.00",
-                    "order_status": "SCHEDULED",
+                    "orderId": 900000002,
+                    "productId": 10,
+                    "orderQuantity": 1200,
+                    "dueDate": "2026-05-21 09:00:00.000 +0900",
+                    "contractAmount": "1500000.00",
+                    "latePenaltyAmount": "120000.00",
+                    "orderStatus": "SCHEDULED",
                 }
             ],
         },
@@ -988,15 +1004,16 @@ planning_request_examples = {
 
 
 @router.post(
-    "",
+    "/analyze",
     response_model=PlanningGenerateResponse,
+    response_model_by_alias=True,
     responses=planning_error_responses,
     summary="생산 계획 조정 및 대시보드 분석 생성",
     description=(
         "CP-SAT 기반 생산 계획 최적화를 수행하고 대시보드 분석 결과를 반환합니다.\n\n"
         "**처리 흐름:**\n"
-        "1. `edit_orders`: 기존 계획을 지정한 일정으로 고정(locked)합니다.\n"
-        "2. `add_orders`: 신규 주문을 CP-SAT가 최적 라인과 시각에 배치합니다.\n"
+        "1. `editOrders`: 기존 계획을 지정한 일정으로 고정(locked)합니다.\n"
+        "2. `addOrders`: 신규 주문을 CP-SAT가 최적 라인과 시각에 배치합니다.\n"
         "3. 두 최적화 변형(DUE_DATE_OPTIMAL, AMOUNT_OPTIMAL)을 생성하고 "
         "Monte Carlo 시뮬레이션으로 평가합니다.\n"
         "4. `planning_response`: DB 저장용 계획 데이터 (반영하기 플로우)\n"
@@ -1057,13 +1074,23 @@ def generate_planning(
         )
 
 
+legacy_router.add_api_route(
+    "",
+    generate_planning,
+    methods=["POST"],
+    response_model=PlanningGenerateResponse,
+    response_model_by_alias=True,
+    responses=planning_error_responses,
+)
+
+
 @router.get(
     "/health",
     response_model=PlanningHealthResponse,
     summary="생산 계획 API 헬스 체크",
     description="솔버나 DB를 호출하지 않고 라우트 가용성만 확인합니다.",
 )
-def planning_health() -> PlanningHealthResponse:
+def get_planning_health() -> PlanningHealthResponse:
     """
     Parameters:
         - None.
@@ -1078,6 +1105,14 @@ def planning_health() -> PlanningHealthResponse:
         status="ok",
         feature="production-planning",
     )
+
+
+legacy_router.add_api_route(
+    "/health",
+    get_planning_health,
+    methods=["GET"],
+    response_model=PlanningHealthResponse,
+)
 
 
 def _http_status_code(response_status: str) -> int:
