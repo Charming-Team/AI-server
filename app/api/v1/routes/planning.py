@@ -1,11 +1,10 @@
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 from pydantic import ConfigDict, Field
 
-from app.api.v1.dependencies import verify_internal_api_token
 from app.features.production_planning.exceptions import (
     PlanningDataAccessError,
     PlanningInfeasibleError,
@@ -20,15 +19,8 @@ from app.features.production_planning.schemas import ProductionPlanningAdjustmen
 from app.schemas.base import ApiSchema
 
 router = APIRouter(
-    prefix="/production-planning",
-    tags=["Production Planning"],
-    dependencies=[Depends(verify_internal_api_token)],
-)
-legacy_router = APIRouter(
     prefix="/planning",
     tags=["Production Planning"],
-    dependencies=[Depends(verify_internal_api_token)],
-    include_in_schema=False,
 )
 logger = logging.getLogger(__name__)
 
@@ -1004,7 +996,7 @@ planning_request_examples = {
 
 
 @router.post(
-    "/analyze",
+    "",
     response_model=PlanningGenerateResponse,
     response_model_by_alias=True,
     responses=planning_error_responses,
@@ -1074,16 +1066,6 @@ def generate_planning(
         )
 
 
-legacy_router.add_api_route(
-    "",
-    generate_planning,
-    methods=["POST"],
-    response_model=PlanningGenerateResponse,
-    response_model_by_alias=True,
-    responses=planning_error_responses,
-)
-
-
 @router.get(
     "/health",
     response_model=PlanningHealthResponse,
@@ -1105,14 +1087,6 @@ def get_planning_health() -> PlanningHealthResponse:
         status="ok",
         feature="production-planning",
     )
-
-
-legacy_router.add_api_route(
-    "/health",
-    get_planning_health,
-    methods=["GET"],
-    response_model=PlanningHealthResponse,
-)
 
 
 def _http_status_code(response_status: str) -> int:

@@ -27,7 +27,7 @@ Open:
 
 - API docs: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/api/v1/health
-- Readiness check: http://127.0.0.1:8000/api/v1/ready
+- Readiness check: http://127.0.0.1:8000/api/v1/health/ready
 
 ## 리포지토리 구조
 

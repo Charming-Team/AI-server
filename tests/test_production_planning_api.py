@@ -111,7 +111,7 @@ def test_planning_api_returns_planning_and_simulation_payloads(monkeypatch) -> N
 
     client = _test_client()
     response = client.post(
-        "/api/v1/production-planning/analyze",
+        "/api/v1/planning",
         headers=INTERNAL_HEADERS,
         json={
             "planningStart": "2026-05-01 09:00:00.000 +0900",
@@ -149,7 +149,7 @@ def test_planning_api_returns_compact_planning_error(monkeypatch) -> None:
 
     client = _test_client()
     response = client.post(
-        "/api/v1/production-planning/analyze",
+        "/api/v1/planning",
         headers=INTERNAL_HEADERS,
         json={
             "planningStart": "2026-05-01 09:00:00.000 +0900",
@@ -170,7 +170,7 @@ def test_planning_health_route() -> None:
     client = _test_client()
 
     response = client.get(
-        "/api/v1/production-planning/health",
+        "/api/v1/planning/health",
         headers=INTERNAL_HEADERS,
     )
 
@@ -192,9 +192,7 @@ def test_planning_openapi_uses_executable_request_examples() -> None:
     client = _test_client()
 
     schema = client.get("/openapi.json").json()
-    request_body = schema["paths"]["/api/v1/production-planning/analyze"]["post"][
-        "requestBody"
-    ]
+    request_body = schema["paths"]["/api/v1/planning"]["post"]["requestBody"]
     examples = request_body["content"]["application/json"]["examples"]
     example = examples["edit_and_add_orders"]["value"]
 

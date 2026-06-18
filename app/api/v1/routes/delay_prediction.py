@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.api.v1.dependencies import verify_internal_api_token
 from app.features.delay_prediction.schemas.request import DelayPredictionRequest
 from app.features.delay_prediction.schemas.response import DelayPredictionResponse
 from app.features.delay_prediction.services.delay_prediction_service import (
@@ -11,7 +10,6 @@ from app.schemas.base import ApiSchema
 router = APIRouter(
     prefix="/delay-prediction",
     tags=["delay-prediction"],
-    dependencies=[Depends(verify_internal_api_token)],
 )
 
 

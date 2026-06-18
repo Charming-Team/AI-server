@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.api.v1.dependencies import verify_internal_api_token
 from app.features.business_report.schemas.request import BusinessReportGenerateRequest
 from app.features.business_report.schemas.response import BusinessReportGenerateResponse
 from app.features.business_report.services.business_report_generation_service import (
@@ -11,7 +10,6 @@ from app.schemas.base import ApiSchema
 router = APIRouter(
     prefix="/business-reports",
     tags=["Business Report"],
-    dependencies=[Depends(verify_internal_api_token)],
 )
 
 

@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from app.api.v1.dependencies import verify_internal_api_token
 from app.features.report.schemas.request import ReportGenerateRequest
 from app.features.report.schemas.response import (
     ReportDetailResponse,
@@ -15,7 +14,6 @@ from app.schemas.base import ApiSchema
 router = APIRouter(
     prefix="/reports",
     tags=["Report Agent"],
-    dependencies=[Depends(verify_internal_api_token)],
 )
 
 class ReportHealthResponse(ApiSchema):

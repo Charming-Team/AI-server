@@ -30,15 +30,9 @@ async def health_check(settings: SettingsDep) -> HealthResponse:
 
 
 @router.get(
-    "/ready",
-    response_model=ReadinessResponse,
-    response_model_exclude_none=True,
-)
-@router.get(
     "/health/ready",
     response_model=ReadinessResponse,
     response_model_exclude_none=True,
-    include_in_schema=False,
 )
 async def readiness_check(
     response: Response,
