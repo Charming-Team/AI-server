@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     planning_rdb_dsn: str | None = None
     planning_rdb_timeout_seconds: float = 10.0
 
+    risk_agent_spring_base_url: str = "http://localhost:8080"
+    risk_agent_internal_token: str = ""
+    risk_agent_connect_timeout_seconds: float = 3.0
+    risk_agent_read_timeout_seconds: float = 15.0
+    risk_agent_max_retries: int = 2
+
     qdrant_search_enabled: bool = False
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
