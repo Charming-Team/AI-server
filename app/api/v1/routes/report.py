@@ -9,8 +9,17 @@ from app.features.report.schemas.response import (
 )
 from app.features.report.services.report_generation_service import ReportGenerationService
 from app.features.report.services.report_query_service import ReportQueryService
+from app.schemas.base import ApiSchema
 
-router = APIRouter(prefix="/reports", tags=["Report Agent"])
+router = APIRouter(
+    prefix="/reports",
+    tags=["Report Agent"],
+)
+
+class ReportHealthResponse(ApiSchema):
+    status: str
+    feature: str
+
 
 report_generation_service = ReportGenerationService()
 report_query_service = ReportQueryService()
@@ -18,15 +27,14 @@ report_query_service = ReportQueryService()
 
 @router.post("/generate", response_model=ReportGenerateResponse)
 def generate_report(request: ReportGenerateRequest) -> ReportGenerateResponse:
+    """Generate a production operations report from read-only source data."""
     return report_generation_service.generate_report(request)
 
 
-@router.get("/health")
-def report_health() -> dict[str, str]:
-    return {
-        "status": "ok",
-        "feature": "report-agent",
-    }
+@router.get("/health", response_model=ReportHealthResponse)
+def get_report_health() -> ReportHealthResponse:
+    """Return route availability without touching DB or LLM dependencies."""
+    return ReportHealthResponse(status="ok", feature="report-agent")
 
 
 @router.get(
@@ -38,6 +46,7 @@ def get_reports(
     offset: int = Query(0, ge=0),
     report_type: str | None = Query(None, alias="reportType"),
 ) -> ReportListResponse:
+    """Fetch generated report metadata from read-only report views."""
     return report_query_service.get_reports(
         limit=limit,
         offset=offset,
@@ -52,6 +61,7 @@ def get_reports(
 def backfill_report_included_items(
     report_id: int,
 ) -> ReportIncludedItemsBackfillResponse:
+    """Build included-items sections for an existing report without saving them."""
     try:
         report = report_query_service.get_report_detail(report_id)
     except ValueError as error:
@@ -75,6 +85,7 @@ def backfill_report_included_items(
 def get_report_detail(
     report_id: int,
 ) -> ReportDetailResponse:
+    """Fetch one generated report from read-only report views."""
     try:
         return report_query_service.get_report_detail(report_id)
     except ValueError as error:

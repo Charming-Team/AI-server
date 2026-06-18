@@ -1,20 +1,24 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
 
 from app.features.business_report.schemas.request import BusinessReportGenerateRequest
 from app.features.business_report.schemas.response import BusinessReportGenerateResponse
 from app.features.business_report.services.business_report_generation_service import (
     BusinessReportGenerationService,
 )
+from app.schemas.base import ApiSchema
 
-router = APIRouter(prefix="/business-reports", tags=["Business Report"])
+router = APIRouter(
+    prefix="/business-reports",
+    tags=["Business Report"],
+)
 
 
-class BusinessReportHealthResponse(BaseModel):
+class BusinessReportHealthResponse(ApiSchema):
     status: str
     feature: str
 
-class BusinessReportErrorResponse(BaseModel):
+
+class BusinessReportErrorResponse(ApiSchema):
     code: str
     message: str
 
@@ -39,11 +43,13 @@ business_report_error_responses = {
 async def generate_business_report(
     request: BusinessReportGenerateRequest,
 ) -> BusinessReportGenerateResponse:
+    """Transform an existing production report into an executive business report."""
     return await business_report_generation_service.generate_business_report(request)
 
 
 @router.get("/health", response_model=BusinessReportHealthResponse)
-async def business_report_health() -> BusinessReportHealthResponse:
+async def get_business_report_health() -> BusinessReportHealthResponse:
+    """Return route availability without touching DB or LLM dependencies."""
     return BusinessReportHealthResponse(
         status="ok",
         feature="business-report-agent",

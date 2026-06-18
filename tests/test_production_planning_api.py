@@ -7,6 +7,8 @@ from app.api.v1.routes import planning as planning_route
 from app.features.production_planning.exceptions import PlanningValidationError
 from app.features.production_planning.schemas import ProductionPlanningAdjustmentRequest
 
+INTERNAL_HEADERS = {"X-Internal-Token": "internal-token"}
+
 
 def _test_client() -> TestClient:
     app = FastAPI()
@@ -110,26 +112,27 @@ def test_planning_api_returns_planning_and_simulation_payloads(monkeypatch) -> N
     client = _test_client()
     response = client.post(
         "/api/v1/planning",
+        headers=INTERNAL_HEADERS,
         json={
-            "planning_start": "2026-05-01 09:00:00.000 +0900",
-            "planning_end": "2026-06-09 08:59:00.000 +0900",
-            "edit_orders": [],
-            "add_orders": [],
+            "planningStart": "2026-05-01 09:00:00.000 +0900",
+            "planningEnd": "2026-06-09 08:59:00.000 +0900",
+            "editOrders": [],
+            "addOrders": [],
         },
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["planning_response"]["adjusted_plan_candidates"][0][
-        "plan_variant_code"
+    assert payload["planningResponse"]["adjustedPlanCandidates"][0][
+        "planVariantCode"
     ] == "DUE_DATE_OPTIMAL"
-    assert payload["simulation_response"]["baseline"]["source"] == "DB_CURRENT_PLAN"
-    assert payload["simulation_response"]["data_sources"] == {
+    assert payload["simulationResponse"]["baseline"]["source"] == "DB_CURRENT_PLAN"
+    assert payload["simulationResponse"]["dataSources"] == {
         "baseline": "DB_CURRENT_PLAN",
         "alternative": "CP_SAT_AND_SIMULATION",
     }
-    assert payload["simulation_response"]["alternatives"][0][
-        "plan_variant_code"
+    assert payload["simulationResponse"]["alternatives"][0][
+        "planVariantCode"
     ] == "DUE_DATE_OPTIMAL"
     assert isinstance(captured["request"], ProductionPlanningAdjustmentRequest)
 
@@ -147,11 +150,12 @@ def test_planning_api_returns_compact_planning_error(monkeypatch) -> None:
     client = _test_client()
     response = client.post(
         "/api/v1/planning",
+        headers=INTERNAL_HEADERS,
         json={
-            "planning_start": "2026-05-01 09:00:00.000 +0900",
-            "planning_end": "2026-06-09 08:59:00.000 +0900",
-            "edit_orders": [],
-            "add_orders": [],
+            "planningStart": "2026-05-01 09:00:00.000 +0900",
+            "planningEnd": "2026-06-09 08:59:00.000 +0900",
+            "editOrders": [],
+            "addOrders": [],
         },
     )
 
@@ -165,7 +169,10 @@ def test_planning_api_returns_compact_planning_error(monkeypatch) -> None:
 def test_planning_health_route() -> None:
     client = _test_client()
 
-    response = client.get("/api/v1/planning/health")
+    response = client.get(
+        "/api/v1/planning/health",
+        headers=INTERNAL_HEADERS,
+    )
 
     assert response.status_code == 200
     assert response.json() == {
@@ -189,9 +196,9 @@ def test_planning_openapi_uses_executable_request_examples() -> None:
     examples = request_body["content"]["application/json"]["examples"]
     example = examples["edit_and_add_orders"]["value"]
 
-    assert example["planning_start"] == "2026-05-01 09:00:00.000 +0900"
-    assert example["edit_orders"][0]["order_id"] == 399
-    assert example["edit_orders"][0]["product_id"] == 10
-    assert example["edit_orders"][0]["locked_plan"]["line_id"] == 6
-    assert example["edit_orders"][0]["contract_amount"] == "30752426.00"
-    assert example["add_orders"][0]["order_id"] == 900000001
+    assert example["planningStart"] == "2026-05-01 09:00:00.000 +0900"
+    assert example["editOrders"][0]["orderId"] == 399
+    assert example["editOrders"][0]["productId"] == 10
+    assert example["editOrders"][0]["lockedPlan"]["lineId"] == 6
+    assert example["editOrders"][0]["contractAmount"] == "30752426.00"
+    assert example["addOrders"][0]["orderId"] == 900000001
