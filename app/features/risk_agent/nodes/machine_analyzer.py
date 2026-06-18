@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from app.features.risk_agent.nodes.analyzer_utils import (
-    as_float,
     clamp,
     unique_texts,
 )

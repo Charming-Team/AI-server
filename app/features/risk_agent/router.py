@@ -7,17 +7,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.core.config import get_settings
+from app.features.chat.llm_client import LlmClient
 from app.features.risk_agent.clients.spring_risk_agent_client import (
     SpringRiskAgentClient,
 )
+from app.features.risk_agent.nodes.cause_ranking_node import (
+    CauseRankingNode,
+)
 from app.features.risk_agent.nodes.context_load_node import ContextLoadNode
-from app.features.risk_agent.schemas.request import (
-    RiskAgentContextLoadRequest,
-)
-from app.features.risk_agent.schemas.state import RiskAgentWorkflowState
-from app.features.risk_agent.services.workflow_controller import (
-    RiskAgentWorkflowController,
-)
 from app.features.risk_agent.nodes.due_impact_analyzer import (
     DueImpactAnalyzer,
 )
@@ -30,26 +27,28 @@ from app.features.risk_agent.nodes.machine_analyzer import (
 from app.features.risk_agent.nodes.material_analyzer import (
     MaterialAnalyzer,
 )
-from app.features.risk_agent.nodes.yield_analyzer import (
-    YieldAnalyzer,
-)
-from app.features.risk_agent.services.analyzer_executor import (
-    AnalyzerExecutor,
-)
-from app.features.risk_agent.nodes.cause_ranking_node import (
-    CauseRankingNode,
-)
-from app.features.chat.llm_client import LlmClient
-from app.features.risk_agent.nodes.risk_explanation_llm_node import (
-    RiskExplanationLlmNode,
-)
 from app.features.risk_agent.nodes.persist_node import (
     RiskAgentPersistNode,
+)
+from app.features.risk_agent.nodes.risk_explanation_llm_node import (
+    RiskExplanationLlmNode,
 )
 from app.features.risk_agent.nodes.validation_node import (
     RiskAgentValidationNode,
 )
-
+from app.features.risk_agent.nodes.yield_analyzer import (
+    YieldAnalyzer,
+)
+from app.features.risk_agent.schemas.request import (
+    RiskAgentContextLoadRequest,
+)
+from app.features.risk_agent.schemas.state import RiskAgentWorkflowState
+from app.features.risk_agent.services.analyzer_executor import (
+    AnalyzerExecutor,
+)
+from app.features.risk_agent.services.workflow_controller import (
+    RiskAgentWorkflowController,
+)
 
 router = APIRouter(
     prefix="/risk-agent",

@@ -6,7 +6,6 @@ from app.features.risk_agent.schemas.evidence import (
     RiskAgentEvidence,
     SpringEnvelope,
 )
-
 from app.features.risk_agent.schemas.persist import (
     RiskAgentPersistRequest,
 )

@@ -1,9 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
+from app.features.risk_agent.nodes.cause_ranking_node import (
+    CauseRankingNode,
+)
 from app.features.risk_agent.nodes.context_load_node import ContextLoadNode
+from app.features.risk_agent.nodes.persist_node import (
+    RiskAgentPersistNode,
+)
+from app.features.risk_agent.nodes.risk_explanation_llm_node import (
+    RiskExplanationLlmNode,
+)
+from app.features.risk_agent.nodes.validation_node import (
+    RiskAgentValidationError,
+    RiskAgentValidationNode,
+)
 from app.features.risk_agent.schemas.common import (
     ConfidenceLevel,
     WorkflowStatus,
@@ -14,19 +27,6 @@ from app.features.risk_agent.schemas.request import (
 from app.features.risk_agent.schemas.state import RiskAgentWorkflowState
 from app.features.risk_agent.services.analyzer_executor import (
     AnalyzerExecutor,
-)
-from app.features.risk_agent.nodes.cause_ranking_node import (
-    CauseRankingNode,
-)
-from app.features.risk_agent.nodes.risk_explanation_llm_node import (
-    RiskExplanationLlmNode,
-)
-from app.features.risk_agent.nodes.persist_node import (
-    RiskAgentPersistNode,
-)
-from app.features.risk_agent.nodes.validation_node import (
-    RiskAgentValidationError,
-    RiskAgentValidationNode,
 )
 
 
@@ -56,7 +56,7 @@ class RiskAgentWorkflowController:
         self,
         request: RiskAgentContextLoadRequest,
     ) -> RiskAgentWorkflowState:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         state = RiskAgentWorkflowState(
             workflow_run_id=(
@@ -77,7 +77,7 @@ class RiskAgentWorkflowController:
             return state.model_copy(
                 update={
                     "status": WorkflowStatus.FAILED,
-                    "finished_at": datetime.now(timezone.utc),
+                    "finished_at": datetime.now(UTC),
                     "error_message": str(exc),
                 }
             )
@@ -98,7 +98,7 @@ class RiskAgentWorkflowController:
             return state.model_copy(
                 update={
                     "status": WorkflowStatus.FAILED,
-                    "finished_at": datetime.now(timezone.utc),
+                    "finished_at": datetime.now(UTC),
                     "error_message": "Analyzer 실행에 필요한 evidence가 없습니다.",
                 }
             )
@@ -122,7 +122,7 @@ class RiskAgentWorkflowController:
                 update={
                     "status": WorkflowStatus.FAILED,
                     "analyzer_findings": batch_result.findings,
-                    "finished_at": datetime.now(timezone.utc),
+                    "finished_at": datetime.now(UTC),
                     "error_message": "모든 Analyzer 실행에 실패했습니다.",
                 }
             )
@@ -176,7 +176,7 @@ class RiskAgentWorkflowController:
                 return state.model_copy(
                     update={
                         "status": WorkflowStatus.FAILED,
-                        "finished_at": datetime.now(timezone.utc),
+                        "finished_at": datetime.now(UTC),
                         "error_message": str(exc),
                     }
                 )
@@ -200,7 +200,7 @@ class RiskAgentWorkflowController:
             return state.model_copy(
                 update={
                     "status": WorkflowStatus.FAILED,
-                    "finished_at": datetime.now(timezone.utc),
+                    "finished_at": datetime.now(UTC),
                     "error_message": str(exc),
                 }
             )
@@ -268,7 +268,7 @@ class RiskAgentWorkflowController:
                     update={
                         "status": WorkflowStatus.FAILED,
                         "finished_at": datetime.now(
-                            timezone.utc
+                            UTC
                         ),
                         "error_message": str(exc),
                     }
@@ -285,7 +285,7 @@ class RiskAgentWorkflowController:
                 "status": WorkflowStatus.FAILED,
                 "validation_errors": validation_feedback,
                 "finished_at": datetime.now(
-                    timezone.utc
+                    UTC
                 ),
                 "error_message": (
                     "Risk Agent 결과가 Validation을 "
@@ -315,7 +315,7 @@ class RiskAgentWorkflowController:
                 update={
                     "status": WorkflowStatus.FAILED,
                     "finished_at": datetime.now(
-                        timezone.utc
+                        UTC
                     ),
                     "error_message": str(exc),
                 }
