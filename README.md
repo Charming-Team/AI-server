@@ -143,7 +143,9 @@ python -m scripts.check_rag_end_to_end --help
 └── README.md
 ```
 
-## 챗봇 핵심 흐름
+## 기능별 핵심 흐름
+
+### 챗봇 답변
 
 ```text
 Spring 내부 호출
@@ -155,4 +157,76 @@ Spring 내부 호출
 -> LLM 답변 생성
 -> 답변 후처리 / 출처 구성
 -> Spring으로 응답 반환
+```
+
+### 내부 문서 인덱싱
+
+```text
+Spring 내부 호출
+-> app/features/chat/router.py
+-> DocumentIndexService
+-> 문서 payload 검증 / chunk 분할
+-> Embedding 생성
+-> Qdrant collection 저장 또는 삭제
+-> 처리 결과 반환
+```
+
+### 생산 운영 리포트
+
+```text
+Spring 또는 관리자 화면 호출
+-> app/api/v1/routes/report.py
+-> ReportGenerationService
+-> read-only 운영 DB view 조회
+-> 리포트 섹션 구성
+-> LLM 요약/분석 생성
+-> 리포트 저장 결과 또는 조회 결과 반환
+```
+
+### 경영 리포트
+
+```text
+Spring 또는 관리자 화면 호출
+-> app/api/v1/routes/business_report.py
+-> BusinessReportGenerationService
+-> 기존 생산 리포트 조회
+-> 경영 관점 요약/인사이트 구성
+-> LLM 기반 경영 리포트 생성
+-> 변환 결과 반환
+```
+
+### 주문별 지연 확률 예측
+
+```text
+Spring 내부 호출
+-> app/api/v1/routes/delay_probability.py
+-> DelayProbabilityPredictionService
+-> orderId 기준 inference view 조회
+-> XGBoost artifact 로드 및 예측
+-> riskLevel / delayProbability / causeDetail 구성
+-> Spring으로 응답 반환
+```
+
+### 생산 계획 조정
+
+```text
+Spring 또는 프론트엔드 호출
+-> app/api/v1/routes/planning.py
+-> Production Planning workflow
+-> editOrders 고정 / addOrders 신규 배치
+-> CP-SAT 최적화 변형 생성
+-> Monte Carlo 시뮬레이션 평가
+-> planning_response + simulation_response 반환
+```
+
+### Risk Agent
+
+```text
+Spring 내부 호출
+-> app/features/risk_agent/router.py
+-> RiskAgentWorkflowController
+-> Spring Evidence API로 컨텍스트 조회
+-> 자재 / 수율 / 설비 / 라인 / 납기 Analyzer 실행
+-> 원인 우선순위 산정 및 LLM 설명 생성
+-> 검증 후 Spring 저장 API 호출
 ```
