@@ -1,0 +1,39 @@
+{
+  "model_name": "xgboost_delay_probability",
+  "model_version": "v1.0.0",
+  "algorithm": "XGBoostClassifier",
+  "probability_output": "calibrated_sigmoid",
+  "artifact_created_at": "2026-06-12T07:32:19.318863+00:00",
+  "artifact_files": [
+    "xgb_pipeline.joblib",
+    "preprocessor.joblib",
+    "xgb_classifier.joblib",
+    "calibrated_model.joblib",
+    "xgboost_model.json",
+    "feature_schema.json",
+    "risk_thresholds.json",
+    "feature_name_mapping.json",
+    "feature_cause_tag_mapping.json",
+    "shap_background_sample.parquet"
+  ],
+  "training_metadata": {
+    "data_window": {
+      "start_date": "2025-06-01",
+      "end_date_exclusive": "2026-06-01"
+    },
+    "train_shape": [
+      254,
+      23
+    ],
+    "valid_shape": [
+      55,
+      23
+    ],
+    "test_shape": [
+      55,
+      23
+    ],
+    "selected_feature_count": 23,
+    "safe_threshold": 0.1
+  }
+}
