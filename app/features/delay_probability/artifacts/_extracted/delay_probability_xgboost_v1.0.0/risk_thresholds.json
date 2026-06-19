@@ -1,0 +1,6 @@
+{
+  "SAFE_MAX": 0.1,
+  "CAUTION_MAX": 0.4,
+  "WARNING_MAX": 0.7,
+  "CRITICAL_MAX": 1.0
+}

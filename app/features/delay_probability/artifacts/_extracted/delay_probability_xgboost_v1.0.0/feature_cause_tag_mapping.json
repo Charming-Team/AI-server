@@ -1,0 +1,14 @@
+{
+  "planned_quantity_gap_bin": "PLAN_QTY_GAP",
+  "duration_to_leadtime_bin": "SCHEDULE_PRESSURE",
+  "due_margin_to_duration_ratio_capped": "DUE_MARGIN_RISK",
+  "capacity_load_ratio": "LINE_LOAD",
+  "avg_estimated_duration_hr": "LONG_DURATION",
+  "avg_capacity_per_day": "LINE_CAPACITY",
+  "avg_standard_yield_rate": "YIELD_RISK",
+  "ever_had_material_shortage": "MATERIAL_SHORTAGE",
+  "inbound_delay_days": "MATERIAL_DELAY",
+  "material_ready_before_start": "MATERIAL_NOT_READY",
+  "primary_line_id": "LINE_RISK",
+  "product_code": "PRODUCT_RISK"
+}
