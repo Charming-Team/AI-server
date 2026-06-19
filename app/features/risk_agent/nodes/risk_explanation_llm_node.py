@@ -13,21 +13,18 @@ from app.features.risk_agent.nodes.analyzer_utils import (
     as_float,
     parse_ml_factors,
 )
-
 from app.features.risk_agent.schemas.common import (
     AnalyzerName,
     DelayCauseType,
     RiskLevel,
     WorkflowStatus,
 )
-
 from app.features.risk_agent.schemas.explanation import (
     RiskExplanationDraft,
 )
 from app.features.risk_agent.schemas.state import (
     RiskAgentWorkflowState,
 )
-
 
 
 class RiskExplanationGenerationError(RuntimeError):

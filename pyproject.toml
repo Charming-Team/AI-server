@@ -30,6 +30,12 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/features/risk_agent/nodes/risk_explanation_llm_node.py" = ["E501"]
+"scripts/seed_risk_demo_distribution.py" = ["E501"]
+"scripts/seed_risk_demo_progress.py" = ["E501"]

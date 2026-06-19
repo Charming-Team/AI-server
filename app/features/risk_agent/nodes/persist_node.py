@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.features.risk_agent.clients.spring_risk_agent_client import (
     SpringRiskAgentClient,
@@ -81,7 +81,7 @@ class RiskAgentPersistNode:
                             state.retry_count + attempt
                         ),
                         "finished_at": datetime.now(
-                            timezone.utc
+                            UTC
                         ),
                         "error_message": None,
                     }
